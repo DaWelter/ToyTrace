@@ -7,13 +7,61 @@
 
 #define LINESIZE 1000
 
-void Scene::ParseNFF(char *fileName)
-{
-  // parse file, add all items to 'primitives'
-  ParseNFF(NULL,fileName,&primitives);
-}
+#include <vector>
+#include <cstdio>
+#include <unordered_map>
 
-void Scene::ParseNFF(FILE *fileToUse, char *fileName, Group *groupToAddTo)
+#include <assimp/cimport.h>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+
+
+class NFFParser
+{
+  // just to have a default shader, in case the file doesn't define one !
+  Shader *currentShader;
+  Scene* scene;
+  std::unordered_map<std::string, Shader*> shaders;
+  friend class AssimpReader;
+public:
+  NFFParser(Scene* _scene) :
+    scene(_scene)
+  {
+    currentShader = new EyeLightShader(Double3(1,1,1));
+  }
+  
+  void Parse(char *_filename)
+  {
+    Parse(NULL, _filename, &scene->primitives);
+  }
+  
+  void Parse(FILE *fileToUse, char *fileName, Group *groupToAddTo);
+  void ParseMesh(char *filename, Group* groupToAddTo);
+  
+  void SetCurrentShader(const std::string &name)
+  {
+    auto shader_iter = shaders.find(name);
+    if (shader_iter != shaders.end())
+    {
+      currentShader = shader_iter->second;
+    }
+    else
+    {
+      std::printf("Error: Material %s not defined. Define it in the NFF file prior to referencing it.\n", name.c_str());
+      exit(0);
+    }
+  }
+  
+  void SetCurrentShader(const char* name, Shader* shader)
+  {
+    currentShader = shader;
+    shaders[name] = shader;
+  }
+};
+
+
+
+void NFFParser::Parse(FILE *fileToUse, char *fileName, Group *groupToAddTo)
 {
   char line[LINESIZE+1];
   char token[LINESIZE+1];
@@ -29,13 +77,11 @@ void Scene::ParseNFF(FILE *fileToUse, char *fileName, Group *groupToAddTo)
       exit(1);
     }
   }
-  
-  // just to have a default shader, in case the file doesn't define one !
-  static Shader *currentShader = new EyeLightShader(Double3(1,1,1));
-  
   /* parse lines */
   
-  while ((str = fgets(line,LINESIZE,file)) && !feof(file)) {
+  while (!feof(file)) 
+  {
+    str = fgets(line,LINESIZE,file);
     if (str[0] == '#') // '#' : comment
       continue;
     
@@ -49,7 +95,7 @@ void Scene::ParseNFF(FILE *fileToUse, char *fileName, Group *groupToAddTo)
       line[strlen(line)-1] = 0; // remove trailing eol indicator '\n'
       Group *subGroup = new Group;
       groupToAddTo->Add(subGroup);
-      ParseNFF(file,fileName,subGroup);
+      Parse(file,fileName,subGroup);
       continue;
     }
 
@@ -80,9 +126,9 @@ void Scene::ParseNFF(FILE *fileToUse, char *fileName, Group *groupToAddTo)
       fscanf(file,"hither %lg\n",&hither);
       fscanf(file,"resolution %d %d\n",&resX,&resY);
 
-      if (camera)
-	delete camera;
-      camera = new PerspectiveCamera(pos,at-pos,up,angle,resX,resY);
+      if (scene->camera)
+      delete scene->camera;
+      scene->camera = new PerspectiveCamera(pos,at-pos,up,angle,resX,resY);
       
       continue;
     }
@@ -165,7 +211,7 @@ void Scene::ParseNFF(FILE *fileToUse, char *fileName, Group *groupToAddTo)
     /* background color */
 
     if (!strcmp(token,"b")) {
-      sscanf(line,"b %lg %lg %lg",&bgColor[0],&bgColor[1],&bgColor[2]);
+      sscanf(line,"b %lg %lg %lg",&scene->bgColor[0],&scene->bgColor[1],&scene->bgColor[2]);
       continue;
     }
     
@@ -202,7 +248,7 @@ void Scene::ParseNFF(FILE *fileToUse, char *fileName, Group *groupToAddTo)
       
       Group *subGroup = new Group;
       groupToAddTo->Add(subGroup);
-      ParseNFF(NULL,line,subGroup);
+      Parse(NULL,line,subGroup);
       continue;
     }
     
@@ -210,20 +256,21 @@ void Scene::ParseNFF(FILE *fileToUse, char *fileName, Group *groupToAddTo)
     
     if (!strcmp(token,"f")) {
       double r,g,b,kd,ks,shine,t,ior;
-	  char texture[LINESIZE];
+      char texture[LINESIZE];
+      char name[LINESIZE];
       
-	  int num = sscanf(line,"f %lg %lg %lg %lg %lg %lg %lg %lg %s\n",&r,&g,&b,&kd,&ks,&shine,&t,&ior,texture);
+      int num = sscanf(line,"f %s %lg %lg %lg %lg %lg %lg %lg %lg %s\n",name, &r,&g,&b,&kd,&ks,&shine,&t,&ior,texture);
       Double3 color(r,g,b);
-	  
-	  if(num==8) {
-		  //currentShader = new PhongShader(color,color,Double3(1.),0.1,kd,ks,shine,ks);
-		  currentShader = new ReflectiveEyeLightShader(color,ks);
-	  } else if(num==9) {
-		  currentShader = new TexturedEyeLightShader(color*kd,texture);
-		}
-	  else {
-		  std::cout << "error in " << fileName << " : " << line << std::endl;
-	  }
+      if(num==9) {
+        //currentShader = new PhongShader(color,color,Double3(1.),0.1,kd,ks,shine,ks);
+        SetCurrentShader(name, new ReflectiveEyeLightShader(color,ks));
+      } else if(num==10) {
+        SetCurrentShader(name, new TexturedEyeLightShader(color*kd,texture));
+      }
+      else {
+        std::cout << "error in " << fileName << " : " << line << std::endl;
+      }
+      this->shaders[name] = currentShader;
       continue;
     }
     
@@ -239,10 +286,10 @@ void Scene::ParseNFF(FILE *fileToUse, char *fileName, Group *groupToAddTo)
 		if (num == 3) {
 			// light source with position only
 			col = Double3(1,1,1);
-			AddLight(new PointLight(col,pos));	
+			scene->AddLight(new PointLight(col,pos));	
 		} else if (num == 6) {
 			// light source with position and color
-			AddLight(new PointLight(col,pos));	
+			scene->AddLight(new PointLight(col,pos));	
 		} else {
 			std::cout << "error in " << fileName << " : " << line << std::endl;
 		}
@@ -257,15 +304,32 @@ void Scene::ParseNFF(FILE *fileToUse, char *fileName, Group *groupToAddTo)
 		int num = sscanf(line,"sl %lg %lg %lg %lg %lg %lg %lg %lg %lg %lg %lg",
 				&pos[0],&pos[1],&pos[2],&dir[0],&dir[1],&dir[2],&col[0],&col[1],&col[2],&min,&max); 
 		if(num == 11) {
-			AddLight(new SpotLight(col,pos,dir,min,max));
+			scene->AddLight(new SpotLight(col,pos,dir,min,max));
 		}
 		else {
 			std::cout << "error in "<<fileName<<" : " << line << std::endl;
 		}
 		continue;
 	}
-
-    /* unknown command */
+	
+	
+	if (!strcmp(token, "m"))
+  {
+    char meshfile[LINESIZE];
+    int num = sscanf(line, "m %s", meshfile);
+    if (num == 1)
+    {
+      ParseMesh(meshfile, groupToAddTo);
+    }
+    else
+    {
+      std::cout << "error in " << fileName << " : " << line << std::endl;
+    }
+    continue;
+  }
+  
+  
+  /* unknown command */
     
     std::cout << "error in " << fileName << " : " << line << std::endl;
     exit(0);
@@ -274,3 +338,126 @@ void Scene::ParseNFF(FILE *fileToUse, char *fileName, Group *groupToAddTo)
   if (fileToUse)
     fclose(file);
 };
+
+
+// Example see: https://github.com/assimp/assimp/blob/master/samples/SimpleOpenGL/Sample_SimpleOpenGL.c
+class AssimpReader
+{
+public:
+  static void Read(char *filename, NFFParser* parser, Group* groupToAddTo)
+  {
+    AssimpReader reader;
+    reader.ReadImp(filename, parser, groupToAddTo);
+  }
+
+private:
+  void ReadImp(char *filename, NFFParser* parser, Group* groupToAddTo)
+  {
+    std::printf("Reading Mesh: %s\n", filename);
+    this->aiscene = aiImportFile(filename, 0);
+    this->groupToAddTo = groupToAddTo;
+    this->parser = parser;
+    
+    if (!aiscene)
+    {
+      std::printf("Error: could not load file.");
+      exit(0);
+    }
+    
+    std::vector<aiNode*> nodestack{ aiscene->mRootNode };
+    while (!nodestack.empty())
+    {
+      const auto *nd = nodestack.back();
+      nodestack.pop_back();
+      for (unsigned int i = 0; i< nd->mNumChildren; ++i)
+      {
+        nodestack.push_back(nd->mChildren[i]);
+      }
+      
+      ReadNode(nd);
+    }
+  }
+  
+  void ReadNode(const aiNode* nd)
+  {
+    for (unsigned int mesh_idx = 0; mesh_idx < nd->mNumMeshes; ++mesh_idx)
+    {
+      const aiMesh* mesh = aiscene->mMeshes[nd->mMeshes[mesh_idx]];
+      
+      std::printf("Mesh %i (%s), mat_idx=%i\n", mesh_idx, mesh->mName.C_Str(), mesh->mMaterialIndex);
+      
+      if (mesh->mMaterialIndex >= 0 && mesh->mMaterialIndex < aiscene->mNumMaterials)
+      {
+        SetCurrentShader(aiscene->mMaterials[mesh->mMaterialIndex]);
+      }
+      ReadMesh(mesh);
+    }
+  }
+  
+  void ReadMesh(const aiMesh* mesh)
+  {
+    for (unsigned int face_idx = 0; face_idx < mesh->mNumFaces; ++face_idx)
+    {
+      const aiFace* face = &mesh->mFaces[face_idx];
+      auto vertex0 = aiVector3_to_myvector(mesh->mVertices[face->mIndices[0]]);
+      for (int i=2; i<face->mNumIndices; i++)
+      {
+        auto vertex1 = aiVector3_to_myvector(mesh->mVertices[face->mIndices[i-1]]);
+        auto vertex2 = aiVector3_to_myvector(mesh->mVertices[face->mIndices[i  ]]);
+        groupToAddTo->Add
+          (new Triangle(
+            vertex0,
+            vertex1,
+            vertex2,
+            parser->currentShader));
+      }
+    }
+  }
+  
+  void SetCurrentShader(const aiMaterial *mat)
+  {
+//     for (int prop_idx = 0; prop_idx < mat->mNumProperties; ++prop_idx)
+//     {
+//       const auto *prop = mat->mProperties[prop_idx];
+//       aiString name;
+//       
+//       std::printf("Mat %p key[%i/%s]\n", (void*)mat, prop_idx, prop->mKey.C_Str());
+//     }
+    aiString ainame;
+    mat->Get(AI_MATKEY_NAME,ainame);
+    auto name = std::string(ainame.C_Str());
+    
+    parser->SetCurrentShader(name);
+  }
+
+private:
+  const aiScene *aiscene = { nullptr };
+  Group *groupToAddTo = { nullptr };
+  NFFParser *parser = {nullptr};
+
+  inline Double3 aiVector3_to_myvector(const aiVector3D &v)
+  {
+    return Double3{v[0], v[1], v[2]};
+  }
+};
+
+
+
+
+
+
+
+void NFFParser::ParseMesh(char *filename, Group* groupToAddTo)
+{
+  AssimpReader::Read(filename, this, groupToAddTo);
+}
+
+
+void Scene::ParseNFF(char *fileName)
+{
+  // parse file, add all items to 'primitives'
+  NFFParser(this).Parse(fileName);
+}
+
+
+

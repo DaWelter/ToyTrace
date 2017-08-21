@@ -12,6 +12,7 @@ class Scene
   // parse an NFF file 'fileName', add all its primitives
   // to the specified group...
   void ParseNFF(FILE *file, char *fileName, Group *groupToAddTo);
+  void ParseMesh(char *filename, Group* groupToAddTo);
   
 public:
   BSPTree bsptree;
@@ -23,11 +24,8 @@ public:
   Scene()
     : bgColor(Double3(0,0,0)),
       camera(new PerspectiveCamera(Double3(0,0,0),Double3(0,0,-1),
-				   Double3(0,1,0),60,640,480))
+      Double3(0,1,0),60,640,480))
   {
-	  //Double3 dir(-4,-10,-7);
-	  //Normalize(dir);
-	  //AddLight(new DirectionalLight(Double3(1,1,1),dir));
   };
 	
   void AddLight(Light *light) {
