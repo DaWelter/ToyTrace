@@ -1,25 +1,28 @@
 #ifndef SCENE_HXX
 #define SCENE_HXX
 
-#include "group.hxx"
 #include "perspectivecamera.hxx"
 #include "shader.hxx"
 #include "light.hxx"
 #include "bsptree.hxx"
 
+#include <memory>
+
 class Scene
 {
   // parse an NFF file 'fileName', add all its primitives
   // to the specified group...
-  void ParseNFF(FILE *file, char *fileName, Group *groupToAddTo);
-  void ParseMesh(char *filename, Group* groupToAddTo);
+  void ParseNFF(FILE *file, char *fileName);
+  void ParseMesh(char *filename);
   
 public:
   BSPTree bsptree;
-  Group primitives;
+  // TODO: Manage memory ...
+  std::vector<Primitive*> primitives;
   std::vector<Light *> lights;
+  Camera *camera;
   Double3 bgColor;
-  Camera *camera; 
+  Box boundingBox;
 
   Scene()
     : bgColor(Double3(0,0,0)),
@@ -28,8 +31,16 @@ public:
   {
   };
 	
-  void AddLight(Light *light) {
-	  lights.push_back(light);
+  void AddLight(std::unique_ptr<Light> light) 
+  {
+    // TODO: Manage memory ...
+	  lights.push_back(light.release());
+  }
+  
+  void AddPrimitive(std::unique_ptr<Primitive> primitive)
+  {
+    // TODO: Manage memory ...
+    primitives.push_back(primitive.release());
   }
 
   // parse an NFF file 'fileName', store all its primitives
@@ -40,7 +51,7 @@ public:
   Double3 RayTrace(Ray &ray)
   {
     if (bsptree.Intersect(ray))
-      if(ray.hit && ray.hit->shader) 
+      if(ray.hit && ray.hit->shader)
         return ray.hit->shader->Shade(ray,this);
 	  else 
       return Double3(1,0,0);
@@ -49,15 +60,40 @@ public:
   };
 
   bool Occluded(Ray &ray)
-  { return bsptree.Intersect(ray); }
+  { 
+    return bsptree.Intersect(ray); 
+  }
 
   void BuildAccelStructure()
   {   
-	  primitives.CalcBounds(); 
-	  std::vector<Primitive *> list;
-	  primitives.ListPrimitives(list);
-	  bsptree.Build(list,primitives.boundingBox);
+	  this->boundingBox = CalcBounds();
+	  bsptree.Build(primitives, boundingBox);
   }
+  
+  void PrintInfo()
+  {
+    std::cout << std::endl;
+    std::cout << "bounding box min: "
+              << boundingBox.min << std::endl;
+    std::cout << "bounding box max: "
+              << boundingBox.max << std::endl;
+  }
+  
+  Box CalcBounds()
+  {
+    Box scenebox;
+    for (int i=0; i<(int)primitives.size(); i++) 
+    {
+      Box box = primitives[i]->CalcBounds();
+      scenebox.Extend(box);
+    }
+    
+    // primitives might lie on box borders
+    scenebox.min -= Double3(Epsilon,Epsilon,Epsilon);
+    scenebox.max += Double3(Epsilon,Epsilon,Epsilon);
+    return scenebox;
+  };
 };
+
 
 #endif

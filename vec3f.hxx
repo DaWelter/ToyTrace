@@ -1,7 +1,7 @@
 #ifndef VEC3F_HXX
 #define VEC3F_HXX
 
-
+#include <iostream>
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Geometry>
 #include <boost/format.hpp>

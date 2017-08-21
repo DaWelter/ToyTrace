@@ -77,12 +77,7 @@ int main(int argc, char *argv[])
   
   std::cout << "building acceleration structure " << std::endl;
   scene.BuildAccelStructure();
-
-  std::cout << std::endl;
-  std::cout << "bounding box min: "
-            << scene.primitives.boundingBox.min << std::endl;
-  std::cout << "bounding box max: "
-            << scene.primitives.boundingBox.max << std::endl;
+  scene.PrintInfo();
   
   Image bm(scene.camera->xres,scene.camera->yres);
   

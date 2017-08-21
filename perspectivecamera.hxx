@@ -3,7 +3,7 @@
 
 
 #include "vec3f.hxx"
-
+#include "ray.hxx"
 
 class Camera
 {
