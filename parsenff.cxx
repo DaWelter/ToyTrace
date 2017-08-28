@@ -27,7 +27,7 @@ public:
     scene(_scene)
   {
     // just to have a default shader, in case the file doesn't define one !
-    currentShader = new EyeLightShader(Double3(1,1,1));
+    currentShader = new DiffuseShader(Double3(0.8, 0.8, 0.8)); // EyeLightShader(Double3(1,1,1));
   }
   
   void Parse(char *_filename)
@@ -259,11 +259,18 @@ void NFFParser::Parse(FILE *fileToUse, char *fileName)
       
       int num = sscanf(line,"f %s %lg %lg %lg %lg %lg %lg %lg %lg %s\n",name, &r,&g,&b,&kd,&ks,&shine,&t,&ior,texture);
       Double3 color(r,g,b);
-      if(num==9) {
+      if(num==9) 
+      {
         //currentShader = new PhongShader(color,color,Double3(1.),0.1,kd,ks,shine,ks);
-        SetCurrentShader(name, new ReflectiveEyeLightShader(color,ks));
-      } else if(num==10) {
-        SetCurrentShader(name, new TexturedEyeLightShader(color*kd,texture));
+        SetCurrentShader(name, 
+                         new DiffuseShader(color)
+                        );
+      } 
+      else if(num==10) 
+      {
+        SetCurrentShader(name, 
+                         new DiffuseShader(color)
+                        );
       }
       else {
         std::cout << "error in " << fileName << " : " << line << std::endl;
@@ -280,7 +287,7 @@ void NFFParser::Parse(FILE *fileToUse, char *fileName)
 		int num = sscanf(line,"l %lg %lg %lg %lg %lg %lg",
 			   &pos[0],&pos[1],&pos[2],
 			   &col[0],&col[1],&col[2]);
-
+    col *= 1.0/255.9999;
 		if (num == 3) {
 			// light source with position only
 			col = Double3(1,1,1);
@@ -295,20 +302,20 @@ void NFFParser::Parse(FILE *fileToUse, char *fileName)
     }
 
 	
-	if(!strcmp(token,"sl"))
-	{
-		Double3 pos,dir,col;
-		double min=0,max=10;
-		int num = sscanf(line,"sl %lg %lg %lg %lg %lg %lg %lg %lg %lg %lg %lg",
-				&pos[0],&pos[1],&pos[2],&dir[0],&dir[1],&dir[2],&col[0],&col[1],&col[2],&min,&max); 
-		if(num == 11) {
-			scene->AddLight(std::make_unique<SpotLight>(col,pos,dir,min,max));
-		}
-		else {
-			std::cout << "error in "<<fileName<<" : " << line << std::endl;
-		}
-		continue;
-	}
+// 	if(!strcmp(token,"sl"))
+// 	{
+// 		Double3 pos,dir,col;
+// 		double min=0,max=10;
+// 		int num = sscanf(line,"sl %lg %lg %lg %lg %lg %lg %lg %lg %lg %lg %lg",
+// 				&pos[0],&pos[1],&pos[2],&dir[0],&dir[1],&dir[2],&col[0],&col[1],&col[2],&min,&max); 
+// 		if(num == 11) {
+// 			scene->AddLight(std::make_unique<SpotLight>(col,pos,dir,min,max));
+// 		}
+// 		else {
+// 			std::cout << "error in "<<fileName<<" : " << line << std::endl;
+// 		}
+// 		continue;
+// 	}
 	
 	
 	if (!strcmp(token, "m"))

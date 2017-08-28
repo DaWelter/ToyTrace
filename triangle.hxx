@@ -13,7 +13,7 @@ public:
 		p[0]=a; p[1]=b; p[2]=c;
 	}
 
-	virtual bool Intersect(Ray &ray)
+	bool Intersect(const Ray &ray, double &ray_length, SurfaceHit &hit) const override
 	{
 		Double3 n;
 		Double3 edge[3];
@@ -27,43 +27,36 @@ public:
 		double r = Dot(ray.dir,n); 
 		if(fabs(r)<Epsilon) return false;
 		double s = (d-Dot(ray.org,n))/r;
-		if(s<Epsilon || s>ray.t+Epsilon) return false;
+		if(s<Epsilon || s>ray_length+Epsilon) return false;
 		Double3 q = ray.org+s*ray.dir;
-		for(int i=0; i<3; i++) {
+		for(int i=0; i<3; i++) 
+    {
 			Double3 w = Cross(n,edge[i]);
 			double t = Dot(q-p[i],w);
 			if(t<Epsilon) return false;
 		}
-		ray.t = s;
-		ray.hit = this;
-		return true;
+		ray_length = s;
+    hit.primitive = this;
+    return true;
 	}
 
-	virtual Double3 GetNormal(Ray &ray)
+	virtual Double3 GetNormal(const SurfaceHit &hit) const override
 	{
 		Double3 n = Cross(p[1]-p[0],p[2]-p[0]);
 		Normalize(n);
 		return n;
 	}
-	virtual Box CalcBounds()
+	
+	virtual Box CalcBounds() const override
 	{
 		Box box;
 		for(int i=0; i<3; i++) box.Extend(p[i]);
 		return box;
 	}
-
-	virtual bool Occluded(Ray &ray) 
-	{  return Intersect(ray);  }
-
-	virtual bool InBox(const Box &box)
-	{
-		Box boundingbox = CalcBounds();
-		return boundingbox.Intersect(box);
-	}
-
-	virtual void ListPrimitives(std::vector<Primitive *> &list)
-	{	list.push_back(this); }
 };
+
+
+
 
 class SmoothTriangle : public Primitive
 {
@@ -77,7 +70,7 @@ public:
 		n[0]=na; n[1]=nb; n[2]=nc;
 	}
 
-	virtual bool Intersect(Ray &ray)
+	bool Intersect(const Ray &ray, double &ray_length, SurfaceHit &hit) const override
 	{
 		Double3 n;
 		Double3 ab,ac,a;
@@ -91,7 +84,7 @@ public:
 		double r = Dot(ray.dir,n); 
 		if(fabs(r)<Epsilon) return false;
 		double s = (d-Dot(ray.org,n))/r;
-		if(s<Epsilon || s>ray.t+Epsilon) return false;
+		if(s<Epsilon || s>ray_length+Epsilon) return false;
 		Double3 q = ray.org+s*ray.dir;
 		
 		double nmax;
@@ -116,40 +109,28 @@ public:
 		double u = detu/det;
 		double v = detv/det;
 		if(u<-Epsilon || v<-Epsilon || u+v>1.+Epsilon) return false;
-		ray.barry = Double3(u,v,1.-u-v);
-		ray.t = s;
-		ray.hit = this;
+		hit.barry = Double3(u,v,1.-u-v);
+		ray_length = s;
+		hit.primitive = this;
 		return true;
 	}
 
-	virtual Double3 GetNormal(Ray &ray)
+	Double3 GetNormal(const SurfaceHit &hit) const override
 	{
-		Double3 normal = n[0]*ray.barry[0]+
-					   n[1]*ray.barry[1] +
-				       n[2]*ray.barry[2];
+		Double3 normal = n[0]*hit.barry[0]+
+					   n[1]*hit.barry[1] +
+				       n[2]*hit.barry[2];
 // 		Double3 normal = Cross(p[1]-p[0],p[2]-p[0]) ;
 		Normalize(normal);
 		return normal;
 	}
 
-	virtual Box CalcBounds()
+	Box CalcBounds() const override
 	{
 		Box box;
 		for(int i=0; i<3; i++) box.Extend(p[i]);
 		return box;
 	}
-
-	virtual bool Occluded(Ray &ray) 
-	{  return Intersect(ray);  }
-
-	virtual bool InBox(const Box &box)
-	{
-		Box boundingbox = CalcBounds();
-		return boundingbox.Intersect(box);
-	}
-
-	virtual void ListPrimitives(std::vector<Primitive *> &list)
-	{	list.push_back(this); }
 };
 
 
@@ -163,11 +144,11 @@ public:
 								: SmoothTriangle(a,b,c,na,nb,nc,shader)
 	{ uv[0]=uva; uv[1]=uvb; uv[2]=uvc; }
 
-	virtual Double3 GetUV(Ray &ray)
+	virtual Double3 GetUV(const SurfaceHit &hit) const override
 	{
-		Double3 res = uv[0]*ray.barry[0]+
-				   uv[1]*ray.barry[1] + 
-				   uv[2]*ray.barry[2];
+		Double3 res = uv[0]*hit.barry[0]+
+				   uv[1]*hit.barry[1] + 
+				   uv[2]*hit.barry[2];
 		return res;
 	}
 };

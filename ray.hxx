@@ -1,28 +1,41 @@
 #ifndef RAY_HXX
 #define RAY_HXX
 
+#include <limits>
 #include "vec3f.hxx"
 
 class Primitive;
 
-#define MaxRayDepth 3
+static constexpr int MAX_RAY_DEPTH = 10;
 
-class Ray
+struct Ray
 {
-public:
-  Ray() : hit(0),t(0.),level(0),barry(0) {}
+  Ray() : level(0) {}
+  Ray(Double3 org, Double3 dir) : org(org), dir(dir) {}
 
   char level; // 0 = primary ray, 1,2,3... secondary ray
   
-  Primitive *hit; // primitive that was hit
-  Double3 barry;
-
   Double3 org; // origin
   Double3 dir; // direction
-  double t;   // current/maximum hit distance
 };
+
 
 inline std::ostream &operator<<(std::ostream &o,const Ray &ray)
 { o << "Ray[" << ray.org << "+t*" << ray.dir << "]"; return o; }
+
+
+struct SurfaceHit
+{
+  const Primitive *primitive = { nullptr }; // primitive that was hit
+  Double3 barry;
+  
+  bool isValid() const
+  {
+    return primitive != nullptr;
+  }
+  
+  Double3 Normal() const;
+};
+
 
 #endif

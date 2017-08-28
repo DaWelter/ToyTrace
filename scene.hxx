@@ -48,20 +48,45 @@ public:
   
   // trace the given ray and shade it and
   // return the color of the shaded ray
-  Double3 RayTrace(Ray &ray)
+  Double3 RayTrace(Sampler &sampler)
   {
-    if (bsptree.Intersect(ray))
-      if(ray.hit && ray.hit->shader)
-        return ray.hit->shader->Shade(ray,this);
-	  else 
-      return Double3(1,0,0);
+    if (lights.empty()) return Double3();
+    
+    RadianceOrImportance::DirectionalSample start = this->camera->TakeDirectionalSample(sampler);
+    auto ray = Ray{start.sample_pos, start.emission_dir};
+    double ray_length = LargeNumber;
+    SurfaceHit hit;
+    if (bsptree.Intersect(ray, ray_length, hit))
+    {
+      if(hit.primitive && hit.primitive->shader)
+      {
+        Double3 hit_pos = ray.org + ray_length * ray.dir;
+        auto *shader = hit.primitive->shader;
+        auto* light = lights[sampler.UniformInt(0, lights.size()-1)];
+        double pmf_of_light = 1./lights.size();
+        RadianceOrImportance::Sample light_sample = light->TakePositionSampleTo(hit_pos, sampler);
+        Ray light_ray{hit_pos, light_sample.sample_pos - hit_pos};
+        double light_ray_length = Length(light_ray.dir);
+        light_ray.dir *= 1./light_ray_length;
+        if (!Occluded(light_ray, light_ray_length))
+        {
+          Double3 brdf_value = shader->EvaluateBRDF(hit, light_ray.dir);
+          Double3 normal = hit.Normal();
+          double d_factor = Dot(normal, light_ray.dir);
+          return (d_factor/light_sample.pdf_of_pos/light_ray_length) * Product(light_sample.value, brdf_value);
+        }
+      }
+      else 
+        return Double3(1,0,0);
+    }
     else
       return bgColor; // ray missed geometric primitives
   };
 
-  bool Occluded(Ray &ray)
+  bool Occluded(const Ray &ray, double ray_length)
   { 
-    return bsptree.Intersect(ray); 
+    SurfaceHit hit;
+    return bsptree.Intersect(ray, ray_length, hit);
   }
 
   void BuildAccelStructure()

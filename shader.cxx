@@ -3,6 +3,36 @@
 #include "ray.hxx"
 #include "scene.hxx"
 
+
+DiffuseShader::DiffuseShader(const Double3 &_albedo)
+  : albedo(_albedo)
+{
+}
+
+
+Double3 DiffuseShader::EvaluateBRDF(const SurfaceHit& inbound_surface_hit, const Double3& out_direction) const
+{
+  return albedo;
+}
+
+
+double DiffuseShader::EvaluatePDF(const SurfaceHit& inbound_surface_hit, const Double3& out_direction) const
+{
+  constexpr double hemisphere_surface_area = 2.*Pi;
+  return 1./hemisphere_surface_area;
+}
+
+
+DirectionSample DiffuseShader::SampleBRDF(const SurfaceHit& inbound_surface_hit) const
+{
+  DirectionSample s;
+  //TODO: Implement
+  //Double3 v = sampler.UniformHemisphere();
+  return s;
+}
+
+
+/*
 Double3 EyeLightShader::Shade(Ray &ray,Scene *scene) 
 {
 	Double3 normal = ray.hit->GetNormal(ray);
@@ -32,7 +62,7 @@ Double3 ReflectiveEyeLightShader::Shade(Ray &ray,Scene *scene)
 	
 	Double3 result = fabs(dot)*col;
 
-	if(ray.level>=MaxRayDepth) return result;
+	if(ray.level>=MAX_RAY_DEPTH) return result;
 
 	Ray reflRay;
 	reflRay.level = ray.level+1;
@@ -77,7 +107,7 @@ Double3 PhongShader::Shade(Ray &ray,Scene *scene)
 	}
 	res += kd*Product(cold,cd) + ks*Product(cols,cs);
 
-	if(ray.level>=MaxRayDepth || kr<Epsilon) return res;
+	if(ray.level>=MAX_RAY_DEPTH || kr<Epsilon) return res;
 	Ray reflRay;
 	reflRay.level = ray.level+1;
 	reflRay.org = pos;
@@ -88,4 +118,4 @@ Double3 PhongShader::Shade(Ray &ray,Scene *scene)
 
 	res += colr*kr;
 	return res;
-}
+}*/

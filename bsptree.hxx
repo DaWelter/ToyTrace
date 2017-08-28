@@ -83,45 +83,46 @@ public:
 		}
 	}
 
+	bool Intersect(const Ray &ray, double &ray_length, double min, double max, SurfaceHit &hit)
+  {
+    if(!child[0] && !child[1]) 
+    {
+      bool res=false;
+      for(unsigned int i=0;i<primitive.size();i++) 
+      {
+        res |= primitive[i]->Intersect(ray, ray_length, hit);
+      }
+      return res;
+    }
+    
+    double dist = (splitpos-ray.org[splitaxis])/ray.dir[splitaxis];
+    
+    char first,last;
+    if(ray.org[splitaxis]<=splitpos) {
+      first=0; last=1;
+    } else {
+      first=1; last=0;
+    }
+    
+    if(dist<0 || dist>max) {
+      if(child[first]) return child[first]->Intersect(ray, ray_length, min,max, hit);
+      else return false;
+    } else if(dist<min) {
+      if(child[last]) return child[last]->Intersect(ray, ray_length, min,max, hit);
+      else return false;
+    } else {
+      bool bhit;
+      if(child[first]) bhit = child[first]->Intersect(ray, ray_length, min,dist, hit);
+      else bhit = false;
+      
+      char hitside = ((ray.org+ray_length*ray.dir)[splitaxis]<splitpos)?0:1;
+      if((!bhit || hitside!=first) && child[last]) {
+         bhit |= child[last]->Intersect(ray, ray_length, dist,max, hit);
+      } 
 
-	bool Intersect(Ray &ray,double min,double max) {
-		if(!child[0] && !child[1]) {
-			bool res=false;
-			for(unsigned int i=0;i<primitive.size();i++) {
-				res |= primitive[i]->Intersect(ray);
-			}
-			return res;
-		}
-		
-		double dist = (splitpos-ray.org[splitaxis])/ray.dir[splitaxis];
-		
-		char first,last;
-		if(ray.org[splitaxis]<=splitpos) {
-			first=0; last=1;
-		} else {
-			first=1; last=0;
-		}
-		
-		if(dist<0 || dist>max) {
-			if(child[first]) return child[first]->Intersect(ray,min,max);
-			else return false;
-		} else if(dist<min) {
-			if(child[last]) return child[last]->Intersect(ray,min,max);
-			else return false;
-		} else {
-			bool bhit;
-			if(child[first]) bhit = child[first]->Intersect(ray,min,dist);
-			else bhit = false;
-			
-			char hitside = ((ray.org+ray.t*ray.dir)[splitaxis]<splitpos)?0:1;
-			if((!bhit || hitside!=first) && child[last]) {
-				 bhit |= child[last]->Intersect(ray,dist,max);
-			} 
-
-			return bhit;
-		}
-		
-	}
+      return bhit;
+    }
+  }
 };
 
 
@@ -142,8 +143,9 @@ public:
 		std::cout << "bsp tree finished" <<std::endl;
 	}
 
-	bool Intersect(Ray &ray) {
-		return root.Intersect(ray,0,ray.t);
+	bool Intersect(const Ray &ray, double &ray_length, SurfaceHit &hit)
+  {
+		return root.Intersect(ray, ray_length, 0, ray_length, hit);
 	}
 };
 

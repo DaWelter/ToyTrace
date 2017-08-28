@@ -14,25 +14,26 @@ public:
 	  Normalize(normal); 
   };
 
-  virtual bool Intersect(Ray &ray)
+  bool Intersect(const Ray &ray, double &ray_length, SurfaceHit &hit) const override
   {
 		double s = Dot(origin,normal);
 		double nv = Dot(ray.dir,normal);
-		if(nv*nv < 1.0e-9) return false;
+		if(nv*nv < 1.0e-9) 
+      return false;
 		double t = (s-Dot(ray.org,normal))/(nv);
-		if(t<Epsilon || t>ray.t+Epsilon) return false;
-		//p_hit = r.o+t*r.v;
-		ray.t = t;
-		ray.hit = this;
-		return true;
+		if(t<Epsilon || t>ray_length+Epsilon) 
+      return false;
+    hit.primitive = this;
+    ray_length = t;
+    return true;
   };
 
-  virtual Double3 GetNormal(Ray &ray)
+  virtual Double3 GetNormal(const SurfaceHit &hit) const
   {
 	  return normal;
   }
 
-  virtual Box CalcBounds()
+  virtual Box CalcBounds() const
   {
 	  Box box;
 	  box.min = -Double3(Infinity);
@@ -40,14 +41,10 @@ public:
 	  return box;
   }
 
-  virtual bool Occluded(Ray &ray) 
-  {  return Intersect(ray);  }
-
-  virtual bool InBox(const Box &box)
-  {  return false; }
-
-  virtual void ListPrimitives(std::vector<Primitive *> &list)
-  {	 list.push_back(this); }
+  virtual bool InBox(const Box &box) const
+  {  
+    return false; 
+  }
 };
 
 #endif

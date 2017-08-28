@@ -81,14 +81,15 @@ int main(int argc, char *argv[])
   
   Image bm(scene.camera->xres,scene.camera->yres);
   
-  SampleGenerator *sampler = new StratifiedSampleGenerator;
+//   SampleGenerator *sampler = new StratifiedSampleGenerator;
   const int nsmpl = 4;
-  double usmpl[nsmpl];
-  double vsmpl[nsmpl];
-  double wsmpl[nsmpl];
-  sampler->GetSamples(nsmpl,usmpl,vsmpl,wsmpl);
+//   double usmpl[nsmpl];
+//   double vsmpl[nsmpl];
+//   double wsmpl[nsmpl];
+//   sampler->GetSamples(nsmpl,usmpl,vsmpl,wsmpl);
+  
+  Sampler other_sampler;
 
-  Ray ray;
   std::cout << std::endl;
   std:: cout << "rendering line ";
   for (int y=0;y<scene.camera->yres;y++) 
@@ -97,12 +98,17 @@ int main(int argc, char *argv[])
     std::cout << std::flush;
     for (int x=0;x<scene.camera->xres;x++) 
     {
+      scene.camera->current_pixel_x = x;
+      scene.camera->current_pixel_y = y;
+      
       Double3 col(0);
       for(int i=0;i<nsmpl;i++)
       {
-        scene.camera->InitRay(x+usmpl[i],y+vsmpl[i],ray);
-        col += wsmpl[i]*scene.RayTrace(ray);
+        //Ray ray = scene.camera->InitRay(x+usmpl[i],y+vsmpl[i]);
+        //col += wsmpl[i]*scene.RayTrace(ray, other_sampler);
+        col += scene.RayTrace(other_sampler);
       }
+      col *= 1.0/nsmpl;
       Clip(col[0],0.,1.); Clip(col[1],0.,1.); Clip(col[2],0.,1.);
       bm.set_pixel(x, bm.height() - y, col[0]*255.99999999,col[1]*255.99999999,col[2]*255.99999999);
     }
