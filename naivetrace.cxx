@@ -1,6 +1,6 @@
 #include "image.hxx"
 #include "scene.hxx"
-
+#include <chrono>
 
 class SampleGenerator
 {
@@ -80,6 +80,8 @@ int main(int argc, char *argv[])
   scene.PrintInfo();
   
   Image bm(scene.camera->xres,scene.camera->yres);
+  ImageDisplay display;
+  auto time_of_last_display = std::chrono::steady_clock::now();
   
 //   SampleGenerator *sampler = new StratifiedSampleGenerator;
   const int nsmpl = 4;
@@ -91,11 +93,9 @@ int main(int argc, char *argv[])
   Sampler other_sampler;
 
   std::cout << std::endl;
-  std:: cout << "rendering line ";
+  std::cout << "Rendering ..." << std::endl;
   for (int y=0;y<scene.camera->yres;y++) 
   {
-    std::cout << '.';
-    std::cout << std::flush;
     for (int x=0;x<scene.camera->xres;x++) 
     {
       scene.camera->current_pixel_x = x;
@@ -104,16 +104,20 @@ int main(int argc, char *argv[])
       Double3 col(0);
       for(int i=0;i<nsmpl;i++)
       {
-        //Ray ray = scene.camera->InitRay(x+usmpl[i],y+vsmpl[i]);
-        //col += wsmpl[i]*scene.RayTrace(ray, other_sampler);
         col += scene.RayTrace(other_sampler);
       }
       col *= 1.0/nsmpl;
       Clip(col[0],0.,1.); Clip(col[1],0.,1.); Clip(col[2],0.,1.);
       bm.set_pixel(x, bm.height() - y, col[0]*255.99999999,col[1]*255.99999999,col[2]*255.99999999);
     }
+    
+    auto time = std::chrono::steady_clock::now();
+    if (time - time_of_last_display > std::chrono::seconds(1))
+    {
+      display.show(bm);
+      time_of_last_display = time;
+    }
   }
-  std::cout<<std::endl;
 
   bm.write("raytrace.tga");
 

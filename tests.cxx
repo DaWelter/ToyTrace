@@ -1,7 +1,10 @@
 #include "gtest/gtest.h"
 #include <cstdio>
+#include <thread>
+#include <chrono>
 
 #include "ray.hxx"
+#include "image.hxx"
 
 
 TEST(TestRaySegment, ExprTemplates)
@@ -17,6 +20,23 @@ TEST(TestRaySegment, EndPointNormal)
   ASSERT_EQ(p[0], 1.);
   ASSERT_EQ(p[1], 2.);
   ASSERT_EQ(p[2], 0.);
+}
+
+
+TEST(Display, Open)
+{
+  ImageDisplay display;
+  Image img(128, 128);
+  img.SetColor(255, 0, 0);
+  img.DrawLine(0, 0, 128, 128, 5);
+  img.DrawLine(0, 128, 128, 0, 5);
+  display.show(img);
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+  img.SetColor(255,255,255);
+  img.DrawLine(64, 0, 64, 128);
+  img.DrawLine(0, 64, 128, 64);
+  display.show(img);
+  std::this_thread::sleep_for(std::chrono::seconds(2));
 }
 
 

@@ -71,6 +71,8 @@ public:
   template<class Array, class Array2>  void GetPixel(const Array &p, Array2 &v) { GetPixel(p[0], p[1], v[0], v[1], v[2]); }
   
 private:
+  friend class ImageDisplay;
+  
   // hack around stupid macros in windows headers that redefine DrawText and Rescale
   void MyDrawText( int x, int y, const char* text, const uchar* colbg );
   void MyRescale( int w, int h, int interpolation );
@@ -78,7 +80,7 @@ private:
   struct CImgInstanceHolder
   {
     uchar buffer[IMG_PRIVATE_DATA_SIZE];
-  } __attribute__((__may_alias__)) priv;
+  } __attribute__((__may_alias__)) __attribute__ ((aligned (sizeof(void*)))) priv;
   
   uchar col[3];
   double opacity;
@@ -88,6 +90,25 @@ private:
 void DrawImageGrid(Image& dst, const std::vector< Image >& images, int dir = 0);
 void DrawImageGrid(Image &dst, const std::vector<std::vector<Image> > &images);
 
+namespace cimg_library {
+class CImgDisplay;
+}
+
+class ImageDisplay
+{
+public:
+  ImageDisplay();
+  void show(const Image &img);
+  
+private:
+  struct Impl
+  {
+    static constexpr int CIMG_DISPLAY_SIZE = 4096; // sufficiently large
+    char buffer[CIMG_DISPLAY_SIZE];
+  } __attribute__((__may_alias__)) __attribute__ ((aligned (sizeof(void*)))) priv;
+  cimg_library::CImgDisplay* impl();
+  const cimg_library::CImgDisplay* impl() const;
+};
 
 
 #endif

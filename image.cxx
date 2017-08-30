@@ -5,7 +5,7 @@
 #define cimg_use_png 1
 #define cimg_debug 0
 #define cimg_OS 1
-#define cimg_display 0
+#define cimg_display 1
 
 #include "image.hxx"
 
@@ -268,4 +268,33 @@ void DrawImageGrid(Image &dst, const std::vector<std::vector<Image> > &images)
     DrawImageGrid(rows[i], images[i], 0);
   }
   DrawImageGrid(dst, rows, 1);
+}
+
+
+ImageDisplay::ImageDisplay()
+{
+  static_assert(sizeof(priv)>=sizeof(cimg_library::CImgDisplay), "memory reserve size must equal size of CImgDisplay");
+  new(impl()) cimg_library::CImgDisplay();
+}
+
+
+void ImageDisplay::show(const Image& img)
+{
+  const auto* img_impl = TOCIMG_CONST(img.priv);
+  impl()->display(*img_impl);
+//   impl()->show();
+//   while (!impl()->is_closed()) 
+//   {
+//     impl()->wait();
+//   }
+}
+
+const cimg_library::CImgDisplay* ImageDisplay::impl() const
+{
+  return reinterpret_cast<const cimg_library::CImgDisplay*>(priv.buffer);
+}
+
+cimg_library::CImgDisplay* ImageDisplay::impl()
+{
+  return reinterpret_cast<cimg_library::CImgDisplay*>(priv.buffer);
 }
