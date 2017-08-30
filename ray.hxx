@@ -10,13 +10,33 @@ static constexpr int MAX_RAY_DEPTH = 10;
 
 struct Ray
 {
-  Ray() : level(0) {}
-  Ray(Double3 org, Double3 dir) : org(org), dir(dir) {}
-
-  char level; // 0 = primary ray, 1,2,3... secondary ray
-  
+  Ray() {}
+  Ray(Double3 _org, Double3 _dir) : org(_org), dir(_dir) {}
   Double3 org; // origin
   Double3 dir; // direction
+};
+
+
+struct RaySegment
+{
+  Ray ray;
+  double length;
+  
+  RaySegment() : length(NaN) {}
+  RaySegment(const Ray &_ray, double _length) : ray(_ray), length(_length) {}
+  static RaySegment FromTo(const Double3 &src, const Double3 &dest) 
+  {
+    Double3 delta = dest-src;
+    double l = Length(delta);
+    delta = l>0 ? delta / l : Double3(NaN, NaN, NaN);
+    return RaySegment{{src, delta}, l};
+  }
+  
+  auto EndPoint() const -> decltype(ray.org + length * ray.dir) 
+  { 
+    // Want to return some expression template construct. Not an actual Double3. To facilitate optimization.
+    return ray.org + length * ray.dir; 
+  }
 };
 
 
@@ -34,7 +54,7 @@ struct SurfaceHit
     return primitive != nullptr;
   }
   
-  Double3 Normal() const;
+  Double3 Normal(const Double3 &up_dir) const;
 };
 
 

@@ -162,5 +162,6 @@ constexpr auto Epsilon = 1.e-8; //std::numeric_limits<double>::epsilon();
 constexpr auto Pi      = double(3.14159265358979323846264338327950288419716939937510);
 constexpr auto Infinity= std::numeric_limits<double>::infinity();
 constexpr auto LargeNumber = std::numeric_limits<double>::max()/16;
+constexpr auto NaN = std::numeric_limits<double>::quiet_NaN();
 
 #endif

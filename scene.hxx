@@ -46,6 +46,14 @@ public:
   // parse an NFF file 'fileName', store all its primitives
   void ParseNFF(char *fileName);
   
+  
+  std::tuple<Light*, double> PickLight(Sampler &sampler)
+  {
+    auto* light = lights[sampler.UniformInt(0, lights.size()-1)];
+    double pmf_of_light = 1./lights.size();
+    return std::make_tuple(light, pmf_of_light);
+  }
+  
   // trace the given ray and shade it and
   // return the color of the shaded ray
   Double3 RayTrace(Sampler &sampler)
@@ -53,27 +61,31 @@ public:
     if (lights.empty()) return Double3();
     
     RadianceOrImportance::DirectionalSample start = this->camera->TakeDirectionalSample(sampler);
-    auto ray = Ray{start.sample_pos, start.emission_dir};
-    double ray_length = LargeNumber;
+    auto segment = RaySegment{{start.sample_pos, start.emission_dir}, LargeNumber};
     SurfaceHit hit;
-    if (bsptree.Intersect(ray, ray_length, hit))
+    // TODO: give Intesect optionally a reference to the starting location as in 
+    // the primitive that was hit and from which the ray now starts.
+    if (bsptree.Intersect(segment.ray, segment.length, hit))
     {
+      // TODO: get hit ID, instantiate Hit info.
+      // Hit info computes normal, according to inbound ray direction, so that normal faces inbound ray.
       if(hit.primitive && hit.primitive->shader)
       {
-        Double3 hit_pos = ray.org + ray_length * ray.dir;
         auto *shader = hit.primitive->shader;
-        auto* light = lights[sampler.UniformInt(0, lights.size()-1)];
-        double pmf_of_light = 1./lights.size();
+        Light* light; double pmf_of_light; std::tie(light, pmf_of_light) = PickLight(sampler);
+        
+        Double3 hit_pos = segment.EndPoint();
         RadianceOrImportance::Sample light_sample = light->TakePositionSampleTo(hit_pos, sampler);
-        Ray light_ray{hit_pos, light_sample.sample_pos - hit_pos};
-        double light_ray_length = Length(light_ray.dir);
-        light_ray.dir *= 1./light_ray_length;
-        if (!Occluded(light_ray, light_ray_length))
+        
+        RaySegment segment_to_light = RaySegment::FromTo(hit_pos, light_sample.sample_pos);
+        
+        // TODO: Hand over reference to last hit.
+        if (!Occluded(segment_to_light.ray, segment_to_light.length))
         {
-          Double3 brdf_value = shader->EvaluateBRDF(hit, light_ray.dir);
-          Double3 normal = hit.Normal();
-          double d_factor = Dot(normal, light_ray.dir);
-          return (d_factor/light_sample.pdf_of_pos/light_ray_length) * Product(light_sample.value, brdf_value);
+          Double3 brdf_value = shader->EvaluateBRDF(hit, segment_to_light.ray.dir);
+          Double3 normal = hit.Normal(-segment.ray.dir);
+          double d_factor = std::max(0., Dot(normal, segment_to_light.ray.dir));
+          return (d_factor/light_sample.pdf_of_pos/segment_to_light.length) * Product(light_sample.value, brdf_value);
         }
       }
       else 
