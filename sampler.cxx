@@ -1,10 +1,12 @@
 #include "sampler.hxx"
 
-inline Double3 TransformToUniformSphere(double r1, double r2)
+namespace SampleTrafo
 {
-  double z = 1. - 2.*r2;
-  double s = sqrt(r2*(1.-r2));
-  double omega = 2.*Pi*r1;
+Double3 ToUniformSphere(Double2 r)
+{
+  double z = 1. - 2.*r[1];
+  double s = sqrt(r[1]*(1.-r[1]));
+  double omega = 2.*Pi*r[0];
   double sn = std::sin(omega);
   double cs = std::cos(omega);
   double x = 2.*cs*s;
@@ -12,34 +14,48 @@ inline Double3 TransformToUniformSphere(double r1, double r2)
   return Double3(x,y,z);
 }
 
+Double3 ToUniformHemisphere(Double2 r)
+{
+  Double3 v = ToUniformSphere(r);
+  v[2] = v[2]>=0. ? v[2] : -v[2];
+  return v;
+}
+}
+
 
 Sampler::Sampler()
   : random_engine(),
     uniform(0., 1.)
 {
+
 }
 
-double Sampler::Uniform01()
+
+void Sampler::Uniform01(double* dest, int count)
 {
-  return uniform(random_engine);
+  for (int i=0; i<count; ++i)
+    dest[i] = uniform(random_engine);
 }
 
 
-Double3 Sampler::UniformSphere()
+int Sampler::UniformInt(int a, int b_inclusive)
 {
-  return TransformToUniformSphere(Uniform01(), Uniform01());
+  return std::uniform_int_distribution<int>(a, b_inclusive)(random_engine);
 }
 
 
-int Sampler::UniformInt(int a, int b)
-{
-  return std::uniform_int_distribution<int>(a, b)(random_engine);
-}
 
-
-Double3 Sampler::UniformHemisphere()
-{
-  Double3 v = UniformSphere();
-  v[2] = v[2]>=0. ? v[2] : -v[2];
-  return v;
-}
+// Double3 Sampler::UniformSphere()
+// {
+//   double r[2];
+//   Uniform01(r, 2);
+//   return TransformToUniformSphere(r[0], r[1]);
+// }
+// 
+// 
+// Double3 Sampler::UniformHemisphere()
+// {
+//   Double3 v = UniformSphere();
+//   v[2] = v[2]>=0. ? v[2] : -v[2];
+//   return v;
+// }

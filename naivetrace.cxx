@@ -2,66 +2,6 @@
 #include "scene.hxx"
 #include <chrono>
 
-class SampleGenerator
-{
-public:
-	virtual void GetSamples(int n,double *u,double *v,double *weight) = 0;
-};
-
-class RegularSampleGenerator : public SampleGenerator
-{
-public:
-	virtual void GetSamples(int n,double *u,double *v,double *weight)
-	{
-		n = sqrt((double)n);
-		if(n<=0) n=1;
-		for(int j=0; j<n; j++)
-		for(int i=0; i<n; i++)
-		{
-			u[j*n+i]= ((double)(i+1))/(n+1);
-			v[j*n+i]= ((double)(j+1))/(n+1);
-			weight[j*n+i] = 1.0/(n*n);
-		}
-	}
-};
-
-
-class RandomSampleGenerator : public SampleGenerator
-{
-public:
-	virtual void GetSamples(int n,double *u,double *v,double *weight)
-	{
-		srand(124312);
-		for(int i=0;i<n;i++) 
-		{
-			u[i] = ((double)rand())/RAND_MAX;
-			v[i] = ((double)rand())/RAND_MAX;
-			weight[i] = 1.0/n;
-		}
-	}
-};
-
-
-class StratifiedSampleGenerator : public SampleGenerator
-{
-public:
-	virtual void GetSamples(int n,double *u,double *v,double *weight)
-	{
-		n = sqrt((double)n);
-		srand(124312);
-		if(n<=0) n=1;
-		for(int j=0; j<n; j++)
-		for(int i=0; i<n; i++)
-		{
-			double dx = ((double)rand())/RAND_MAX;
-			double dy = ((double)rand())/RAND_MAX;
-			u[j*n+i]= ((double)i+dx)/(n+1);
-			v[j*n+i]= ((double)j+dy)/(n+1);
-			weight[j*n+i] = 1.0/(n*n);
-		}
-	}
-};
-
 
 int main(int argc, char *argv[])
 {
@@ -82,15 +22,10 @@ int main(int argc, char *argv[])
   Image bm(scene.camera->xres,scene.camera->yres);
   ImageDisplay display;
   auto time_of_last_display = std::chrono::steady_clock::now();
-  
-//   SampleGenerator *sampler = new StratifiedSampleGenerator;
+
   const int nsmpl = 4;
-//   double usmpl[nsmpl];
-//   double vsmpl[nsmpl];
-//   double wsmpl[nsmpl];
-//   sampler->GetSamples(nsmpl,usmpl,vsmpl,wsmpl);
   
-  Sampler other_sampler;
+  Sampler sampler;
 
   std::cout << std::endl;
   std::cout << "Rendering ..." << std::endl;
@@ -104,7 +39,7 @@ int main(int argc, char *argv[])
       Double3 col(0);
       for(int i=0;i<nsmpl;i++)
       {
-        col += scene.RayTrace(other_sampler);
+        col += scene.RayTrace(sampler);
       }
       col *= 1.0/nsmpl;
       Clip(col[0],0.,1.); Clip(col[1],0.,1.); Clip(col[2],0.,1.);

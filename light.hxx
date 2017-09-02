@@ -68,7 +68,7 @@ public:
     static_cast<RadianceOrImportance::Sample&>(s) = MakeLightSample();
     constexpr double unit_sphere_surface_area = (4.*Pi);
     s.pdf_of_dir_given_pos = 1. / unit_sphere_surface_area;
-    s.emission_dir = sampler.UniformSphere();
+    s.emission_dir = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
     return s;
   }
   
