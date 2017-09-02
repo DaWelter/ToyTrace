@@ -3,7 +3,7 @@ project(naivetrace)
 
 include_directories(external)
 
-add_compile_options ("-std=c++14")
+add_compile_options ("-std=c++11")
 
 find_package(PNG)
 find_package(JPEG)

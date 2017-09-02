@@ -28,7 +28,7 @@ struct RaySegment
   {
     Double3 delta = dest-src;
     double l = Length(delta);
-    delta = l>0 ? delta / l : Double3(NaN, NaN, NaN);
+    delta = l>0 ? (delta / l).eval() : Double3(NaN, NaN, NaN);
     return RaySegment{{src, delta}, l};
   }
   
