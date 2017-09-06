@@ -83,7 +83,7 @@ public:
 		}
 	}
 
-	bool Intersect(const Ray &ray, double &ray_length, double min, double max, SurfaceHit &hit)
+	bool Intersect(const Ray &ray, double &ray_length, double min, double max, HitId &hit) const
   {
     if(!child[0] && !child[1]) 
     {
@@ -143,7 +143,7 @@ public:
 		std::cout << "bsp tree finished" <<std::endl;
 	}
 
-	bool Intersect(const Ray &ray, double &ray_length, SurfaceHit &hit)
+	bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const
   {
 		return root.Intersect(ray, ray_length, 0, ray_length, hit);
 	}

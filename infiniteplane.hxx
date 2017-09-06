@@ -14,7 +14,7 @@ public:
 	  Normalize(normal); 
   };
 
-  bool Intersect(const Ray &ray, double &ray_length, SurfaceHit &hit) const override
+  bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const override
   {
 		double s = Dot(origin,normal);
 		double nv = Dot(ray.dir,normal);
@@ -28,7 +28,7 @@ public:
     return true;
   };
 
-  virtual Double3 GetNormal(const SurfaceHit &hit) const
+  virtual Double3 GetNormal(const HitId &hit) const
   {
 	  return normal;
   }

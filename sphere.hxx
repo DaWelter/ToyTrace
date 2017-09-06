@@ -12,7 +12,7 @@ public:
 	: center(_center),radius(_radius),Primitive(_shader)
 	{};
 
-	bool Intersect(const Ray &ray, double &ray_length, SurfaceHit &hit) const override
+	bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const override
 	{
 		Double3 q = center-ray.org;
 		double t = Dot(q,ray.dir);
@@ -33,7 +33,7 @@ public:
 		return true;
 	};
 
-	virtual Double3 GetNormal(const SurfaceHit &hit) const
+	virtual Double3 GetNormal(const HitId &hit) const
 	{
 	  Double3 n(hit.barry-center);
 	  Normalize(n);

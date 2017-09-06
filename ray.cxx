@@ -2,10 +2,14 @@
 #include "primitive.hxx"
 
 
-Double3 SurfaceHit::Normal(const Double3 &up_dir) const
+RaySurfaceIntersection::RaySurfaceIntersection(const HitId& hitid, const RaySegment& inbound)
+  : primitive(hitid.primitive),
+    barry(hitid.barry),
+    shader(hitid.primitive ? hitid.primitive->shader : nullptr),
+    dir_out(-inbound.ray.dir),
+    pos(inbound.EndPoint())
 {
-  Double3 n = primitive ? primitive->GetNormal(*this) : Double3();
-  double sign = Dot(up_dir, n);
-  n = sign > 0 ? n : (-n).eval();
-  return n;
+  Double3 n = primitive ? primitive->GetNormal(hitid) : Double3();
+  double sign = Dot(dir_out, n);
+  this->normal = sign > 0 ? n : (-n).eval();
 }

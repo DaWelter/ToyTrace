@@ -8,7 +8,7 @@
 
 class Ray;
 class Scene;
-class SurfaceHit;
+class RaySurfaceIntersection;
 
 // class Shader
 // {
@@ -19,7 +19,7 @@ class SurfaceHit;
 
 struct DirectionSample
 {
-  Double3 v;
+  Double3 dir;
   double scatter_function;
   double pdf;
 };
@@ -29,9 +29,9 @@ class Shader
 {
 public:
   virtual ~Shader() {}
-  virtual DirectionSample SampleBRDF(const SurfaceHit &inbound_surface_hit) const = 0;
-  virtual Double3 EvaluateBRDF(const SurfaceHit &inbound_surface_hit, const Double3 &out_direction) const = 0;
-  virtual double EvaluatePDF(const SurfaceHit &inbound_surface_hit, const Double3 &out_direction) const = 0;
+  virtual DirectionSample SampleBRDF(const RaySurfaceIntersection &inbound_surface_hit) const = 0;
+  virtual Double3 EvaluateBRDF(const RaySurfaceIntersection &inbound_surface_hit, const Double3 &out_direction) const = 0;
+  virtual double EvaluatePDF(const RaySurfaceIntersection &inbound_surface_hit, const Double3 &out_direction) const = 0;
 };
 
 
@@ -40,9 +40,9 @@ class DiffuseShader : public Shader
   Double3 albedo; // between zero and one.
 public:
   DiffuseShader(const Double3 &albedo);
-  DirectionSample SampleBRDF(const SurfaceHit &inbound_surface_hit) const override;
-  Double3 EvaluateBRDF(const SurfaceHit& inbound_surface_hit, const Double3& out_direction) const override;
-  double EvaluatePDF(const SurfaceHit &inbound_surface_hit, const Double3 &out_direction) const override;
+  DirectionSample SampleBRDF(const RaySurfaceIntersection &inbound_surface_hit) const override;
+  Double3 EvaluateBRDF(const RaySurfaceIntersection& inbound_surface_hit, const Double3& out_direction) const override;
+  double EvaluatePDF(const RaySurfaceIntersection &inbound_surface_hit, const Double3 &out_direction) const override;
 };
 
 

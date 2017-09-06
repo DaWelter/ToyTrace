@@ -10,22 +10,23 @@ DiffuseShader::DiffuseShader(const Double3 &_albedo)
 }
 
 
-Double3 DiffuseShader::EvaluateBRDF(const SurfaceHit& inbound_surface_hit, const Double3& out_direction) const
+Double3 DiffuseShader::EvaluateBRDF(const RaySurfaceIntersection& inbound_surface_hit, const Double3& out_direction) const
 {
   return albedo;
 }
 
 
-double DiffuseShader::EvaluatePDF(const SurfaceHit& inbound_surface_hit, const Double3& out_direction) const
+double DiffuseShader::EvaluatePDF(const RaySurfaceIntersection& inbound_surface_hit, const Double3& out_direction) const
 {
   constexpr double hemisphere_surface_area = 2.*Pi;
   return 1./hemisphere_surface_area;
 }
 
 
-DirectionSample DiffuseShader::SampleBRDF(const SurfaceHit& inbound_surface_hit) const
+DirectionSample DiffuseShader::SampleBRDF(const RaySurfaceIntersection& inbound_surface_hit) const
 {
   DirectionSample s;
+  assert(false);
   //TODO: Implement
   //Double3 v = sampler.UniformHemisphere();
   return s;

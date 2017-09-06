@@ -6,7 +6,11 @@
 
 #include "ray.hxx"
 #include "image.hxx"
+#include "perspectivecamera.hxx"
+#include "infiniteplane.hxx"
 #include "sampler.hxx"
+#include "scene.hxx"
+#include "renderingalgorithms.hxx"
 
 
 TEST(TestRaySegment, ExprTemplates)
@@ -40,6 +44,7 @@ TEST(Display, Open)
   display.show(img);
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
 }
+
 
 
 class RandomSamplingFixture : public ::testing::Test
@@ -184,6 +189,105 @@ TEST_F(StratifiedFixture, SampleLocation)
   CheckTrafo(1., 1.);
   CheckTrafo(0.5, 0.5);
 }
+
+
+
+class PerspectiveCameraTesting : public testing::Test
+{
+  Double3 pos{0, 0, 0},
+          dir{0, 0, 1},
+          up{0, 1, 0};
+  double fov = 90;
+  double bound_at_z1 = 0.5;
+  Sampler sampler;
+  InfinitePlane imageplane;
+  std::unique_ptr<PerspectiveCamera> cam;
+public:
+  PerspectiveCameraTesting() :
+    imageplane({0, 0, 1}, {0, 0, 1}, nullptr)
+  {
+  }
+  
+  void init(int _xres, int _yres)
+  {
+    cam = std::make_unique<PerspectiveCamera>(pos, dir, up, fov, _xres, _yres);
+  }
+  
+  void run(int _pixel_x, int _pixel_y)
+  {
+  /* Pixel bins:
+    |         i=0         |           i=1           |        .....           |         x=xres-1       |
+    At distance z=1:
+    x=0                   x=i/xres                 x=2/xres           ....   x=(xres-1)/xres          x=1
+  */
+    cam->current_pixel_x = _pixel_x;
+    cam->current_pixel_y = _pixel_y;
+    Double3 possum{0,0,0}, possqr{0,0,0};
+    Box box;
+    constexpr int Nsamples = 100;
+    for (int i = 0; i < Nsamples; ++i)
+    {
+      auto s = cam->TakeDirectionalSampleFrom(pos, sampler);
+      HitId hit;
+      double length = 100.;
+      bool is_hit = imageplane.Intersect(s.ray_out, length, hit);
+      ASSERT_TRUE(is_hit);
+      Double3 endpos = s.ray_out.org + length * s.ray_out.dir;
+      possum += endpos;
+      possqr += Product(endpos, endpos);
+      box.Extend(endpos);
+    }
+    // int_x=-s-s x^2 / (2s) dx = 1/3 x^3 /2s | x=-s..s = 1/(6s) 2*(s^3) = 1/3 s^2. -> std = sqrt(1/3) s
+    // s = 1 -> std = 0.577
+    Double3 average = possum / Nsamples;
+    Double3 stddev  = (possqr / Nsamples - Product(average, average)).array().sqrt().matrix();
+    std::cout << "@Pixel: ix=" << cam->current_pixel_x << "," << cam->current_pixel_y << std::endl;
+    std::cout << "Pixel: " << average << " +/- " << stddev << std::endl;
+    Double3 exactpos {((cam->current_pixel_x + 0.5) * 2.0 / cam->xres - 1.0),
+                      ((cam->current_pixel_y + 0.5) * 2.0 / cam->yres - 1.0),
+                      1.0};
+    std::cout << "Box: " << box.min << " to " << box.max << std::endl;
+    Double3 radius { 2.0/cam->xres, 2.0/cam->yres, 0. };
+    std::cout << "Exact: " << exactpos << " +/- " << radius << std::endl;
+  }
+};
+
+
+TEST_F(PerspectiveCameraTesting, Sampling1)
+{
+  init(11,11);
+  run(0,0);
+  run(10,10);
+  run(5,5);
+}
+
+
+
+class SimpleRenderTests : public testing::Test
+{
+protected:
+  Scene scene;
+};
+
+
+TEST_F(SimpleRenderTests, OnePixelBackground)
+{
+  scene.SetCamera<PerspectiveCamera>(
+    Double3{0., 0., 0.},
+    Double3{0., 0., 1.},
+    Double3{0., 1., 0.},
+    90.,
+    1, 1);
+  scene.bgColor = Double3{ 0.5, 0., 0. };
+  scene.BuildAccelStructure();
+  Raytracing rt(scene);
+  auto col = rt.MakePrettyPixel();
+  ASSERT_FLOAT_EQ(col[0], 0.5);
+  ASSERT_FLOAT_EQ(col[1], 0.);
+  ASSERT_FLOAT_EQ(col[2], 0.);
+}
+
+
 
 
 int main(int argc, char **argv) {

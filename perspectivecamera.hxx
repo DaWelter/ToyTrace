@@ -26,6 +26,9 @@ class PerspectiveCamera : public Camera
   double xmin, xperpixel;
   double ymin, yperpixel;
 public:
+  using Sample = RadianceOrImportance::Sample;
+  using DirectionalSample = RadianceOrImportance::DirectionalSample;
+  
 	PerspectiveCamera(const Double3 &_pos,
                     const Double3 &_dir,
                     const Double3 &_up,
@@ -51,7 +54,7 @@ public:
     double a = xres;
     double b = yres;
     double aspect = b/a;
-    a = tan(fov*0.7);
+    a = tan(fov*0.5);
     b = a*aspect;
     xmin = -a;
     ymin = -b;
@@ -59,14 +62,13 @@ public:
     yperpixel = 2.*b / yres;
 	}
 
-  RadianceOrImportance::Sample TakePositionSampleTo(const Double3 &org, Sampler &sampler) const override
+  Sample TakePositionSample(Sampler &sampler) const override
   {
-    assert(false && "Not Implemented");
-    RadianceOrImportance::Sample s;
+    Sample s{this->pos, 1., Double3::Constant(1.), false};    
     return s;
   }
   
-  RadianceOrImportance::DirectionalSample TakeDirectionalSample(Sampler &sampler) const override
+  DirectionalSample TakeDirectionalSampleFrom(const Double3 &pos, Sampler &sampler) const override
   {
     double r1 = sampler.Uniform01();
     double r2 = sampler.Uniform01();
@@ -75,12 +77,8 @@ public:
       ymin + (r2 + current_pixel_y) * yperpixel,
       1.0);
     Normalize(v);
-    RadianceOrImportance::DirectionalSample s;
-    s.emission_dir = right*v[0] + up*v[1] + dir*v[2];
-    s.sample_pos = pos;
-    s.value = Double3(1.);
-    s.pdf_of_pos = 1.;
-    s.pdf_of_dir_given_pos = 1.;
+    Double3 emission_dir = right*v[0] + up*v[1] + dir*v[2];
+    DirectionalSample s{{pos, emission_dir}, 1.0, Double3::Constant(1.)};
     return s;
   }
 };

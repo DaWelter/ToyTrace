@@ -1,5 +1,6 @@
 #include "image.hxx"
 #include "scene.hxx"
+#include "renderingalgorithms.hxx"
 #include <chrono>
 
 
@@ -19,27 +20,28 @@ int main(int argc, char *argv[])
   scene.BuildAccelStructure();
   scene.PrintInfo();
   
-  Image bm(scene.camera->xres,scene.camera->yres);
+  Image bm(scene.GetCamera().xres,scene.GetCamera().yres);
   ImageDisplay display;
   auto time_of_last_display = std::chrono::steady_clock::now();
 
+  Raytracing algo(scene);
+  
   const int nsmpl = 4;
   
-  Sampler sampler;
-
   std::cout << std::endl;
   std::cout << "Rendering ..." << std::endl;
-  for (int y=0;y<scene.camera->yres;y++) 
+  for (int y=0;y<scene.GetCamera().yres;y++) 
   {
-    for (int x=0;x<scene.camera->xres;x++) 
+    for (int x=0;x<scene.GetCamera().xres;x++) 
     {
-      scene.camera->current_pixel_x = x;
-      scene.camera->current_pixel_y = y;
+      scene.GetCamera().current_pixel_x = x;
+      scene.GetCamera().current_pixel_y = y;
       
       Double3 col(0);
       for(int i=0;i<nsmpl;i++)
       {
-        col += scene.RayTrace(sampler);
+        Double3 smpl_col = algo.MakePrettyPixel();
+	col += smpl_col;
       }
       col *= 1.0/nsmpl;
       Clip(col[0],0.,1.); Clip(col[1],0.,1.); Clip(col[2],0.,1.);

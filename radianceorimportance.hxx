@@ -8,15 +8,18 @@ namespace RadianceOrImportance
   
 struct Sample
 {
-  Double3 sample_pos;
-  Double3 value;
-  double pdf_of_pos; // conditioned on 'org' (see below) is okay.
+  // If "is_direction" is true then pos represents a "position" on the unit sphere ...
+  Double3 pos;
+  double pdf_of_pos;
+  Double3 measurement_contribution;
+  bool is_direction;
 };
 
-struct DirectionalSample : public Sample
+struct DirectionalSample
 {
-  Double3 emission_dir;
+  Ray ray_out;
   double pdf_of_dir_given_pos;
+  Double3 measurement_contribution;
 };
 
 
@@ -24,8 +27,10 @@ class PathEndPoint
 {
 public:
   virtual ~PathEndPoint() {}
-  virtual Sample TakePositionSampleTo(const Double3 &org, Sampler &sampler) const = 0;
-  virtual DirectionalSample TakeDirectionalSample(Sampler &sampler) const = 0;
+  virtual Sample TakePositionSample(Sampler &sampler) const = 0;
+  virtual DirectionalSample TakeDirectionalSampleFrom(const Double3 &pos, Sampler &sampler) const = 0;
+  //virtual void EvaluateMeasurementContribution(const Double3 &pos) const = 0;
+  //virtual void EvaluateMeasurementContribution(const Double3 &pos, const Double3 &dir_out) const = 0;
 };
 
 

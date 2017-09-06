@@ -14,15 +14,18 @@ class Scene
   // to the specified group...
   void ParseNFF(FILE *file, char *fileName);
   void ParseMesh(char *filename);
-  
-public:
+  friend class NFFParser;
+
   BSPTree bsptree;
   // TODO: Manage memory ...
   std::vector<Primitive*> primitives;
   std::vector<Light *> lights;
-  Camera *camera;
-  Double3 bgColor;
+  std::unique_ptr<Camera> camera;
+
   Box boundingBox;
+  
+public:
+  Double3 bgColor;
 
   Scene()
     : bgColor(Double3(0,0,0)),
@@ -30,11 +33,38 @@ public:
       Double3(0,1,0),60,640,480))
   {
   };
-	
+
+  template<class CameraType, class... Args>
+  void SetCamera(Args&&... args)
+  {
+    std::unique_ptr<CameraType> new_cam(new CameraType(std::forward<Args>(args)...));
+    camera = std::move(new_cam);
+  }
+  
   void AddLight(std::unique_ptr<Light> light) 
   {
     // TODO: Manage memory ...
 	  lights.push_back(light.release());
+  }
+  
+  int GetNumLights() const
+  {
+    return lights.size();
+  }
+  
+  const Light& GetLight(int i) const
+  {
+    return *lights[i];
+  }
+  
+  const Camera& GetCamera() const
+  {
+    return *camera;
+  }
+  
+  Camera& GetCamera()
+  {
+    return *camera;
   }
   
   void AddPrimitive(std::unique_ptr<Primitive> primitive)
@@ -45,69 +75,28 @@ public:
 
   // parse an NFF file 'fileName', store all its primitives
   void ParseNFF(char *fileName);
-  
-  
-  std::tuple<Light*, double> PickLight(Sampler &sampler)
-  {
-    auto* light = lights[sampler.UniformInt(0, lights.size()-1)];
-    double pmf_of_light = 1./lights.size();
-    return std::make_tuple(light, pmf_of_light);
-  }
-  
-  // trace the given ray and shade it and
-  // return the color of the shaded ray
-  Double3 RayTrace(Sampler &sampler)
-  {
-    if (lights.empty()) return Double3();
-    
-    RadianceOrImportance::DirectionalSample start = this->camera->TakeDirectionalSample(sampler);
-    auto segment = RaySegment{{start.sample_pos, start.emission_dir}, LargeNumber};
-    SurfaceHit hit;
-    // TODO: give Intesect optionally a reference to the starting location as in 
-    // the primitive that was hit and from which the ray now starts.
-    if (bsptree.Intersect(segment.ray, segment.length, hit))
-    {
-      // TODO: get hit ID, instantiate Hit info.
-      // Hit info computes normal, according to inbound ray direction, so that normal faces inbound ray.
-      if(hit.primitive && hit.primitive->shader)
-      {
-        auto *shader = hit.primitive->shader;
-        Light* light; double pmf_of_light; std::tie(light, pmf_of_light) = PickLight(sampler);
-        
-        Double3 hit_pos = segment.EndPoint();
-        RadianceOrImportance::Sample light_sample = light->TakePositionSampleTo(hit_pos, sampler);
-        
-        RaySegment segment_to_light = RaySegment::FromTo(hit_pos, light_sample.sample_pos);
-        
-        // TODO: Hand over reference to last hit.
-        if (!Occluded(segment_to_light.ray, segment_to_light.length))
-        {
-          Double3 brdf_value = shader->EvaluateBRDF(hit, segment_to_light.ray.dir);
-          Double3 normal = hit.Normal(-segment.ray.dir);
-          double d_factor = std::max(0., Dot(normal, segment_to_light.ray.dir));
-          return (d_factor/light_sample.pdf_of_pos/segment_to_light.length) * Product(light_sample.value, brdf_value);
-        }
-      }
-      else 
-        return Double3(1,0,0);
-    }
-    else
-      return bgColor; // ray missed geometric primitives
-  };
 
-  bool Occluded(const Ray &ray, double ray_length)
+
+  bool Occluded(const Ray &ray, double ray_length) const
   { 
-    SurfaceHit hit;
+    HitId hit;
     return bsptree.Intersect(ray, ray_length, hit);
   }
 
+  HitId Intersect(const Ray &ray, double &ray_length) const
+  {
+    HitId hit;
+    bsptree.Intersect(ray, ray_length, hit);
+    return hit;
+  }
+  
   void BuildAccelStructure()
   {   
 	  this->boundingBox = CalcBounds();
 	  bsptree.Build(primitives, boundingBox);
   }
   
-  void PrintInfo()
+  void PrintInfo() const
   {
     std::cout << std::endl;
     std::cout << "bounding box min: "
@@ -116,7 +105,12 @@ public:
               << boundingBox.max << std::endl;
   }
   
-  Box CalcBounds()
+  Box GetBoundingBox() const
+  {
+    return this->boundingBox;
+  }
+  
+  Box CalcBounds() const
   {
     Box scenebox;
     for (int i=0; i<(int)primitives.size(); i++) 

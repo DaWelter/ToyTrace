@@ -13,7 +13,7 @@ public:
 		p[0]=a; p[1]=b; p[2]=c;
 	}
 
-	bool Intersect(const Ray &ray, double &ray_length, SurfaceHit &hit) const override
+	bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const override
 	{
 		Double3 n;
 		Double3 edge[3];
@@ -40,7 +40,7 @@ public:
     return true;
 	}
 
-	virtual Double3 GetNormal(const SurfaceHit &hit) const override
+	virtual Double3 GetNormal(const HitId &hit) const override
 	{
 		Double3 n = Cross(p[1]-p[0],p[2]-p[0]);
 		Normalize(n);
@@ -70,7 +70,7 @@ public:
 		n[0]=na; n[1]=nb; n[2]=nc;
 	}
 
-	bool Intersect(const Ray &ray, double &ray_length, SurfaceHit &hit) const override
+	bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const override
 	{
 		Double3 n;
 		Double3 ab,ac,a;
@@ -115,7 +115,7 @@ public:
 		return true;
 	}
 
-	Double3 GetNormal(const SurfaceHit &hit) const override
+	Double3 GetNormal(const HitId &hit) const override
 	{
 		Double3 normal = n[0]*hit.barry[0]+
 					   n[1]*hit.barry[1] +
@@ -144,7 +144,7 @@ public:
 								: SmoothTriangle(a,b,c,na,nb,nc,shader)
 	{ uv[0]=uva; uv[1]=uvb; uv[2]=uvc; }
 
-	virtual Double3 GetUV(const SurfaceHit &hit) const override
+	virtual Double3 GetUV(const HitId &hit) const override
 	{
 		Double3 res = uv[0]*hit.barry[0]+
 				   uv[1]*hit.barry[1] + 

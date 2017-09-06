@@ -5,6 +5,7 @@
 #include "vec3f.hxx"
 
 class Primitive;
+class Shader;
 
 static constexpr int MAX_RAY_DEPTH = 10;
 
@@ -44,17 +45,29 @@ inline std::ostream &operator<<(std::ostream &o,const Ray &ray)
 { o << "Ray[" << ray.org << "+t*" << ray.dir << "]"; return o; }
 
 
-struct SurfaceHit
+struct HitId
 {
   const Primitive *primitive = { nullptr }; // primitive that was hit
   Double3 barry;
   
-  bool isValid() const
+  operator bool() const
   {
     return primitive != nullptr;
   }
+};
+
+
+struct RaySurfaceIntersection
+{
+  Double3 normal;
+  Double3 barry;
+  Double3 dir_out; // away from surface
+  Double3 pos;
+  const Shader* shader = { nullptr };
+  const Primitive* primitive = { nullptr };
   
-  Double3 Normal(const Double3 &up_dir) const;
+  RaySurfaceIntersection(const HitId &hitid, const RaySegment &inbound);
+  RaySurfaceIntersection() = default;
 };
 
 

@@ -1,6 +1,7 @@
 #ifndef VEC3F_HXX
 #define VEC3F_HXX
 
+#include <cassert>
 #include <iostream>
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Geometry>
@@ -158,7 +159,7 @@ inline Scalar Clip(Scalar &x, Scalar a,Scalar b){
 }
 
 
-constexpr auto Epsilon = 1.e-8; //std::numeric_limits<double>::epsilon();
+constexpr auto Epsilon = std::numeric_limits<double>::epsilon();
 constexpr auto Pi      = double(3.14159265358979323846264338327950288419716939937510);
 constexpr auto Infinity= std::numeric_limits<double>::infinity();
 constexpr auto LargeNumber = std::numeric_limits<double>::max()/16;

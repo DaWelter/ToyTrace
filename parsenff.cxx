@@ -127,9 +127,7 @@ void NFFParser::Parse(FILE *fileToUse, char *fileName)
       fscanf(file,"angle %lg\n",&angle);
       fscanf(file,"hither %lg\n",&hither);
       fscanf(file,"resolution %d %d\n",&resX,&resY);
-
-      delete scene->camera;
-      scene->camera = new PerspectiveCamera(pos,at-pos,up,angle,resX,resY);
+      scene->SetCamera<PerspectiveCamera>(pos,at-pos,up,angle,resX,resY);
       
       continue;
     }
@@ -213,6 +211,7 @@ void NFFParser::Parse(FILE *fileToUse, char *fileName)
 
     if (!strcmp(token,"b")) {
       sscanf(line,"b %lg %lg %lg",&scene->bgColor[0],&scene->bgColor[1],&scene->bgColor[2]);
+      scene->bgColor /= 255;
       continue;
     }
     

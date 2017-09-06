@@ -37,6 +37,7 @@ public:
 //     // Fortunately the calling code should only ever use the quotient of radiance and pdf. Thus
 //     // the deltas cancel out and I can set this to one.
 //     s.pdf_of_pos = 1.;
+//     s.is_extremely_far_away = true;
 //   }
 //   
 //   Light::DirectionalSample TakeDirectionalSample() const override
@@ -50,35 +51,30 @@ public:
 
 class PointLight : public Light
 {
-	Double3 col;
+	Double3 col; // Total power distributed uniformely over the unit sphere.
 	Double3 pos;
 public:
 	PointLight(const Double3 &col,const Double3 &pos)
 		: col(col),pos(pos)
 	{}
 
-  Light::Sample TakePositionSampleTo(const Double3 &org, Sampler &sampler) const override
+  Sample TakePositionSample(Sampler &sampler) const override
   {
-    return MakeLightSample();
-  }
-  
-  Light::DirectionalSample TakeDirectionalSample(Sampler &sampler) const override
-  {
-    Light::DirectionalSample s;
-    static_cast<RadianceOrImportance::Sample&>(s) = MakeLightSample();
-    constexpr double unit_sphere_surface_area = (4.*Pi);
-    s.pdf_of_dir_given_pos = 1. / unit_sphere_surface_area;
-    s.emission_dir = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
+    Sample s;
+    s.pos = pos;
+    s.pdf_of_pos = 1.;
+    s.measurement_contribution = col;
     return s;
   }
   
-private:
-  Light::Sample MakeLightSample() const
+  DirectionalSample TakeDirectionalSampleFrom(const Double3 &pos, Sampler &sampler) const
   {
-    Sample s;
-    s.sample_pos = pos;
-    s.pdf_of_pos = 1.;
-    s.value = col;
+    constexpr double one_over_unit_sphere_surface_area = 1./(4.*Pi);
+    DirectionalSample s{
+      { pos, SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare()) },
+      one_over_unit_sphere_surface_area,
+      one_over_unit_sphere_surface_area * col
+    };
     return s;
   }
 };

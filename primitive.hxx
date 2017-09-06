@@ -21,19 +21,19 @@ public:
   
   Shader *shader;
   
-  virtual bool Intersect(const Ray &ray, double &ray_length, SurfaceHit &hit) const = 0;
+  virtual bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const = 0;
   
-  virtual Double3 GetNormal(const SurfaceHit &hit) const = 0;
+  virtual Double3 GetNormal(const HitId &hit) const = 0;
   
   virtual Box   CalcBounds() const = 0;
   
   virtual bool  Occluded(const Ray &ray, double t) const
   {
-    SurfaceHit hit;
+    HitId hit;
     return Intersect(ray, t, hit);
   }
   
-  virtual Double3 GetUV(const SurfaceHit &hit) const
+  virtual Double3 GetUV(const HitId &hit) const
   { 
 	  return Double3{0, 0, 0};
   }
