@@ -25,10 +25,10 @@ class Scene
   Box boundingBox;
   
 public:
-  Double3 bgColor;
+  Spectral bgColor;
 
   Scene()
-    : bgColor(Double3(0,0,0)),
+    : bgColor{0,0,0},
       camera(new PerspectiveCamera(Double3(0,0,0),Double3(0,0,-1),
       Double3(0,1,0),60,640,480))
   {

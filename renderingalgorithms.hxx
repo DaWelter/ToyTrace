@@ -38,13 +38,13 @@ public:
   }
   
   
-  Double3 LightingMeasurementOverPdf(const RaySurfaceIntersection &intersection)
+  Spectral LightingMeasurementOverPdf(const RaySurfaceIntersection &intersection)
   {
-    Double3 ret{0., 0., 0.};
+    Spectral ret{0., 0., 0.};
     if (scene.GetNumLights() > 0)
     {
       const Light* light; double pmf_of_light; std::tie(light, pmf_of_light) = PickLightUniform();
-          
+
       RadianceOrImportance::Sample light_sample = light->TakePositionSample(sampler);
       
       RaySegment segment_to_light = MakeSegmentToLight(intersection.pos, light_sample);
@@ -52,11 +52,11 @@ public:
       if (!scene.Occluded(segment_to_light.ray, segment_to_light.length))
       {
         const auto *shader = intersection.primitive->shader;
-        Double3 brdf_value = shader->EvaluateBRDF(intersection, segment_to_light.ray.dir);
+        Spectral brdf_value = shader->EvaluateBRDF(intersection, segment_to_light.ray.dir);
         double d_factor = std::max(0., Dot(intersection.normal, segment_to_light.ray.dir));
         
-        ret = ((d_factor/light_sample.pdf_of_pos/segment_to_light.length) * 
-          brdf_value.array() * light_sample.measurement_contribution.array()).matrix();
+        ret = d_factor/light_sample.pdf_of_pos/segment_to_light.length * 
+          brdf_value * light_sample.measurement_contribution;
       }
     }
     return ret;
@@ -65,13 +65,13 @@ public:
   
   // trace the given ray and shade it and
   // return the color of the shaded ray
-  Double3 MakePrettyPixel()
+  Spectral MakePrettyPixel()
   {
     RadianceOrImportance::Sample start_pos_sample = scene.GetCamera().TakePositionSample(sampler);
     RadianceOrImportance::DirectionalSample start = scene.GetCamera().TakeDirectionalSampleFrom(start_pos_sample.pos, sampler);
     
-    Double3 result = ((start_pos_sample.measurement_contribution.array() *
-                      start.measurement_contribution.array()) / start_pos_sample.pdf_of_pos /  start.pdf_of_dir_given_pos).matrix();
+    Spectral result = (start_pos_sample.measurement_contribution *
+                      start.measurement_contribution) / start_pos_sample.pdf_of_pos /  start.pdf_of_dir_given_pos;
     
     auto segment = RaySegment{start.ray_out, LargeNumber};
     HitId hit = scene.Intersect(segment.ray, segment.length);
@@ -80,8 +80,8 @@ public:
     if (hit)
     {
       RaySurfaceIntersection intersection{hit, segment};
-      Double3 lights_factor = LightingMeasurementOverPdf(intersection);
-      return (result.array() * lights_factor.array()).matrix();
+      Spectral lights_factor = LightingMeasurementOverPdf(intersection);
+      return result * lights_factor;
     }
     else
       return scene.bgColor; // ray missed geometric primitives

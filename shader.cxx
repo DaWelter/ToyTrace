@@ -4,13 +4,13 @@
 #include "scene.hxx"
 
 
-DiffuseShader::DiffuseShader(const Double3 &_albedo)
+DiffuseShader::DiffuseShader(const Spectral &_albedo)
   : albedo(_albedo)
 {
 }
 
 
-Double3 DiffuseShader::EvaluateBRDF(const RaySurfaceIntersection& inbound_surface_hit, const Double3& out_direction) const
+Spectral DiffuseShader::EvaluateBRDF(const RaySurfaceIntersection& inbound_surface_hit, const Double3& out_direction) const
 {
   return albedo;
 }

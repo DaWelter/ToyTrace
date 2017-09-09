@@ -37,11 +37,11 @@ int main(int argc, char *argv[])
       scene.GetCamera().current_pixel_x = x;
       scene.GetCamera().current_pixel_y = y;
       
-      Double3 col(0);
+      Spectral col(0);
       for(int i=0;i<nsmpl;i++)
       {
-        Double3 smpl_col = algo.MakePrettyPixel();
-	col += smpl_col;
+        Spectral smpl_col = algo.MakePrettyPixel();
+        col += smpl_col;
       }
       col *= 1.0/nsmpl;
       Clip(col[0],0.,1.); Clip(col[1],0.,1.); Clip(col[2],0.,1.);

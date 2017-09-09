@@ -8,8 +8,6 @@
 #include <boost/format.hpp>
 #include <boost/functional/hash.hpp>
 
-template<class T >
-class DynArray;
 template<class T, int d>
 class Vec : public Eigen::Matrix<T, d, 1>
 {
@@ -60,6 +58,9 @@ typedef Vec<long, 2> Long3;
 #define VECDARG class T,int d
 #define VECD Vec<T, d>
 #endif
+
+typedef Eigen::Array<double, 3, 1> Spectral;
+
 
 namespace std
 {

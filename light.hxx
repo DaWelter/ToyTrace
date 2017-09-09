@@ -51,7 +51,7 @@ public:
 
 class PointLight : public Light
 {
-	Double3 col; // Total power distributed uniformely over the unit sphere.
+	Spectral col; // Total power distributed uniformely over the unit sphere.
 	Double3 pos;
 public:
 	PointLight(const Double3 &col,const Double3 &pos)
