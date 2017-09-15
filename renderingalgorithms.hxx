@@ -49,7 +49,7 @@ public:
       
       RaySegment segment_to_light = MakeSegmentToLight(intersection.pos, light_sample);
       // TODO: Hand over reference to last hit.
-      if (!scene.Occluded(segment_to_light.ray, segment_to_light.length, &intersection.hitid))
+      if (!scene.Occluded(segment_to_light.ray, segment_to_light.length, intersection.hitid))
       {
         const auto &shader = intersection.shader();
         Spectral brdf_value = shader.EvaluateBRDF(-incident_dir, intersection, segment_to_light.ray.dir, nullptr);
@@ -74,7 +74,7 @@ public:
                       start.measurement_contribution) / start_pos_sample.pdf_of_pos /  start.pdf;
     
     auto segment = RaySegment{start.ray_out, LargeNumber};
-    HitId hit = scene.Intersect(segment.ray, segment.length, nullptr);
+    HitId hit = scene.Intersect(segment.ray, segment.length);
     // TODO: give Intesect optionally a reference to the starting location as in 
     // the primitive that was hit and from which the ray now starts.
     if (hit)
@@ -157,7 +157,7 @@ struct PathNode
   Double3 Position() const;
   Double3 DirectionToEmitter() const;
   Double3 InboundDir() const;
-  const HitId* hitId() const;
+  HitId hitId() const;
 
   static PathNode MakeTypeOne(
     const RadianceOrImportance::EmitterSensor &emitter, 
@@ -196,9 +196,9 @@ Double3 PathNode::InboundDir() const
 }
 
 
-const HitId* PathNode::hitId() const
+HitId PathNode::hitId() const
 {
-  return (type == SURFACE) ? &surface().intersection.hitid : nullptr;
+  return (type == SURFACE) ? surface().intersection.hitid : HitId{};
 }
 
 
@@ -317,7 +317,7 @@ public:
   Spectral MakePrettyPixel()
   {
     Spectral ret = BiDirectionPathTraceOfLength(2, 1);
-    //ret += BiDirectionPathTraceOfLength(3, 1);
+    ret += BiDirectionPathTraceOfLength(3, 1);
     return ret;
   }
   
@@ -392,7 +392,7 @@ public:
       dir_sample.measurement_contribution);
     history.Copy(node.index, node.index+1); // It's the same value since we have not sampled at the node we are going to add now yet.
     auto segment = RaySegment{dir_sample.ray_out, LargeNumber};
-    auto last_hit = node.type == PathNode::SURFACE ? &node.surface().intersection.hitid : nullptr;
+    auto last_hit = node.hitId();
     HitId hit = scene.Intersect(segment.ray, segment.length, last_hit);
     if (hit)
     {
@@ -426,23 +426,24 @@ public:
       return Spectral{0.};
     
     RaySegment segment;
-    const HitId *last_hit{nullptr};
+    HitId hits_ignored[2];
     if (node1.type == PathNode::NODE1_DIRECTIONAL)
     {
       segment = RaySegment{{node2.Position(), node1.DirectionToEmitter()}, LargeNumber};
-      last_hit = node2.hitId();
+      hits_ignored[0] = node2.hitId();
     }
     else if (node2.type == PathNode::NODE1_DIRECTIONAL)
     {
       segment = RaySegment{{node1.Position(), node2.DirectionToEmitter()}, LargeNumber};
-      last_hit = node1.hitId();
+      hits_ignored[0] = node1.hitId();
     }
     else
     {
       segment = RaySegment::FromTo(node1.Position(), node2.Position());
-      last_hit = node2.hitId();
+      hits_ignored[0] = node1.hitId();
+      hits_ignored[1] = node2.hitId();
     }
-    if (scene.Occluded(segment.ray, segment.length, last_hit))
+    if (scene.Occluded(segment.ray, segment.length, hits_ignored[0], hits_ignored[1]))
       return Spectral{0.};
     bool isAreaMeasure = segment.length<LargeNumber; // i.e. nodes are not directional.
     double geom_term = isAreaMeasure ? 1./segment.length : 1.;

@@ -77,16 +77,16 @@ public:
   void ParseNFF(char *fileName);
 
 
-  bool Occluded(const Ray &ray, double ray_length, const HitId *last_hit) const
+  bool Occluded(const Ray &ray, double ray_length, const HitId &to_ignore1 = HitId(), const HitId &to_ignore2 = HitId()) const
   { 
     HitId hit;
-    return bsptree.Intersect(ray, ray_length, hit, last_hit);
+    return bsptree.Intersect(ray, ray_length, hit, to_ignore1, to_ignore2);
   }
 
-  HitId Intersect(const Ray &ray, double &ray_length, const HitId *last_hit) const
+  HitId Intersect(const Ray &ray, double &ray_length, const HitId &to_ignore1 = HitId(), const HitId &to_ignore2 = HitId()) const
   {
     HitId hit;
-    bsptree.Intersect(ray, ray_length, hit, last_hit);
+    bsptree.Intersect(ray, ray_length, hit, to_ignore1, to_ignore2);
     return hit;
   }
   

@@ -11,6 +11,44 @@
 static int nprim=0;
 
 
+class IntersectionChecker
+{
+  double &ray_length;
+  HitId &hit;
+  HitId to_ignore[2];
+public:
+  IntersectionChecker(double &_ray_length, HitId &_hit, HitId igno1, HitId igno2)
+    : ray_length{_ray_length}, hit(_hit), to_ignore{ igno1, igno2 }
+  {
+  }
+//   void addToIgnore(const HitId &igno)
+//   {
+//     if (to_ignore[0])
+//     {
+//       assert((bool)to_ignore[1]==false);
+//       to_ignore[1] = igno;
+//     }
+//     else
+//       to_ignore[0] = igno;
+//   }
+  double rayLength() const 
+  { 
+    return ray_length; 
+  }
+  HitId hitId() const 
+  { 
+    return hit; 
+  }
+  bool intersect(const Ray &ray, const Primitive &p)
+  {
+    if ((to_ignore[0].primitive == &p) || 
+       (to_ignore[1].primitive == &p)) 
+     return false;;
+    return p.Intersect(ray, ray_length, hit);
+  }
+};
+
+
 class TreeNode
 {
 	TreeNode* child[2];
@@ -82,16 +120,16 @@ public:
 			child[1]->Split(level+1,childlist[1],childbox[1]);
 		}
 	}
-	
-	bool Intersect(const Ray &ray, double &ray_length, double min, double max, HitId &hit, const HitId *last_hit) const
+
+
+	bool Intersect(const Ray &ray, double min, double max, IntersectionChecker &intersectionChecker) const
   {
     if(!child[0] && !child[1]) 
     {
       bool res=false;
       for(unsigned int i=0;i<primitive.size();i++) 
       {
-        if (last_hit && last_hit->primitive == primitive[i]) continue;
-        res |= primitive[i]->Intersect(ray, ray_length, hit);
+        res |= intersectionChecker.intersect(ray, *primitive[i]);
       }
       return res;
     }
@@ -110,23 +148,29 @@ public:
     
     if(dist<0 || dist>max) 
     {
-      if(child[first]) return child[first]->Intersect(ray, ray_length, min,max, hit, last_hit);
+      // Facing away from split plane or distance is further than max checking distance.
+      if(child[first]) return child[first]->Intersect(ray, min, max, intersectionChecker);
       else return false;
     } 
     else if(dist<min) 
     {
-      if(child[last]) return child[last]->Intersect(ray, ray_length, min,max, hit, last_hit);
+      // Facing going towards the split plane but min checking distance is beyond the plane, i.e. within second node.
+      if(child[last]) return child[last]->Intersect(ray, min, max, intersectionChecker);
       else return false;
     } 
     else 
     {
+      // Intersecting both subvolumes.
       bool bhit;
-      if(child[first]) bhit = child[first]->Intersect(ray, ray_length, min,dist, hit, last_hit);
-      else bhit = false;
-      
-      char hitside = ((ray.org+ray_length*ray.dir)[splitaxis]<splitpos)?0:1;
-      if((!bhit || hitside!=first) && child[last]) {
-         bhit |= child[last]->Intersect(ray, ray_length, dist,max, hit, last_hit);
+      if(child[first]) 
+        bhit = child[first]->Intersect(ray, min, dist, intersectionChecker);
+      else 
+        bhit = false;
+      // Because primitives overlapping both nodes, we have to check if the hit location is actually in the first node.
+      char hitside = ((ray.org+intersectionChecker.rayLength()*ray.dir)[splitaxis]<splitpos) ? 0 : 1;
+      if ((!bhit || hitside!=first) && child[last]) 
+      {
+         bhit |= child[last]->Intersect(ray, dist, max, intersectionChecker);
       } 
       return bhit;
     }
@@ -151,9 +195,10 @@ public:
 		std::cout << "bsp tree finished" <<std::endl;
 	}
 
-	bool Intersect(const Ray &ray, double &ray_length, HitId &hit, const HitId *last_hit) const
+	bool Intersect(const Ray &ray, double &ray_length, HitId &hit, const HitId &to_ignore1, const HitId &to_ignore2) const
   {
-		return root.Intersect(ray, ray_length, 0, ray_length, hit, last_hit);
+    IntersectionChecker intersectionChecker{ray_length, hit, to_ignore1, to_ignore2};
+		return root.Intersect(ray, 0, ray_length, intersectionChecker);
 	}
 };
 
