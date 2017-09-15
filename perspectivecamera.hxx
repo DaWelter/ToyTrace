@@ -7,7 +7,7 @@
 #include "radianceorimportance.hxx"
 
 
-class Camera : public RadianceOrImportance::PathEndPoint
+class Camera : public RadianceOrImportance::EmitterSensor
 {
 public:
 	Camera(int xres,int yres)
@@ -68,7 +68,7 @@ public:
     return s;
   }
   
-  DirectionalSample TakeDirectionalSampleFrom(const Double3 &pos, Sampler &sampler) const override
+  DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler) const override
   {
     double r1 = sampler.Uniform01();
     double r2 = sampler.Uniform01();
@@ -80,6 +80,17 @@ public:
     Double3 emission_dir = right*v[0] + up*v[1] + dir*v[2];
     DirectionalSample s{{pos, emission_dir}, 1.0, Double3::Constant(1.)};
     return s;
+  }
+  
+  
+  Spectral EvaluatePositionComponent(const Double3 &pos, double *pdf) const override
+  {
+    assert (false && "Not implemented");
+  }
+  
+  Spectral EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, double *pdf) const override
+  {
+    assert (false && "Not implemented");
   }
 };
 

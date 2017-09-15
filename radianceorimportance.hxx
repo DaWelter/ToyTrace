@@ -5,7 +5,7 @@
 
 namespace RadianceOrImportance
 {
-  
+
 struct Sample
 {
   // If "is_direction" is true then pos represents a "position" on the unit sphere ...
@@ -18,19 +18,18 @@ struct Sample
 struct DirectionalSample
 {
   Ray ray_out;
-  double pdf_of_dir_given_pos;
+  double pdf;
   Spectral measurement_contribution;
 };
 
-
-class PathEndPoint
+class EmitterSensor
 {
 public:
-  virtual ~PathEndPoint() {}
+  virtual ~EmitterSensor() {}
   virtual Sample TakePositionSample(Sampler &sampler) const = 0;
-  virtual DirectionalSample TakeDirectionalSampleFrom(const Double3 &pos, Sampler &sampler) const = 0;
-  //virtual void EvaluateMeasurementContribution(const Double3 &pos) const = 0;
-  //virtual void EvaluateMeasurementContribution(const Double3 &pos, const Double3 &dir_out) const = 0;
+  virtual DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler) const = 0;
+  virtual Spectral EvaluatePositionComponent(const Double3 &pos, double *pdf) const = 0;
+  virtual Spectral EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, double *pdf) const = 0;
 };
 
 

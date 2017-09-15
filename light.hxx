@@ -8,7 +8,7 @@
 
 
 
-class Light : public RadianceOrImportance::PathEndPoint
+class Light : public RadianceOrImportance::EmitterSensor
 {
 public:
   using Sample = RadianceOrImportance::Sample;
@@ -60,22 +60,37 @@ public:
 
   Sample TakePositionSample(Sampler &sampler) const override
   {
-    Sample s;
-    s.pos = pos;
-    s.pdf_of_pos = 1.;
-    s.measurement_contribution = col;
+    Sample s {
+      pos,
+      1.,
+      col,
+      false };
     return s;
   }
   
-  DirectionalSample TakeDirectionalSampleFrom(const Double3 &pos, Sampler &sampler) const
+  DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler) const override
   {
     constexpr double one_over_unit_sphere_surface_area = 1./(4.*Pi);
     DirectionalSample s{
       { pos, SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare()) },
       one_over_unit_sphere_surface_area,
-      one_over_unit_sphere_surface_area * col
+      Spectral{1.}
     };
     return s;
+  }
+  
+  Spectral EvaluatePositionComponent(const Double3 &pos, double *pdf) const override
+  {
+    assert (Length(pos - this->pos) <= Epsilon);
+    if (pdf) *pdf = 1.;
+    return col;
+  }
+  
+  Spectral EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, double *pdf) const override
+  {
+    constexpr double one_over_unit_sphere_surface_area = 1./(4.*Pi);
+    if (pdf) *pdf = one_over_unit_sphere_surface_area;
+    return Spectral{1.};
   }
 };
 

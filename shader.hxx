@@ -11,7 +11,7 @@ class Scene;
 class RaySurfaceIntersection;
 
 
-struct DirectionSample
+struct BRDFSample
 {
   Double3 dir;
   Spectral scatter_function;
@@ -23,9 +23,8 @@ class Shader
 {
 public:
   virtual ~Shader() {}
-  virtual DirectionSample SampleBRDF(const RaySurfaceIntersection &inbound_surface_hit) const = 0;
-  virtual Spectral EvaluateBRDF(const RaySurfaceIntersection &inbound_surface_hit, const Double3 &out_direction) const = 0;
-  virtual double EvaluatePDF(const RaySurfaceIntersection &inbound_surface_hit, const Double3 &out_direction) const = 0;
+  virtual BRDFSample SampleBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit) const = 0;
+  virtual Spectral EvaluateBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, double *pdf) const = 0;
 };
 
 
@@ -34,11 +33,9 @@ class DiffuseShader : public Shader
   Spectral albedo; // between zero and one.
 public:
   DiffuseShader(const Spectral &albedo);
-  DirectionSample SampleBRDF(const RaySurfaceIntersection &inbound_surface_hit) const override;
-  Spectral EvaluateBRDF(const RaySurfaceIntersection& inbound_surface_hit, const Double3& out_direction) const override;
-  double EvaluatePDF(const RaySurfaceIntersection &inbound_surface_hit, const Double3 &out_direction) const override;
+  BRDFSample SampleBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit) const override;
+  Spectral EvaluateBRDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
 };
-
 
 
 // class FlatShader : public Shader

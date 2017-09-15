@@ -10,25 +10,19 @@ DiffuseShader::DiffuseShader(const Spectral &_albedo)
 }
 
 
-Spectral DiffuseShader::EvaluateBRDF(const RaySurfaceIntersection& inbound_surface_hit, const Double3& out_direction) const
+Spectral DiffuseShader::EvaluateBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
 {
+  constexpr double hemisphere_surface_area = 2.*Pi;
+  if (pdf)
+    *pdf = 1./hemisphere_surface_area;
   return albedo;
 }
 
 
-double DiffuseShader::EvaluatePDF(const RaySurfaceIntersection& inbound_surface_hit, const Double3& out_direction) const
+BRDFSample DiffuseShader::SampleBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit) const
 {
-  constexpr double hemisphere_surface_area = 2.*Pi;
-  return 1./hemisphere_surface_area;
-}
-
-
-DirectionSample DiffuseShader::SampleBRDF(const RaySurfaceIntersection& inbound_surface_hit) const
-{
-  DirectionSample s;
-  assert(false);
-  //TODO: Implement
-  //Double3 v = sampler.UniformHemisphere();
+  BRDFSample s;
+  assert(false && "Implement transform to align hemisphere with hit normal!");
   return s;
 }
 

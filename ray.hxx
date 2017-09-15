@@ -59,13 +59,15 @@ struct HitId
 
 struct RaySurfaceIntersection
 {
+  HitId hitid;
   Double3 normal;
-  Double3 barry;
-  Double3 dir_out; // away from surface
+  //Double3 barry;
   Double3 pos;
-  const Shader* shader = { nullptr };
-  const Primitive* primitive = { nullptr };
+  //const Shader* shader = { nullptr };
+  //const Primitive* primitive = { nullptr };
   
+  const Primitive& primitive() const;
+  const Shader& shader() const;
   RaySurfaceIntersection(const HitId &hitid, const RaySegment &inbound);
   RaySurfaceIntersection() = default;
 };

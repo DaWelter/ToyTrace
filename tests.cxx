@@ -227,7 +227,7 @@ public:
     constexpr int Nsamples = 100;
     for (int i = 0; i < Nsamples; ++i)
     {
-      auto s = cam->TakeDirectionalSampleFrom(pos, sampler);
+      auto s = cam->TakeDirectionSampleFrom(pos, sampler);
       HitId hit;
       double length = 100.;
       bool is_hit = imageplane.Intersect(s.ray_out, length, hit);

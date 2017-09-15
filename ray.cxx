@@ -2,14 +2,30 @@
 #include "primitive.hxx"
 
 
-RaySurfaceIntersection::RaySurfaceIntersection(const HitId& hitid, const RaySegment& inbound)
-  : primitive(hitid.primitive),
-    barry(hitid.barry),
-    shader(hitid.primitive ? hitid.primitive->shader : nullptr),
-    dir_out(-inbound.ray.dir),
-    pos(inbound.EndPoint())
+RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySegment& _inbound)
+  : hitid(_hitid),
+    //primitive(hitid.primitive),
+    
+    //barry(hitid.barry),
+    //shader(hitid.primitive ? hitid.primitive->shader : nullptr),
+    //dir_out(-inbound.ray.dir),
+    pos(_inbound.EndPoint())
 {
-  Double3 n = primitive ? primitive->GetNormal(hitid) : Double3();
-  double sign = Dot(dir_out, n);
+  Double3 n = hitid.primitive ? hitid.primitive->GetNormal(hitid) : Double3();
+  double sign = Dot(-_inbound.ray.dir, n);
   this->normal = sign > 0 ? n : (-n).eval();
 }
+
+
+const Primitive& RaySurfaceIntersection::primitive() const
+{ 
+  assert((bool)hitid); 
+  return *hitid.primitive; 
+}
+
+const Shader& RaySurfaceIntersection::shader() const
+{ 
+  assert((bool)hitid && hitid.primitive->shader); 
+  return *hitid.primitive->shader; 
+}
+  

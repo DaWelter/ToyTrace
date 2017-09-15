@@ -166,11 +166,13 @@ constexpr auto Infinity= std::numeric_limits<double>::infinity();
 constexpr auto LargeNumber = std::numeric_limits<double>::max()/16;
 constexpr auto NaN = std::numeric_limits<double>::quiet_NaN();
 
+#if 0 // if using c++11
 namespace std {
 template<typename T, typename... Args>
 std::unique_ptr<T> make_unique(Args&&... args) {
     return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
 }
 }
+#endif
 
 #endif
