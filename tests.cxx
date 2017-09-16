@@ -29,6 +29,30 @@ TEST(TestRaySegment, EndPointNormal)
 }
 
 
+TEST(TestMath, OrthogonalSystemZAligned)
+{
+  Double3 directions[] = {
+    { 1., 0., 0. },
+    { 0., 1., 0. },
+    { 0., 0., 3. },
+    { 1., 1., 0. }
+  };
+  for (auto dir : directions)
+  {
+    Eigen::Matrix<double, 3, 3> m = OrthogonalSystemZAligned(dir);
+    std::cout << "dir = " << dir << std::endl;
+    std::cout << "m{dir} = " << m << std::endl;
+    EXPECT_TRUE(m.isUnitary(1.e-6));
+    ASSERT_NEAR(m.determinant(), 1., 1.e-6);
+    auto mi = m.inverse().eval();
+    auto dir_local = mi * dir;
+    EXPECT_NEAR(dir_local[0], 0., 1.e-6);
+    EXPECT_NEAR(dir_local[1], 0., 1.e-6);
+    EXPECT_NEAR(dir_local[2], Length(dir), 1.e-6);
+  }
+}
+
+
 TEST(Display, Open)
 {
   ImageDisplay display;
@@ -132,6 +156,53 @@ TEST_F(RandomSamplingFixture, UniformHemisphereDistribution)
     ASSERT_GE(v[2], 0.);
   }
 }
+
+
+TEST_F(RandomSamplingFixture, CosHemisphereDistribution)
+{
+  static constexpr int N = 100;
+  int n_samples_per_quadrant[2][2] = { {0, 0}, {0, 0} };
+  int n_samples_z_test[3] = { 0, 0, 0, };
+  const double z_thresholds[3] = { 0.25 * Pi*0.5, 0.5 * Pi*0.5, 0.75 * Pi*0.5 };
+  for (int i=0; i<N; ++i)
+  {
+    auto v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
+    ASSERT_NEAR(Length(v), 1.0, 1.e-6);
+    ASSERT_GE(v[2], 0.);
+    ++n_samples_per_quadrant[v[0]<0. ? 0 : 1][v[1]<0. ? 0 : 1];
+    auto angle = std::acos(v[2]);
+    if (angle<z_thresholds[2]) ++n_samples_z_test[2];
+    if (angle<z_thresholds[1]) ++n_samples_z_test[1];
+    if (angle<z_thresholds[0]) ++n_samples_z_test[0];
+  }
+  // See UniformIntDistribution.
+  double avg = 1./4.;
+  double var = (4.-1.)*avg*avg + (1.-avg)*(1.-avg);
+  double sigma_quadrant = std::sqrt(var * N);
+  std::cout << "quadrant_expected: " << 0.25*N << "+/-" << sigma_quadrant << std::endl;
+  for (int qx = 0; qx <= 1; ++qx)
+  for (int qy = 0; qy <= 1; ++qy)
+  {
+    std::cout << "samples in " << qx << "," << qy << " = " << n_samples_per_quadrant[qx][qy] << std::endl;
+    EXPECT_NEAR(n_samples_per_quadrant[qx][qy], 0.25*N, sigma_quadrant*3);
+  }
+  for (int z_bin = 0; z_bin < 3; ++z_bin)
+  {
+    // The cummulative distribution, i.e. the probability of z to be smaller than the threshold.
+    double P = std::pow(std::sin(z_thresholds[z_bin]), 2.);
+    // Expected number throws into the lower bin is P * N
+    // Expected hit indication = 1 * P + 0 * (1-P) = P
+    // Variance of single throw = (1-P)^2 * P + (0-P)^2 * (1-P) = P - 2 PP + PPP + PP - PPP = P - PP
+    double Navg = P;
+    double Nvar = (P-P*P);
+    double Nsigma = std::sqrt(Nvar/N);
+    std::cout << "E[N(theta*2/Pi<" << (z_thresholds[z_bin]*2./Pi) << ")] = " << Navg << "+/-" << Nsigma << std::endl;
+    double actual = double(n_samples_z_test[z_bin])/N;
+    std::cout << "  actual N = " <<  actual << std::endl;
+    EXPECT_NEAR(actual, Navg, Nsigma*3);
+  }
+}
+
 
 
 class StratifiedFixture : public testing::Test

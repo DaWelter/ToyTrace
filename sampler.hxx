@@ -9,6 +9,7 @@ namespace SampleTrafo
 {
 Double3 ToUniformSphere(Double2 r);
 Double3 ToUniformHemisphere(Double2 r);
+Double3 ToCosHemisphere(Double2 r);
 }
 
 

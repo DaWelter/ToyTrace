@@ -20,6 +20,17 @@ Double3 ToUniformHemisphere(Double2 r)
   v[2] = v[2]>=0. ? v[2] : -v[2];
   return v;
 }
+
+Double3 ToCosHemisphere(Double2 r)
+{
+  double rho = std::sqrt(1.-r[0]);
+  double z   = std::sqrt(r[0]);
+  double omega = 2.*Pi*r[1];
+  double sn = std::sin(omega);
+  double cs = std::cos(omega);
+  return Double3{cs*rho, sn*rho, z};
+}
+
 }
 
 

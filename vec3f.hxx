@@ -5,6 +5,7 @@
 #include <iostream>
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Geometry>
+#include <eigen3/Eigen/LU>
 #include <boost/format.hpp>
 #include <boost/functional/hash.hpp>
 
@@ -159,6 +160,29 @@ inline Scalar Clip(Scalar &x, Scalar a,Scalar b){
   return x;
 }
 
+
+template<class Derived>
+Eigen::Matrix<typename Eigen::internal::traits<Derived>::Scalar, 3,3> 
+inline OrthogonalSystemZAligned(const Eigen::MatrixBase<Derived> &_Z)
+{
+  Eigen::Matrix<typename Eigen::internal::traits<Derived>::Scalar, 3 ,3> m;
+  auto Z = m.col(2);
+  auto X = m.col(0);
+  auto Y = m.col(1);
+  Z = _Z;
+  Z.normalize();
+  if(Z.x()*Z.x() + Z.y()*Z.y() > 1.0e-6) 
+  {
+    Y = Cross(Z, Double3(0.,0.,1.));
+    X = Cross(Y,Z);
+  } 
+  else 
+  {
+    Y = Float3(0,1,0);
+    X = Float3(1,0,0);
+  }
+  return m;
+}
 
 constexpr auto Epsilon = std::numeric_limits<double>::epsilon();
 constexpr auto Pi      = double(3.14159265358979323846264338327950288419716939937510);
