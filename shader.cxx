@@ -4,9 +4,15 @@
 #include "scene.hxx"
 
 
-DiffuseShader::DiffuseShader(const Spectral &_albedo)
-  : albedo(_albedo)
+DiffuseShader::DiffuseShader(const Spectral &_reflectance)
+  : kr_d(_reflectance)
 {
+  // Wtf? kr_d is the (constant) Lambertian BRDF. Energy conservation
+  // demands Int|_Omega kr_d cos(theta) dw <= 1. Working out the math
+  // I obtain kr_d <= 1/Pi. 
+  // But well, reflectance, also named Bihemispherical reflectance
+  // [TotalCompendium.pdf,pg.31] goes up to one. Therefore I divide by Pi. 
+  kr_d *= 1./Pi;
 }
 
 
@@ -15,15 +21,18 @@ Spectral DiffuseShader::EvaluateBRDF(const Double3 &incident_dir, const RaySurfa
   constexpr double hemisphere_surface_area = 2.*Pi;
   if (pdf)
     *pdf = 1./hemisphere_surface_area;
-  return albedo;
+  return kr_d;
 }
 
 
-BRDFSample DiffuseShader::SampleBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit) const
+BRDFSample DiffuseShader::SampleBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const
 {
-  BRDFSample s;
-  assert(false && "Implement transform to align hemisphere with hit normal!");
-  return s;
+  auto m = OrthogonalSystemZAligned(surface_hit.normal);
+  Double3 v = SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare());
+  v = m * v;
+  constexpr double hemisphere_surface_area = 2.*Pi;
+  double pdf = 1./hemisphere_surface_area;
+  return BRDFSample{v, kr_d, pdf};
 }
 
 

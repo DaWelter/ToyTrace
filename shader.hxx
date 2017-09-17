@@ -5,7 +5,7 @@
 #include"texture.hxx"
 
 
-
+class Sampler;
 class Ray;
 class Scene;
 class RaySurfaceIntersection;
@@ -23,17 +23,17 @@ class Shader
 {
 public:
   virtual ~Shader() {}
-  virtual BRDFSample SampleBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit) const = 0;
+  virtual BRDFSample SampleBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const = 0;
   virtual Spectral EvaluateBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, double *pdf) const = 0;
 };
 
 
 class DiffuseShader : public Shader
 {
-  Spectral albedo; // between zero and one.
+  Spectral kr_d; // between zero and 1/Pi.
 public:
-  DiffuseShader(const Spectral &albedo);
-  BRDFSample SampleBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit) const override;
+  DiffuseShader(const Spectral &reflectance);
+  BRDFSample SampleBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
   Spectral EvaluateBRDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
 };
 

@@ -103,7 +103,8 @@ struct PathNode
     VOLUME,
     NODE1,
     SURFACE,
-    NODE1_DIRECTIONAL
+    NODE1_DIRECTIONAL,
+    ESCAPED,
   };
   
   PathNodeType type;
@@ -133,7 +134,7 @@ struct PathNode
     assert(type==SURFACE); 
     return *reinterpret_cast<Surface*>(buffer); 
   }
-  Volume& volume() 
+  Volume& volume()
   { 
     assert(type==VOLUME); 
     return *reinterpret_cast<Volume*>(buffer); 
@@ -164,6 +165,7 @@ struct PathNode
     const RadianceOrImportance::Sample &sample);
   static PathNode MakeSurface(
         char index, const Double3& inbound_dir, const RaySurfaceIntersection& intersection);
+  static PathNode MakeEscaped(char index);
 };
 
 
@@ -253,8 +255,12 @@ PathNode::DirectionalSample PathNode::SampleDirection(Sampler &sampler) const
   }
   else if (node.type == SURFACE)
   {
-    auto sample = node.surface().intersection.shader().SampleBRDF(-node.surface().inbound_dir, node.surface().intersection);
-    return RadianceOrImportance::DirectionalSample{{node.surface().intersection.pos, sample.dir}, sample.pdf, sample.scatter_function};
+    auto sample = node.surface().intersection.shader().SampleBRDF(-node.surface().inbound_dir, node.surface().intersection, sampler);
+    double d_factor = Dot(node.surface().intersection.normal, sample.dir);
+    return RadianceOrImportance::DirectionalSample{
+      {node.surface().intersection.pos, sample.dir}, 
+      sample.pdf, 
+      d_factor * sample.scatter_function};
   }
   assert(false && "Not implemented");
 }
@@ -274,6 +280,13 @@ PathNode PathNode::MakeTypeOne(const RadianceOrImportance::EmitterSensor& emitte
   new (result.buffer) One{&emitter, sample.pos};
   return result;
 }
+
+
+PathNode PathNode::MakeEscaped(char index)
+{
+  return PathNode{ESCAPED, index};
+}
+
 
 
 
@@ -316,8 +329,10 @@ public:
 
   Spectral MakePrettyPixel()
   {
-    Spectral ret = BiDirectionPathTraceOfLength(2, 1);
+    Spectral ret{0.};
+    ret += BiDirectionPathTraceOfLength(2, 1);
     ret += BiDirectionPathTraceOfLength(3, 1);
+    ret += BiDirectionPathTraceOfLength(4, 1);
     return ret;
   }
   
@@ -333,11 +348,12 @@ public:
       return Spectral(0.);
     
     auto eye_node = TracePath(scene.GetCamera(), eye_path_length, history_from_eye);
-    if (eye_node.index <= 1) return Spectral{0};
+    if (eye_node.type == PathNode::ESCAPED) return Spectral{0};
     
     const Light* the_light; double pmf_of_light; 
     std::tie(the_light, pmf_of_light) = PickLightUniform();
     auto light_node = TracePath(*the_light, light_path_length, history_from_light);
+    if (light_node.type == PathNode::ESCAPED) return Spectral{0};
     
     Spectral measurement_contribution = 
       GeometryTermAndScattering(light_node, eye_node) *
@@ -352,17 +368,15 @@ public:
   
   PathNode TracePath(const RadianceOrImportance::EmitterSensor &emitter, int length, BdptHistory &history)
   {
-      bool keep_going = true;
       PathNode lastnode = InitNodeOne(
         emitter,
         history);
-      while(lastnode.index < length && keep_going)
+      while(lastnode.index < length && lastnode.type != PathNode::ESCAPED)
       {
-        keep_going = MakeNextNode(
+        MakeNextNode(
           lastnode,
           history);
       }
-      // Return value optimization with that wired union member???
       return lastnode;
   }
   
@@ -381,7 +395,7 @@ public:
   }
   
   
-  bool MakeNextNode(
+  void MakeNextNode(
     PathNode &node, // updated
     BdptHistory &history)
   {
@@ -398,9 +412,11 @@ public:
     {
       auto intersection = RaySurfaceIntersection{hit, segment};
       node = PathNode::MakeSurface(node.index+1, dir_sample.ray_out.dir, intersection);
-      return true;
     }
-    return false;
+    else
+    {
+      node = PathNode::MakeEscaped(node.index+1);
+    }
   }
 
 
