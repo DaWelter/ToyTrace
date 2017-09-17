@@ -13,6 +13,40 @@
 #include "renderingalgorithms.hxx"
 
 
+
+// Throw a one with probability p and zero with probability 1-p.
+// Let this be reflected by random variable X \in {0, 1}.
+// What is the expectation E[X] and std deviation sqrt(Var[X])?
+std::pair<double, double> MeanAndSigmaOfThrowingOneWithPandZeroOtherwise(double p)
+{
+  // Expected hit indication = 1 * P + 0 * (1-P) = P
+  // Variance of single throw = (1-P)^2 * P + (0-P)^2 * (1-P) = P - 2 PP + PPP + PP - PPP = P - PP
+  return std::make_pair(p, std::sqrt(p-p*p));
+}
+
+// For a sample average <X_i> = 1/N sum_i X_i, 
+// <X_i> is a random variable itself. It has some distribution
+// around the true expectation E[X]. The standard deviation 
+// of this distribution is:
+double SigmaOfAverage(int N, double sample_sigma)
+{
+  return sample_sigma/std::sqrt(N);
+}
+
+
+void CheckNumberOfSamplesInBin(const char *name, int Nbin, int N, double p_of_bin)
+{
+  double mean, sigma;
+  std::tie(mean, sigma) = MeanAndSigmaOfThrowingOneWithPandZeroOtherwise(p_of_bin);
+  mean *= N;
+  sigma = SigmaOfAverage(N, sigma * N);
+  
+  std::cout << "Expected in " << name << ": " << mean << "+/-" << sigma << " Actual: " << Nbin << " of " << N << std::endl;
+  EXPECT_NEAR(Nbin, mean, sigma*3);
+}
+
+
+
 TEST(TestRaySegment, ExprTemplates)
 {
   auto e = RaySegment{}.EndPoint();
@@ -114,21 +148,10 @@ TEST_F(RandomSamplingFixture, UniformIntDistribution)
     ASSERT_GE(k, 0);
     ++counts[k];
   }
-  // First expectance of depositing one number in a particular bin. 
-  // Random variable is 1 in one of N cases, and 0 in the others.
-  double avg = 1./N;
-  double var = (N-1)*avg*avg + (1.-avg)*(1.-avg);
-  // Standard deviation of the calculated average from the true expectation.
-  double sigma_of_avg = std::sqrt(var / M);
-  // Allow 5 sigma deviation.
-  std::cout << "avg=" << avg << " var=" << var << " sigma=" << sigma_of_avg << std::endl;
-  int count_min = (avg - 5 * sigma_of_avg) * M;
-  int count_max = (avg + 5 * sigma_of_avg) * M;
-  std::cout << " bounds=" << count_min << ", " << count_max << std::endl;
   for (int k = 0; k < N; ++k)
   {
-    ASSERT_GE(counts[k], count_min);
-    ASSERT_LE(counts[k], count_max);
+    std::stringstream ss; ss << "'uniform int bin " << k << "'";
+    CheckNumberOfSamplesInBin(ss.str().c_str(), counts[k], M, 1./N);
   }
 }
 
@@ -175,31 +198,19 @@ TEST_F(RandomSamplingFixture, CosHemisphereDistribution)
     if (angle<z_thresholds[1]) ++n_samples_z_test[1];
     if (angle<z_thresholds[0]) ++n_samples_z_test[0];
   }
-  // See UniformIntDistribution.
-  double avg = 1./4.;
-  double var = (4.-1.)*avg*avg + (1.-avg)*(1.-avg);
-  double sigma_quadrant = std::sqrt(var * N);
-  std::cout << "quadrant_expected: " << 0.25*N << "+/-" << sigma_quadrant << std::endl;
+  const char* bin_names[2][2] = {
+    { "00", "01" }, { "10", "11" }
+  };
   for (int qx = 0; qx <= 1; ++qx)
   for (int qy = 0; qy <= 1; ++qy)
   {
-    std::cout << "samples in " << qx << "," << qy << " = " << n_samples_per_quadrant[qx][qy] << std::endl;
-    EXPECT_NEAR(n_samples_per_quadrant[qx][qy], 0.25*N, sigma_quadrant*3);
+    CheckNumberOfSamplesInBin(bin_names[qx][qy], n_samples_per_quadrant[qx][qy], N, 0.25);
   }
   for (int z_bin = 0; z_bin < 3; ++z_bin)
   {
-    // The cummulative distribution, i.e. the probability of z to be smaller than the threshold.
-    double P = std::pow(std::sin(z_thresholds[z_bin]), 2.);
-    // Expected number throws into the lower bin is P * N
-    // Expected hit indication = 1 * P + 0 * (1-P) = P
-    // Variance of single throw = (1-P)^2 * P + (0-P)^2 * (1-P) = P - 2 PP + PPP + PP - PPP = P - PP
-    double Navg = P;
-    double Nvar = (P-P*P);
-    double Nsigma = std::sqrt(Nvar/N);
-    std::cout << "E[N(theta*2/Pi<" << (z_thresholds[z_bin]*2./Pi) << ")] = " << Navg << "+/-" << Nsigma << std::endl;
-    double actual = double(n_samples_z_test[z_bin])/N;
-    std::cout << "  actual N = " <<  actual << std::endl;
-    EXPECT_NEAR(actual, Navg, Nsigma*3);
+    std::stringstream ss; ss << "'Theta<" << (z_thresholds[z_bin]*180./Pi) <<"deg'";
+    double p = std::pow(std::sin(z_thresholds[z_bin]), 2.);
+    CheckNumberOfSamplesInBin(ss.str().c_str(), n_samples_z_test[z_bin], N, p);
   }
 }
 
