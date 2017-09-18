@@ -16,11 +16,17 @@ DiffuseShader::DiffuseShader(const Spectral &_reflectance)
 }
 
 
+inline double CosWeightedHemispherePdf(const RaySurfaceIntersection &surface_hit, const Double3& out_direction)
+{
+  double theta = Dot(surface_hit.normal, out_direction);
+  return theta/Pi;
+}
+
+
 Spectral DiffuseShader::EvaluateBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
 {
-  constexpr double hemisphere_surface_area = 2.*Pi;
   if (pdf)
-    *pdf = 1./hemisphere_surface_area;
+    *pdf = CosWeightedHemispherePdf(surface_hit, out_direction);
   return kr_d;
 }
 
@@ -28,10 +34,9 @@ Spectral DiffuseShader::EvaluateBRDF(const Double3 &incident_dir, const RaySurfa
 BRDFSample DiffuseShader::SampleBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const
 {
   auto m = OrthogonalSystemZAligned(surface_hit.normal);
-  Double3 v = SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare());
+  Double3 v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
   v = m * v;
-  constexpr double hemisphere_surface_area = 2.*Pi;
-  double pdf = 1./hemisphere_surface_area;
+  double pdf = CosWeightedHemispherePdf(surface_hit, v);
   return BRDFSample{v, kr_d, pdf};
 }
 
