@@ -29,14 +29,8 @@ public:
     // just to have a default shader, in case the file doesn't define one !
     currentShader = new DiffuseShader(Double3(0.8, 0.8, 0.8)); // EyeLightShader(Double3(1,1,1));
   }
-  
-  void Parse(char *_filename)
-  {
-    Parse(NULL, _filename);
-  }
-  
+  void Parse(char *fileName);
 private:
-  void Parse(FILE *fileToUse, char *fileName);
   
   void ParseMesh(char *filename);
   
@@ -63,29 +57,28 @@ private:
 
 
 
-void NFFParser::Parse(FILE *fileToUse, char *fileName)
+void NFFParser::Parse(char *fileName)
 {
   char line[LINESIZE+1];
   char token[LINESIZE+1];
   char *str;
   int i;
-  /* open file */
 
-  FILE *file = fileToUse;
+  FILE *file = fopen(fileName,"r");
   if (!file) 
   {
-    file = fopen(fileName,"r");
-    if (!file) 
-    {
-      std::cerr << "could not open input file " << fileName << std::endl;
-      exit(1);
-    }
+    std::cerr << "could not open input file " << fileName << std::endl;
+    exit(1);
   }
-  /* parse lines */
   
+  int line_no = 0;
   while (!feof(file)) 
   {
-    str = fgets(line,LINESIZE,file);
+    str = std::fgets(line,LINESIZE,file);
+    if (str == nullptr)
+      continue;
+    //std::cout << (++line_no) << ": " << str;
+    
     if (str[0] == '#') // '#' : comment
       continue;
     
@@ -97,14 +90,15 @@ void NFFParser::Parse(FILE *fileToUse, char *fileName)
     
     if (!strcmp(token,"begin_hierarchy")) {
       line[strlen(line)-1] = 0; // remove trailing eol indicator '\n'
-      Parse(file, fileName);
+      //Parse(file, fileName);
       continue;
     }
 
     /* end group */
 
     if (!strcmp(token,"end_hierarchy")) {
-      return;
+      //return;
+      continue;
     }
     
     /* camera */
@@ -245,7 +239,7 @@ void NFFParser::Parse(FILE *fileToUse, char *fileName)
       }
       line[strlen(line)-1] = 0; // remove trailing eol indicator '\n'
       std::cout << "including file " << line << std::endl;
-      Parse(NULL,line);
+      Parse(line);
       continue;
     }
     
@@ -282,14 +276,15 @@ void NFFParser::Parse(FILE *fileToUse, char *fileName)
     
     if (!strcmp(token,"l")) 
 	{
-		Double3 pos, col;
+		Double3 pos;
+    Spectral col;
 		int num = sscanf(line,"l %lg %lg %lg %lg %lg %lg",
 			   &pos[0],&pos[1],&pos[2],
 			   &col[0],&col[1],&col[2]);
     col *= 1.0/255.9999;
 		if (num == 3) {
 			// light source with position only
-			col = Double3(1,1,1);
+			col = Spectral(1,1,1);
 			scene->AddLight(std::make_unique<PointLight>(col,pos));	
 		} else if (num == 6) {
 			// light source with position and color
@@ -339,8 +334,7 @@ void NFFParser::Parse(FILE *fileToUse, char *fileName)
     exit(0);
   }
   
-  if (fileToUse)
-    fclose(file);
+  fclose(file);
 };
 
 
