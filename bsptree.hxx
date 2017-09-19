@@ -8,9 +8,6 @@
 #define MIN_PRIMITIVES 4
 
 
-static int nprim=0;
-
-
 class IntersectionChecker
 {
   double &ray_length;
@@ -71,15 +68,13 @@ public:
 		box1.min[splitaxis] = splitpos;//0.5*(nodebox.max[splitaxis]+nodebox.min[splitaxis]);
 	}
 
-	void Split(int level,std::vector<Primitive *> &list,const Box &nodebox)
+	void Split(int level, std::vector<Primitive *> list,const Box &nodebox)
 	{
 		if(level>=MAX_LEVEL || list.size()<=MIN_PRIMITIVES) {
 			int n = list.size();
 			//Assert(n<50);
 			//std::cout<<"-leaf: l:"<<level<<" s:"<<n<<"-";
 			std::cout<<".";
-			nprim += n;
-
 			primitive.swap(list);
 			return;
 		}
@@ -109,7 +104,10 @@ public:
 			if(list[i]->InBox(childbox[1])) { inlist=true; childlist[1].push_back(list[i]); }
 			assert(inlist);
 		}
-		list.clear();
+		{
+      decltype(list) begone{};
+      list.swap(begone);
+    }
 
 		if(childlist[0].size()>0) {
 			child[0] = new TreeNode();
@@ -185,13 +183,12 @@ class BSPTree
 public:
 	BSPTree() {}
 
-	void Build(std::vector<Primitive *> &list,const Box &box) {
-		std::cout << "building bsp tree: "<<list.size()<<" primitives"<<std::endl;
+	void Build(const std::vector<Primitive *> &list,const Box &box) 
+  {
+		std::cout << "building bsp tree ..."<<std::endl;
 		boundingBox=box;
 		root.Split(0,list,box);
 		std::cout << std::endl;
-
-		std::cout << "number of references: " << nprim << std::endl;
 		std::cout << "bsp tree finished" <<std::endl;
 	}
 

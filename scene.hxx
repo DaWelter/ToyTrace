@@ -98,6 +98,8 @@ public:
   
   void PrintInfo() const
   {
+    std::cout << "Number of primitives: " << primitives.size() << std::endl;
+    std::cout << "Number of lights: " << lights.size() << std::endl;
     std::cout << std::endl;
     std::cout << "bounding box min: "
               << boundingBox.min << std::endl;
