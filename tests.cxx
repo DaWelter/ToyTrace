@@ -11,6 +11,7 @@
 #include "sampler.hxx"
 #include "scene.hxx"
 #include "renderingalgorithms.hxx"
+#include "sphere.hxx"
 
 
 
@@ -85,6 +86,27 @@ TEST(TestMath, OrthogonalSystemZAligned)
     EXPECT_NEAR(dir_local[2], Length(dir), 1.e-6);
   }
 }
+
+
+
+TEST(TestMath, RaySphereIntersection)
+{
+  Sphere s{{0., 0., 2.}, 2., nullptr};
+  RaySegment rs{Ray{{0., 0., -1.},{0., 0., 1.}}, LargeNumber};
+  HitId hit;
+  double length = LargeNumber;
+  bool bhit = s.Intersect(rs.ray, rs.length, hit);
+  EXPECT_NEAR(rs.length, 1., 1.e-6);
+  ASSERT_TRUE(bhit);
+  RaySurfaceIntersection intersect{hit, rs};
+  EXPECT_NEAR(intersect.pos[0], 0., 1.e-6);
+  EXPECT_NEAR(intersect.pos[1], 0., 1.e-6);
+  EXPECT_NEAR(intersect.pos[2], 0., 1.e-6);
+  EXPECT_NEAR(intersect.normal[0], 0., 1.e-6);
+  EXPECT_NEAR(intersect.normal[1], 0., 1.e-6);
+  EXPECT_NEAR(intersect.normal[2], -1., 1.e-6);
+}
+
 
 
 TEST(Display, Open)

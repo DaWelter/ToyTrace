@@ -29,7 +29,7 @@ public:
 		else return false;
 		hit.primitive = this;
     ray_length = t;
-    hit.barry = p;
+    hit.barry = ray.org + t * ray.dir;
 		return true;
 	};
 
