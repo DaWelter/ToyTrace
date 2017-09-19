@@ -349,17 +349,21 @@ class SimpleRenderTests : public testing::Test
 {
 protected:
   Scene scene;
+  void SetCameraSimple(double z_distance, double fov, int xres, int yres)
+  {
+    scene.SetCamera<PerspectiveCamera>(
+      Double3{0., 0., z_distance},
+      Double3{0., 0., 1.},
+      Double3{0., 1., 0.},
+      fov,
+      xres, yres);
+  }
 };
 
 
 TEST_F(SimpleRenderTests, OnePixelBackground)
 {
-  scene.SetCamera<PerspectiveCamera>(
-    Double3{0., 0., 0.},
-    Double3{0., 0., 1.},
-    Double3{0., 1., 0.},
-    90.,
-    1, 1);
+  SetCameraSimple(0., 90., 1, 1);
   scene.bgColor = Double3{ 0.5, 0., 0. };
   scene.BuildAccelStructure();
   Raytracing rt(scene);
