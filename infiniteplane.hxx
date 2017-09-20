@@ -8,8 +8,8 @@ class InfinitePlane : public Primitive
   Double3 normal;
   Double3 origin;
 public:
-  InfinitePlane(Double3 origin, Double3 normal,Shader *shader)
-    : Primitive(shader),normal(normal),origin(origin)
+  InfinitePlane(Double3 origin, Double3 normal)
+    : Primitive(),normal(normal),origin(origin)
   { 
 	  Normalize(normal); 
   };

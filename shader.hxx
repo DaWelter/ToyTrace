@@ -7,6 +7,7 @@
 
 class Sampler;
 class Ray;
+class RaySegment;
 class Scene;
 class RaySurfaceIntersection;
 
@@ -35,6 +36,38 @@ public:
   DiffuseShader(const Spectral &reflectance);
   BRDFSample SampleBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
   Spectral EvaluateBRDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
+};
+
+
+class Medium
+{
+public:
+  struct InteractionSample
+  {
+    double t;
+    Spectral transmission;
+    Spectral sigma_a, sigma_s;
+    double pdf;
+  };
+  struct PhaseSample
+  {
+    Double3 dir;
+    Spectral phase_function;
+    double pdf;
+  };
+  
+  virtual ~Medium() {}
+  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler) const = 0;
+  virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler) const = 0;
+  virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const = 0;
+};
+
+
+class VacuumMedium : public Medium
+{
+  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler) const override;
+  virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler) const override;
+  virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const override;
 };
 
 

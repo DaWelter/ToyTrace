@@ -41,6 +41,36 @@ BRDFSample DiffuseShader::SampleBRDF(const Double3 &incident_dir, const RaySurfa
 }
 
 
+Spectral VacuumMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
+{
+  if (pdf)
+    *pdf = 1.;
+  return Spectral{0.}; // Because it is a delta function.
+}
+
+
+Medium::InteractionSample VacuumMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler) const
+{
+  return Medium::InteractionSample{
+      LargeNumber,
+      Spectral{1.},
+      Spectral{0.}, Spectral{0.},
+      1.
+    };
+}
+
+
+Medium::PhaseSample VacuumMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler) const
+{
+  return Medium::PhaseSample{
+    -incident_dir,
+    Spectral{1.},
+    1.
+  };
+}
+
+
+
 /*
 Double3 EyeLightShader::Shade(Ray &ray,Scene *scene) 
 {

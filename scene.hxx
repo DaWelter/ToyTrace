@@ -67,10 +67,13 @@ public:
     return *camera;
   }
   
-  void AddPrimitive(std::unique_ptr<Primitive> primitive)
+  template<class PrimitiveType, class... Args>
+  Primitive& AddPrimitive(Args&&... args)
   {
     // TODO: Manage memory ...
-    primitives.push_back(primitive.release());
+    auto* prim = new PrimitiveType(std::forward<Args>(args)...);
+    primitives.push_back(prim);
+    return *prim;
   }
 
   // parse an NFF file 'fileName', store all its primitives

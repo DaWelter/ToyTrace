@@ -7,8 +7,7 @@ class Triangle : public Primitive
 {
 	Double3 p[3];
 public:
-	Triangle(const Double3 &a,const Double3 &b,const Double3 &c,Shader *shader) 
-		:Primitive(shader) 
+	Triangle(const Double3 &a,const Double3 &b,const Double3 &c) 
 	{
 		p[0]=a; p[1]=b; p[2]=c;
 	}
@@ -63,8 +62,7 @@ class SmoothTriangle : public Primitive
 	Double3 p[3],n[3];
 public:
 	SmoothTriangle(const Double3 &a,const Double3 &b,const Double3 &c,
-				   const Double3 &na,const Double3 &nb,const Double3 &nc,Shader *shader)
-				   : Primitive(shader)
+				   const Double3 &na,const Double3 &nb,const Double3 &nc)
 	{
 		p[0]=a;  p[1]=b;  p[2]=c;
 		n[0]=na; n[1]=nb; n[2]=nc;
@@ -140,8 +138,8 @@ class TexturedSmoothTriangle : public SmoothTriangle
 public:
 	TexturedSmoothTriangle(	const Double3 &a,const Double3 &b,const Double3 &c,
 							const Double3 &na,const Double3 &nb,const Double3 &nc,
-							const Double3 &uva,const Double3 &uvb,const Double3 &uvc,Shader *shader)
-								: SmoothTriangle(a,b,c,na,nb,nc,shader)
+							const Double3 &uva,const Double3 &uvb,const Double3 &uvc)
+								: SmoothTriangle(a,b,c,na,nb,nc)
 	{ uv[0]=uva; uv[1]=uvb; uv[2]=uvc; }
 
 	virtual Double3 GetUV(const HitId &hit) const override

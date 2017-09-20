@@ -8,8 +8,8 @@ class Sphere : public Primitive
   Double3 center;
   double radius;
 public:
-	Sphere(Double3 _center,double _radius,Shader *_shader)
-	: center(_center),radius(_radius),Primitive(_shader)
+	Sphere(Double3 _center,double _radius)
+	: center(_center),radius(_radius),Primitive()
 	{};
 
 	bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const override

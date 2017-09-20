@@ -91,7 +91,7 @@ TEST(TestMath, OrthogonalSystemZAligned)
 
 TEST(TestMath, RaySphereIntersection)
 {
-  Sphere s{{0., 0., 2.}, 2., nullptr};
+  Sphere s{{0., 0., 2.}, 2.};
   RaySegment rs{Ray{{0., 0., -1.},{0., 0., 1.}}, LargeNumber};
   HitId hit;
   double length = LargeNumber;
@@ -308,7 +308,7 @@ class PerspectiveCameraTesting : public testing::Test
   std::unique_ptr<PerspectiveCamera> cam;
 public:
   PerspectiveCameraTesting() :
-    imageplane({0, 0, 1}, {0, 0, 1}, nullptr)
+    imageplane({0, 0, 1}, {0, 0, 1})
   {
   }
   

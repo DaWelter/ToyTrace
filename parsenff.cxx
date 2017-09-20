@@ -15,46 +15,72 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 
-
-class NFFParser
+template<class Thing>
+class CurrentThing
 {
-  Shader *currentShader;
-  Scene* scene;
-  std::unordered_map<std::string, Shader*> shaders;
-  friend class AssimpReader;
+  Thing* currentThing;
+  std::unordered_map<std::string, Thing*> things;
+  std::string name;
 public:
-  NFFParser(Scene* _scene) :
-    scene(_scene)
+  CurrentThing(const std::string &_name, const std::string &_defaultName, Thing* _defaultThing) :
+    name(_name), currentThing(_defaultThing)
   {
-    // just to have a default shader, in case the file doesn't define one !
-    currentShader = new DiffuseShader(Double3(0.8, 0.8, 0.8)); // EyeLightShader(Double3(1,1,1));
+    things[_defaultName] = currentThing;
   }
-  void Parse(char *fileName);
-private:
   
-  void ParseMesh(char *filename);
-  
-  void SetCurrentShader(const std::string &name)
+  void activate(const std::string &name)
   {
-    auto shader_iter = shaders.find(name);
-    if (shader_iter != shaders.end())
+    auto it = things.find(name);
+    if (it != things.end())
     {
-      currentShader = shader_iter->second;
+      currentThing = it->second;
     }
     else
     {
-      std::printf("Error: Material %s not defined. Define it in the NFF file prior to referencing it.\n", name.c_str());
+      std::printf("Error: %s %s not defined. Define it in the NFF file prior to referencing it.\n", this->name.c_str(), name.c_str());
       exit(0);
     }
   }
   
-  void SetCurrentShader(const char* name, Shader* shader)
+  void set_and_activate(const char* name, Thing* thing)
   {
-    currentShader = shader;
-    shaders[name] = shader;
+    currentThing = thing;
+    things[name] = thing;
+  }
+  
+  Thing* operator()() const
+  {
+    return currentThing;
   }
 };
 
+
+class NFFParser
+{
+  Scene* scene;
+  CurrentThing<Shader> shaders;
+  CurrentThing<Medium> mediums;
+  friend class AssimpReader;
+public:
+  NFFParser(Scene* _scene) :
+    scene(_scene),
+    shaders("Shader", "default", new DiffuseShader(Double3(0.8, 0.8, 0.8))),
+    mediums("Medium", "default", new VacuumMedium())
+  {
+  }
+  void Parse(char *fileName);
+private:
+  void AssignCurrentMaterialParams(Primitive &primitive);
+  void ParseMesh(char *filename);
+};
+
+
+
+void NFFParser::AssignCurrentMaterialParams(Primitive& primitive)
+{
+  primitive.shader = shaders();
+  primitive.medium = mediums();
+}
 
 
 void NFFParser::Parse(char *fileName)
@@ -86,16 +112,13 @@ void NFFParser::Parse(char *fileName)
     if (numtokens <= 0) // empty line, except for whitespaces
       continue; 
     
-    /* start new group */
-    
     if (!strcmp(token,"begin_hierarchy")) {
       line[strlen(line)-1] = 0; // remove trailing eol indicator '\n'
       //Parse(file, fileName);
       continue;
     }
 
-    /* end group */
-
+    
     if (!strcmp(token,"end_hierarchy")) {
       //return;
       continue;
@@ -132,7 +155,8 @@ void NFFParser::Parse(char *fileName)
       Double3 pos;
       double rad;
       sscanf(str,"s %lg %lg %lg %lg",&pos[0],&pos[1],&pos[2],&rad);
-      scene->AddPrimitive(std::make_unique<Sphere>(pos,rad,currentShader));
+      AssignCurrentMaterialParams(
+        scene->AddPrimitive<Sphere>(pos,rad));
       continue;
     }
 
@@ -149,17 +173,17 @@ void NFFParser::Parse(char *fileName)
 			&vertex[i][0],&vertex[i][1],&vertex[i][2],
 			&normal[i][0],&normal[i][1],&normal[i][2]);
       }
-      assert(currentShader != NULL);
-      for (i=2;i<vertices;i++) {
-		scene->AddPrimitive
-			(std::make_unique<SmoothTriangle>(
-				vertex[0],
-				vertex[i-1],
-				vertex[i],
-				normal[i-1],
-				normal[i],
-				normal[0],
-				currentShader));
+
+      for (i=2;i<vertices;i++) 
+      {
+        AssignCurrentMaterialParams(
+          scene->AddPrimitive<SmoothTriangle>(
+          vertex[0],
+          vertex[i-1],
+          vertex[i],
+          normal[i-1],
+          normal[i],
+          normal[0]));
       }
       delete[] vertex;
       delete[] normal;
@@ -181,34 +205,26 @@ void NFFParser::Parse(char *fileName)
 			&normal[i][0],&normal[i][1],&normal[i][2],
 			&uv[i][0],&uv[i][1],&uv[i][2]);
 		}
-		assert(currentShader != NULL);
+
 		for (i=2;i<vertices;i++) {
-		scene->AddPrimitive(
-			std::make_unique<TexturedSmoothTriangle>(
-				vertex[0],
-				vertex[i-1],
-				vertex[i],
-				normal[i-1],
-				normal[i],
-				normal[0],
-				uv[i-1],
-				uv[i],
-				uv[0],
-				currentShader));
+      AssignCurrentMaterialParams(
+        scene->AddPrimitive<TexturedSmoothTriangle>(
+            vertex[0],
+            vertex[i-1],
+            vertex[i],
+            normal[i-1],
+            normal[i],
+            normal[0],
+            uv[i-1],
+            uv[i],
+            uv[0]));
 		}
 		delete[] vertex;
 		delete[] normal;
 		continue;
     }
 
-    /* background color */
-
-    if (!strcmp(token,"b")) {
-      sscanf(line,"b %lg %lg %lg",&scene->bgColor[0],&scene->bgColor[1],&scene->bgColor[2]);
-      scene->bgColor /= 255;
-      continue;
-    }
-    
+   
     /* polygon */
 
     if (!strcmp(token,"p")) {
@@ -218,13 +234,13 @@ void NFFParser::Parse(char *fileName)
 		for (i=0;i<vertices;i++) {
 			fscanf(file,"%lg %lg %lg\n",&vertex[i][0],&vertex[i][1],&vertex[i][2]);
 		}
-		assert(currentShader != NULL);
+
 		for (i=2;i<vertices;i++) {
-			scene->AddPrimitive
-				(std::make_unique<Triangle>(vertex[0],
+			AssignCurrentMaterialParams(
+        scene->AddPrimitive<Triangle>(
+          vertex[0],
 					vertex[i-1],
-					vertex[i],
-					currentShader));
+					vertex[i]));
 			}
 		delete[] vertex;
 		continue;
@@ -255,20 +271,19 @@ void NFFParser::Parse(char *fileName)
       if(num==9) 
       {
         //currentShader = new PhongShader(color,color,Double3(1.),0.1,kd,ks,shine,ks);
-        SetCurrentShader(name, 
+        shaders.set_and_activate(name, 
                          new DiffuseShader(color)
                         );
       } 
       else if(num==10) 
       {
-        SetCurrentShader(name, 
+        shaders.set_and_activate(name, 
                          new DiffuseShader(color)
                         );
       }
       else {
         std::cout << "error in " << fileName << " : " << line << std::endl;
       }
-      this->shaders[name] = currentShader;
       continue;
     }
     
@@ -327,6 +342,13 @@ void NFFParser::Parse(char *fileName)
     continue;
   }
   
+    /* background color */
+
+    if (!strcmp(token,"b")) {
+      sscanf(line,"b %lg %lg %lg",&scene->bgColor[0],&scene->bgColor[1],&scene->bgColor[2]);
+      scene->bgColor /= 255;
+      continue;
+    }
   
   /* unknown command */
     
@@ -399,11 +421,11 @@ private:
       {
         auto vertex1 = aiVector3_to_myvector(mesh->mVertices[face->mIndices[i-1]]);
         auto vertex2 = aiVector3_to_myvector(mesh->mVertices[face->mIndices[i  ]]);
-        scene->AddPrimitive(std::make_unique<Triangle>(
-            vertex0,
-            vertex1,
-            vertex2,
-            parser->currentShader));
+        parser->AssignCurrentMaterialParams(
+          scene->AddPrimitive<Triangle>(
+              vertex0,
+              vertex1,
+              vertex2));
       }
     }
   }
@@ -421,7 +443,7 @@ private:
     mat->Get(AI_MATKEY_NAME,ainame);
     auto name = std::string(ainame.C_Str());
     
-    parser->SetCurrentShader(name);
+    parser->shaders.activate(name);
   }
 
 private:

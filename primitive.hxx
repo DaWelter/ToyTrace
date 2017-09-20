@@ -3,6 +3,7 @@
 
 
 class Shader;
+class Medium;
 
 #include<vector>
 #include"ray.hxx"
@@ -11,15 +12,13 @@ class Shader;
 class Primitive
 {
 public:
-  Primitive(Shader *shader) 
-	  : shader(shader)
-  { }
   Primitive() 
-	  : shader(0) 
+	  : shader(nullptr), medium(nullptr)
   {}
   virtual ~Primitive() {}
   
   Shader *shader;
+  Medium *medium;
   
   virtual bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const = 0;
   
