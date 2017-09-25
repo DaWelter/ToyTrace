@@ -14,6 +14,7 @@ RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySeg
   Double3 n = hitid.primitive ? hitid.primitive->GetNormal(hitid) : Double3();
   double sign = Dot(-_inbound.ray.dir, n);
   this->normal = sign > 0 ? n : (-n).eval();
+  this->volume_normal = n;
 }
 
 

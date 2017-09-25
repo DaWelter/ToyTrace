@@ -61,6 +61,7 @@ struct RaySurfaceIntersection
 {
   HitId hitid;
   Double3 normal;
+  Double3 volume_normal;
   //Double3 barry;
   Double3 pos;
   //const Shader* shader = { nullptr };

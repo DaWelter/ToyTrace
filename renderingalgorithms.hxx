@@ -1,15 +1,111 @@
 #include "scene.hxx"
 
 
+/* This thing tracks overlapping media volumes. Since it is a bit complicated
+ * to physically correctly handle mixtures of media that would occur
+ * in overlapping volumes, I take a simpler approach. This hands over the
+ * medium with the highest associated priority. In case multiple volumes with the
+ * same medium material overlap it will be as if there was the union of all of
+ * those volumes.
+ */
+class MediumTracker
+{
+  static constexpr int MAX_INTERSECTING_MEDIA = 4;
+  const Medium* current;
+  std::array<const Medium*, MAX_INTERSECTING_MEDIA> media;
+  const Scene &scene;
+  void enterVolume(const Medium *medium);
+  void leaveVolume(const Medium *medium);
+public:
+  explicit MediumTracker(const Scene &_scene);
+  MediumTracker(const MediumTracker &_other) = default;
+  void initializePosition(const Double3 &pos);
+  void goingThroughSurface(const Double3 &dir_of_travel, const RaySurfaceIntersection &intersection);
+  const Medium& getCurrentMedium() const;
+};
+
+
+MediumTracker::MediumTracker(const Scene& _scene)
+  : scene{_scene}, current{nullptr}, media{}
+  // Note: Zero-initializes media array.
+{
+  
+}
+
+
+const Medium& MediumTracker::getCurrentMedium() const
+{
+  assert(current);
+  return *current;
+}
+
+
+void MediumTracker::initializePosition(const Double3& pos)
+{
+  // TODO: Find the actual stack of media the position is contained within.
+  current = &scene.GetEmptySpaceMedium();
+  std::fill(media.begin(), media.end(), nullptr);
+}
+
+
+void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const RaySurfaceIntersection& intersection)
+{
+  if (Dot(dir_of_travel, intersection.volume_normal) < 0)
+    enterVolume(intersection.primitive().medium);
+  else
+    leaveVolume(intersection.primitive().medium);
+}
+
+
+void MediumTracker::enterVolume(const Medium* medium)
+{
+  // Set one of the array entries that is currently nullptr to the new medium pointer.
+  // But only if there is room left. Otherwise the new medium is ignored.
+  bool is_null = false;
+  for (int i = 0; i < media.size() && !is_null; ++i)
+  {
+    bool is_null = media[i]==nullptr;
+    media[i] = is_null ? medium : media[i];
+  }
+  current = (is_null && medium->priority > current->priority) ? medium : current;
+}
+
+
+void MediumTracker::leaveVolume(const Medium* medium)
+{
+  // If the medium is in the media stack, remove it.
+  // And also make the medium of highest prio the current one.
+  bool is_eq = false;
+  for (int i = 0; i < media.size() && !is_eq; ++i)
+  {
+    bool is_eq = media[i] == medium;
+    media[i] = is_eq ? nullptr : media[i];
+  }
+  if (medium == current)
+  {
+    const Medium* medium_max_prio = &scene.GetEmptySpaceMedium();
+    for (int i = 0; i < media.size(); ++i)
+    {
+      medium_max_prio = (media[i] &&  medium_max_prio->priority < media[i]->priority) ?
+                          media[i] : medium_max_prio;
+    }
+    current = medium_max_prio;
+  }
+}
+
+
+
 class BaseAlgo
 {
 protected:
   const Scene &scene;
   Sampler sampler;
+  MediumTracker medium_tracker_root;
 
 public:
   BaseAlgo(const Scene &_scene)
-    : scene(_scene)
+    : scene{_scene},
+      medium_tracker_root{_scene}
     {}
     
   std::tuple<const Light*, double> PickLightUniform()
@@ -18,12 +114,15 @@ public:
     double pmf_of_light = 1./scene.GetNumLights();
     return std::make_tuple(&light, pmf_of_light);
   }
+  
+  virtual Spectral MakePrettyPixel() = 0;
 };
 
 
 
 class Raytracing : public BaseAlgo
 {
+  int max_level = 5;
 public:
   Raytracing(const Scene &_scene) : BaseAlgo(_scene) {}
   
@@ -38,53 +137,180 @@ public:
   }
   
   
-  Spectral LightingMeasurementOverPdf(const Double3 &incident_dir, const RaySurfaceIntersection &intersection)
+  Spectral TransmittanceEstimate(RaySegment seg, HitId last_hit, MediumTracker medium_tracker)
   {
-    Spectral ret{0., 0., 0.};
-    if (scene.GetNumLights() > 0)
+    // TODO: Russian roulette.
+    Spectral result{1.};
+    double length_to_go = seg.length;
+    while (length_to_go > Epsilon && result.abs().sum()>1.e-6)
     {
-      const Light* light; double pmf_of_light; std::tie(light, pmf_of_light) = PickLightUniform();
-
-      RadianceOrImportance::Sample light_sample = light->TakePositionSample(sampler);
       
-      RaySegment segment_to_light = MakeSegmentToLight(intersection.pos, light_sample);
-      // TODO: Hand over reference to last hit.
-      if (!scene.Occluded(segment_to_light.ray, segment_to_light.length, intersection.hitid))
+      // The last_hit given by the argument is ignored.
+      last_hit = scene.Intersect(seg.ray, seg.length, last_hit);
+      if (last_hit)
       {
-        const auto &shader = intersection.shader();
-        Spectral brdf_value = shader.EvaluateBRDF(-incident_dir, intersection, segment_to_light.ray.dir, nullptr);
-        double d_factor = std::max(0., Dot(intersection.normal, segment_to_light.ray.dir));
-        
-        ret = d_factor/light_sample.pdf_of_pos/Sqr(segment_to_light.length) * 
-          brdf_value * light_sample.measurement_contribution;
+        RaySurfaceIntersection intersection{last_hit, seg};
+        Spectral bsdf = intersection.shader().EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, nullptr);
+        result *= bsdf * medium_tracker.getCurrentMedium().EvaluateTransmission(seg);
+        medium_tracker.goingThroughSurface(seg.ray.dir, intersection);
+        length_to_go -= seg.length;
+        seg.ray.org += seg.length * seg.ray.dir;
+        seg.length = length_to_go;
+      }
+      else
+      {
+        length_to_go = 0.;
+        result *= medium_tracker.getCurrentMedium().EvaluateTransmission(seg);
       }
     }
+    return result;
+  }
+  
+  
+  std::pair<Spectral, Double3> LightEmissionWithTransmittanceTo(const Double3 &pos, const HitId &last_hit, const MediumTracker &medium_tracker_parent)
+  {
+    if (scene.GetNumLights() <= 0)
+      return std::make_pair(Spectral{0.}, Double3{0.});
+
+    const Light* light; double pmf_of_light; std::tie(light, pmf_of_light) = PickLightUniform();
+
+    RadianceOrImportance::Sample light_sample = light->TakePositionSample(sampler);
+    RaySegment segment_to_light = MakeSegmentToLight(pos, light_sample);
+    
+    // TODO: consider case of infinitely far away light!!
+    auto transmittance = TransmittanceEstimate(segment_to_light, last_hit, medium_tracker_parent);
+    auto sample_value = (transmittance * light_sample.measurement_contribution)
+                         / (light_sample.pdf_of_pos * Sqr(segment_to_light.length));
+    
+    return std::make_pair(sample_value, segment_to_light.ray.dir);
+  }
+  
+  
+  Spectral LightConnection(const Double3 &incident_dir, const RaySurfaceIntersection &intersection, const MediumTracker &medium_tracker_parent)
+  {
+    Spectral light_value;
+    Double3 dir_to_light;
+    std::tie(light_value, dir_to_light) = LightEmissionWithTransmittanceTo(intersection.pos, intersection.hitid, medium_tracker_parent);
+    
+    if (light_value.abs().sum() <= 1.e-6)
+      return Spectral{0.};
+    
+
+    const auto &shader = intersection.shader();
+    Spectral bsdf_value = shader.EvaluateBSDF(-incident_dir, intersection, dir_to_light, nullptr);
+    double d_factor = std::max(0., Dot(intersection.normal, dir_to_light));
+    
+    auto ret = d_factor * bsdf_value * light_value;
     return ret;
   }
   
   
-  // trace the given ray and shade it and
-  // return the color of the shaded ray
-  Spectral MakePrettyPixel()
+  Spectral LightConnection(const Double3 &pos, const Double3 &incident_dir, const MediumTracker &medium_tracker_parent)
+  {
+    Spectral light_value;
+    Double3 dir_to_light;
+    std::tie(light_value, dir_to_light) = LightEmissionWithTransmittanceTo(pos, HitId(), medium_tracker_parent);
+    
+    if (light_value.abs().sum() <= 1.e-6)
+      return Spectral{0.};
+    
+    
+    const auto &medium = medium_tracker_parent.getCurrentMedium();
+    auto phase_func = medium.EvaluatePhaseFunction(-incident_dir, pos, dir_to_light, nullptr);
+    auto ret = phase_func * light_value;
+  }
+  
+  
+  Spectral PropagationAtIntersection(const Double3 &incident_dir, const RaySurfaceIntersection &intersection, int level, const MediumTracker &medium_tracker_parent)
+  {
+    if (level > max_level)
+      return Spectral{0.};
+    
+    auto surface_sample  = intersection.shader().SampleBSDF(-incident_dir, intersection, sampler);
+    // Preserve the information about current media. However, as we propagate the path further,
+    // the current medium can change. Therefore we need to clone the medium tracker.
+    MediumTracker medium_tracker(medium_tracker_parent);
+    // By definition, intersection.normal points to where the intersection ray is comming from.
+    // Thus we can determine if the sampled direction goes through the surface by looking
+    // if the direction goes in the opposite direction of the normal.
+    if (Dot(surface_sample.dir, intersection.normal) < 0.)
+    {
+      medium_tracker.goingThroughSurface(surface_sample.dir, intersection);
+    }
+    auto ret = Trace({intersection.pos, surface_sample.dir}, level+1,  medium_tracker);
+    
+    double d_factor = std::abs(Dot(intersection.normal, surface_sample.dir));
+    ret *= d_factor / surface_sample.pdf * surface_sample.scatter_function;
+    return ret;
+  }
+  
+  
+  Spectral PropagationAtVolumeInteraction(const Double3 &pos, const Double3 &incident_dir, int level, const MediumTracker &medium_tracker_parent)
+  {
+    if (level > max_level)
+      return Spectral{0.};
+    const Medium& medium = medium_tracker_parent.getCurrentMedium();
+    
+    auto scatter_smpl = medium.SamplePhaseFunction(-incident_dir, pos, sampler);
+    auto result = Trace({pos, scatter_smpl.dir}, level+1, medium_tracker_parent);
+    
+    result *= scatter_smpl.phase_function / scatter_smpl.pdf;
+    return result;
+  }
+  
+  
+  Spectral Trace(const Ray &ray, int level, const MediumTracker &medium_tracker_parent)
+  {
+    const Medium& medium = medium_tracker_parent.getCurrentMedium();
+    auto segment = RaySegment{ray, LargeNumber};
+
+    HitId hit = scene.Intersect(segment.ray, segment.length);  
+    auto medium_smpl = medium.SampleInteractionPoint(segment, sampler);
+    
+    if (medium_smpl.t < segment.length)
+    {
+      auto pos = ray.org + medium_smpl.t * ray.dir;
+      auto result = PropagationAtVolumeInteraction(
+        pos,
+        ray.dir,
+        level,
+        medium_tracker_parent
+      );
+      
+      result += LightConnection(pos, ray.dir, medium_tracker_parent);
+      result *= medium_smpl.sigma_s / medium_smpl.pdf;
+      return result;
+    }
+    else
+    {
+      if (hit)
+      {
+        RaySurfaceIntersection intersection{hit, segment};
+        // Compute specular and translucency path components.
+        auto result = PropagationAtIntersection(ray.dir, intersection, level, medium_tracker_parent);
+        // Direct lighting.
+        result += LightConnection(ray.dir, intersection, medium_tracker_parent);
+      }
+      else
+      {
+        return scene.bgColor;
+      }
+    }
+  }
+  
+  
+  Spectral MakePrettyPixel() override
   {
     RadianceOrImportance::Sample start_pos_sample = scene.GetCamera().TakePositionSample(sampler);
     RadianceOrImportance::DirectionalSample start = scene.GetCamera().TakeDirectionSampleFrom(start_pos_sample.pos, sampler);
     
-    Spectral result = (start_pos_sample.measurement_contribution *
-                      start.measurement_contribution) / start_pos_sample.pdf_of_pos /  start.pdf;
+    Spectral camera_factor = 
+      (start_pos_sample.measurement_contribution*start.measurement_contribution) 
+      / start_pos_sample.pdf_of_pos /  start.pdf;
     
-    auto segment = RaySegment{start.ray_out, LargeNumber};
-    HitId hit = scene.Intersect(segment.ray, segment.length);
-    // TODO: give Intesect optionally a reference to the starting location as in 
-    // the primitive that was hit and from which the ray now starts.
-    if (hit)
-    {
-      RaySurfaceIntersection intersection{hit, segment};
-      Spectral lights_factor = LightingMeasurementOverPdf(segment.ray.dir, intersection);
-      return result * lights_factor;
-    }
-    else
-      return scene.bgColor; // ray missed geometric primitives
+    Spectral eye_tree_factor = Trace(start.ray_out, 1, this->medium_tracker_root);
+
+    return camera_factor * eye_tree_factor;
   };
 };
 
@@ -240,7 +466,7 @@ Spectral PathNode::EvaluateDirection(const Double3& outbound_dir) const
   }
   else if (node.type == SURFACE)
   {
-    return node.surface().intersection.shader().EvaluateBRDF(-node.surface().inbound_dir, node.surface().intersection, outbound_dir, nullptr);
+    return node.surface().intersection.shader().EvaluateBSDF(-node.surface().inbound_dir, node.surface().intersection, outbound_dir, nullptr);
   }
   assert(false && "Not implemented");
 }
@@ -255,7 +481,7 @@ PathNode::DirectionalSample PathNode::SampleDirection(Sampler &sampler) const
   }
   else if (node.type == SURFACE)
   {
-    auto sample = node.surface().intersection.shader().SampleBRDF(-node.surface().inbound_dir, node.surface().intersection, sampler);
+    auto sample = node.surface().intersection.shader().SampleBSDF(-node.surface().inbound_dir, node.surface().intersection, sampler);
     double d_factor = Dot(node.surface().intersection.normal, sample.dir);
     return RadianceOrImportance::DirectionalSample{
       {node.surface().intersection.pos, sample.dir}, 
@@ -327,12 +553,14 @@ public:
   }
   
 
-  Spectral MakePrettyPixel()
+  Spectral MakePrettyPixel() override
   {
     Spectral ret{0.};
     ret += BiDirectionPathTraceOfLength(2, 1);
+    ret += BiDirectionPathTraceOfLength(2, 2);
+    ret += BiDirectionPathTraceOfLength(2, 3);
     ret += BiDirectionPathTraceOfLength(3, 1);
-    ret += BiDirectionPathTraceOfLength(4, 1);
+    //ret += BiDirectionPathTraceOfLength(4, 1);
     return ret;
   }
   

@@ -23,7 +23,7 @@ inline double CosWeightedHemispherePdf(const RaySurfaceIntersection &surface_hit
 }
 
 
-Spectral DiffuseShader::EvaluateBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
+Spectral DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
 {
   if (pdf)
     *pdf = CosWeightedHemispherePdf(surface_hit, out_direction);
@@ -31,14 +31,17 @@ Spectral DiffuseShader::EvaluateBRDF(const Double3 &incident_dir, const RaySurfa
 }
 
 
-BRDFSample DiffuseShader::SampleBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const
+BSDFSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const
 {
   auto m = OrthogonalSystemZAligned(surface_hit.normal);
   Double3 v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
   v = m * v;
   double pdf = CosWeightedHemispherePdf(surface_hit, v);
-  return BRDFSample{v, kr_d, pdf};
+  return BSDFSample{v, kr_d, pdf};
 }
+
+
+
 
 
 Spectral VacuumMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
@@ -69,6 +72,61 @@ Medium::PhaseSample VacuumMedium::SamplePhaseFunction(const Double3& incident_di
   };
 }
 
+
+Spectral VacuumMedium::EvaluateTransmission(const RaySegment& segment) const
+{
+  return Spectral{1.};
+}
+
+
+
+
+IsotropicHomogeneousMedium::IsotropicHomogeneousMedium(const Spectral& _sigma_s, const Spectral& _sigma_a, int priority)
+  : Medium(priority), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{_sigma_s + _sigma_a}
+{
+}
+
+
+Spectral IsotropicHomogeneousMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
+{
+  if (pdf)
+    *pdf = 1./UnitSphereSurfaceArea;
+  return Spectral{1./UnitSphereSurfaceArea};
+}
+
+
+Medium::PhaseSample IsotropicHomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler) const
+{
+  return Medium::PhaseSample{
+    SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare()),
+    Spectral{1./UnitSphereSurfaceArea},
+    1./UnitSphereSurfaceArea
+  };
+}
+
+
+Medium::InteractionSample IsotropicHomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler) const
+{
+  Medium::InteractionSample smpl;
+  smpl.sigma_a = sigma_a;
+  smpl.sigma_s = sigma_s;
+  // TODO: Tower sampling based on sigma_ext
+  int component = sampler.UniformInt(0, 2);
+  smpl.t = - std::log(1-sampler.Uniform01()) / sigma_ext[component];
+  smpl.t = smpl.t > LargeNumber ? LargeNumber : smpl.t;
+  Spectral weights{1./static_size<Spectral>()};
+  smpl.pdf = (weights * sigma_ext * (-sigma_ext * smpl.t).exp()).sum();
+  smpl.transmission = (smpl.t >= segment.length) ? 
+                      Spectral{0.} :
+                      (-sigma_ext * smpl.t).exp();
+  return smpl;
+}
+
+
+Spectral IsotropicHomogeneousMedium::EvaluateTransmission(const RaySegment& segment) const
+{
+  return (-sigma_ext * segment.length).exp();
+}
 
 
 /*

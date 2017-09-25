@@ -62,6 +62,18 @@ typedef Vec<long, 2> Long3;
 
 typedef Eigen::Array<double, 3, 1> Spectral;
 
+template<class T>
+constexpr int static_size()
+{
+  return 0;
+}
+
+template<>
+constexpr int static_size<Spectral>()
+{
+  return Spectral::RowsAtCompileTime;
+}
+
 
 namespace std
 {
@@ -189,6 +201,8 @@ constexpr auto Pi      = double(3.1415926535897932384626433832795028841971693993
 constexpr auto Infinity= std::numeric_limits<double>::infinity();
 constexpr auto LargeNumber = std::numeric_limits<double>::max()/16;
 constexpr auto NaN = std::numeric_limits<double>::quiet_NaN();
+constexpr auto UnitSphereSurfaceArea = 4.*Pi;
+constexpr auto UnitHalfSphereSurfaceArea = 2.*Pi;
 
 #if 0 // if using c++11
 namespace std {

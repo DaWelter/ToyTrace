@@ -14,6 +14,16 @@
 #include "sphere.hxx"
 
 
+TEST(BasicAssumptions, EigenTypes)
+{
+  // Spectral is currently an Eigen::Array type. It is still a row vector/array.
+  EXPECT_EQ(Spectral::ColsAtCompileTime, 1);
+  EXPECT_EQ(Spectral::RowsAtCompileTime, 3);
+  // Vectors in eigen are Eigen::Matrix row vectors.
+  EXPECT_EQ(Double3::ColsAtCompileTime, 1);
+  EXPECT_EQ(Double3::RowsAtCompileTime, 3);
+};
+
 
 // Throw a one with probability p and zero with probability 1-p.
 // Let this be reflected by random variable X \in {0, 1}.
@@ -234,6 +244,45 @@ TEST_F(RandomSamplingFixture, CosHemisphereDistribution)
     double p = std::pow(std::sin(z_thresholds[z_bin]), 2.);
     CheckNumberOfSamplesInBin(ss.str().c_str(), n_samples_z_test[z_bin], N, p);
   }
+}
+
+
+TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
+{
+  ImageDisplay display;
+  Image img{500, 10};
+  img.SetColor(64, 64, 64);
+  Spectral length_scales{1., 5., 10.};
+  double cutoff_length = 5.; // Integrate transmission T(x) up to this x.
+  double img_dx = img.width() / cutoff_length / 2.;
+  img.DrawRect(0, 0, img_dx * cutoff_length, img.height());
+  Spectral sigma_s{0.}, sigma_a{1./length_scales};
+  IsotropicHomogeneousMedium medium{sigma_s, sigma_a, 0};
+  int N = 1000;
+  Spectral integral{0.};
+  for (int i=0; i<N; ++i)
+  {
+    Medium::InteractionSample s = medium.SampleInteractionPoint(RaySegment{{{0.,0.,0.}, {0., 0., 1.,}}, cutoff_length}, sampler);
+    EXPECT_TRUE(s.t < cutoff_length || (s.transmission.abs().sum() < 1.e-6));
+    for (int k=0; k<static_size<Spectral>(); ++k)
+    {
+      EXPECT_NEAR(s.sigma_a[k], sigma_a[k], 1.e-6);
+      EXPECT_NEAR(s.sigma_s[k], sigma_s[k], 1.e-6);
+    }
+    if (s.transmission.abs().sum() < 1.e-6)
+      img.SetColor(255, 0, 0);
+    else
+      img.SetColor(255 * s.transmission[0], 255 * s.transmission[1], 255 * s.transmission[2]);
+    int imgx = std::min<int>(img.width()-1, s.t * img_dx);
+    img.DrawLine(imgx, 0, imgx, img.height()-1);
+    integral += s.transmission / s.pdf;
+  }
+  integral *= 1./N;
+  Spectral exact_solution = length_scales * (1. - (-(sigma_a+sigma_s)*cutoff_length).exp());
+  for (int k=0; k<static_size<Spectral>(); ++k)
+    EXPECT_NEAR(integral[k], exact_solution[k], 0.1 * integral[k]);
+  display.show(img);
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
 }
 
 

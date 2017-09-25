@@ -21,7 +21,8 @@ class Scene
   std::vector<Primitive*> primitives;
   std::vector<Light *> lights;
   std::unique_ptr<Camera> camera;
-
+  std::unique_ptr<Medium> empty_space_medium;
+  
   Box boundingBox;
   
 public:
@@ -29,8 +30,8 @@ public:
 
   Scene()
     : bgColor{0,0,0},
-      camera(new PerspectiveCamera(Double3(0,0,0),Double3(0,0,-1),
-      Double3(0,1,0),60,640,480))
+      camera(new PerspectiveCamera(Double3(0,0,0),Double3(0,0,-1), Double3(0,1,0),60,640,480)),
+      empty_space_medium{new VacuumMedium()}
   {
   };
 
@@ -67,6 +68,11 @@ public:
     return *camera;
   }
   
+  const Medium& GetEmptySpaceMedium() const
+  {
+    return *empty_space_medium;
+  }
+    
   template<class PrimitiveType, class... Args>
   Primitive& AddPrimitive(Args&&... args)
   {

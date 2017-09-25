@@ -22,10 +22,15 @@ class CurrentThing
   std::unordered_map<std::string, Thing*> things;
   std::string name;
 public:
-  CurrentThing(const std::string &_name, const std::string &_defaultName, Thing* _defaultThing) :
-    name(_name), currentThing(_defaultThing)
+  CurrentThing(const std::string &_name, const std::string &default_name, Thing* default_thing) :
+    name(_name), currentThing(default_thing)
   {
-    things[_defaultName] = currentThing;
+    things[default_name] = default_thing;
+  }
+  
+  int size() const
+  {
+    return things.size();
   }
   
   void activate(const std::string &name)
@@ -80,6 +85,7 @@ void NFFParser::AssignCurrentMaterialParams(Primitive& primitive)
 {
   primitive.shader = shaders();
   primitive.medium = mediums();
+  assert(primitive.shader && primitive.medium);
 }
 
 
@@ -261,14 +267,19 @@ void NFFParser::Parse(char *fileName)
     
     /* shader parameters */
     
-    if (!strcmp(token,"f")) {
+    if (!strcmp(token,"shader"))
+    {
       double r,g,b,kd,ks,shine,t,ior;
       char texture[LINESIZE];
       char name[LINESIZE];
       
-      int num = sscanf(line,"f %s %lg %lg %lg %lg %lg %lg %lg %lg %s\n",name, &r,&g,&b,&kd,&ks,&shine,&t,&ior,texture);
+      int num = std::sscanf(line,"shader %s %lg %lg %lg %lg %lg %lg %lg %lg %s\n",name, &r,&g,&b,&kd,&ks,&shine,&t,&ior,texture);
       Double3 color(r,g,b);
-      if(num==9) 
+      if(num==1)
+      {
+        shaders.activate(name);
+      }
+      else if(num==9) 
       {
         //currentShader = new PhongShader(color,color,Double3(1.),0.1,kd,ks,shine,ks);
         shaders.set_and_activate(name, 
@@ -287,8 +298,28 @@ void NFFParser::Parse(char *fileName)
       continue;
     }
     
-    /* lightsource */
+    if (!strcmp(token, "medium"))
+    {
+      Spectral sigma_s{0.}, sigma_a{1.};
+      char name[LINESIZE];
+      int num = std::sscanf(line, "medium %s %lg %lg %lg %lg %lg %lg\n", name, &sigma_s[0], &sigma_s[1], &sigma_s[2], &sigma_a[0], &sigma_a[1], &sigma_a[2]);
+      if (num==1)
+      {
+        mediums.activate(name);
+      }
+      else if(num == 7)
+      {
+        mediums.set_and_activate(
+          name,
+          new IsotropicHomogeneousMedium(sigma_s, sigma_a, mediums.size()));
+      }
+      else
+      {
+        std::cout << "error in " << fileName << " : " << line << std::endl;
+      }
+    }
     
+    /* lightsource */
     if (!strcmp(token,"l")) 
 	{
 		Double3 pos;

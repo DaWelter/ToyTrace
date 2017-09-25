@@ -12,7 +12,7 @@ class Scene;
 class RaySurfaceIntersection;
 
 
-struct BRDFSample
+struct BSDFSample
 {
   Double3 dir;
   Spectral scatter_function;
@@ -20,12 +20,22 @@ struct BRDFSample
 };
 
 
+// enum ShaderFlags
+// {
+//   // Probability of scattered directions described by point mass functions?
+//   TRANSMISSION_IS_PMF = 1, 
+//   REFLECTION_IS_PMF = 2,
+// };
+// ?????
+
+
 class Shader
 {
 public:
   virtual ~Shader() {}
-  virtual BRDFSample SampleBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const = 0;
-  virtual Spectral EvaluateBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, double *pdf) const = 0;
+  virtual BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const = 0;
+  virtual Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, double *pdf) const = 0;
+  //int flags;
 };
 
 
@@ -34,9 +44,10 @@ class DiffuseShader : public Shader
   Spectral kr_d; // between zero and 1/Pi.
 public:
   DiffuseShader(const Spectral &reflectance);
-  BRDFSample SampleBRDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
-  Spectral EvaluateBRDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
+  BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
+  Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
 };
+
 
 
 class Medium
@@ -55,17 +66,35 @@ public:
     Spectral phase_function;
     double pdf;
   };
-  
+  const int priority;
+  Medium(int _priority) : priority(_priority) {}
   virtual ~Medium() {}
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler) const = 0;
+  virtual Spectral EvaluateTransmission(const RaySegment &segment) const = 0;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler) const = 0;
   virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const = 0;
 };
 
 
+
 class VacuumMedium : public Medium
 {
+public:
+  VacuumMedium() : Medium(-1) {}
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler) const override;
+  virtual Spectral EvaluateTransmission(const RaySegment &segment) const override;
+  virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler) const override;
+  virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const override;
+};
+
+
+class IsotropicHomogeneousMedium : public Medium
+{
+  Spectral sigma_s, sigma_a, sigma_ext;
+public:
+  IsotropicHomogeneousMedium(const Spectral &_sigma_s, const Spectral &_sigma_a, int priority); 
+  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler) const override;
+  virtual Spectral EvaluateTransmission(const RaySegment &segment) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler) const override;
   virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const override;
 };
