@@ -199,4 +199,10 @@ std::unique_ptr<T> make_unique(Args&&... args) {
 }
 #endif
 
+template<class T>
+inline T Sqr(const T &x)
+{
+  return x*x;
+}
+
 #endif

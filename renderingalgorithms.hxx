@@ -55,7 +55,7 @@ public:
         Spectral brdf_value = shader.EvaluateBRDF(-incident_dir, intersection, segment_to_light.ray.dir, nullptr);
         double d_factor = std::max(0., Dot(intersection.normal, segment_to_light.ray.dir));
         
-        ret = d_factor/light_sample.pdf_of_pos/segment_to_light.length * 
+        ret = d_factor/light_sample.pdf_of_pos/Sqr(segment_to_light.length) * 
           brdf_value * light_sample.measurement_contribution;
       }
     }
@@ -462,7 +462,7 @@ public:
     if (scene.Occluded(segment.ray, segment.length, hits_ignored[0], hits_ignored[1]))
       return Spectral{0.};
     bool isAreaMeasure = segment.length<LargeNumber; // i.e. nodes are not directional.
-    double geom_term = isAreaMeasure ? 1./segment.length : 1.;
+    double geom_term = isAreaMeasure ? Sqr(1./segment.length) : 1.;
     if (node1.type == PathNode::SURFACE)
       geom_term *= DFactor(node1, segment.ray.dir);
     if (node2.type == PathNode::SURFACE)
