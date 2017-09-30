@@ -38,10 +38,10 @@ public:
   }
   bool intersect(const Ray &ray, const Primitive &p)
   {
-    if ((to_ignore[0].primitive == &p) || 
-       (to_ignore[1].primitive == &p)) 
-     return false;;
-    return p.Intersect(ray, ray_length, hit);
+    if (to_ignore[0].primitive == &p || to_ignore[1].primitive == &p)
+      return p.Intersect(ray, ray_length, hit, to_ignore[0], to_ignore[1]);
+    else
+      return p.Intersect(ray, ray_length, hit);
   }
 };
 

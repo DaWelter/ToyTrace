@@ -22,6 +22,12 @@ public:
   
   virtual bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const = 0;
   
+  virtual bool Intersect(const Ray &ray, double &ray_length, HitId &hit, const HitId &to_ignore1, const HitId &to_ignore2) const
+  {
+    assert(to_ignore1.primitive == this || to_ignore2.primitive == this);
+    return false;
+  }
+  
   virtual Double3 GetNormal(const HitId &hit) const = 0;
   
   virtual Box   CalcBounds() const = 0;

@@ -15,6 +15,11 @@ struct Ray
   Ray(Double3 _org, Double3 _dir) : org(_org), dir(_dir) {}
   Double3 org; // origin
   Double3 dir; // direction
+  
+  auto PointAt(double t) const -> decltype(org + t * dir)
+  {
+    return org + t * dir;
+  }
 };
 
 
@@ -33,10 +38,10 @@ struct RaySegment
     return RaySegment{{src, delta}, l};
   }
   
-  auto EndPoint() const -> decltype(ray.org + length * ray.dir) 
+  auto EndPoint() const -> decltype(ray.PointAt(length))
   { 
     // Want to return some expression template construct. Not an actual Double3. To facilitate optimization.
-    return ray.org + length * ray.dir; 
+    return ray.PointAt(length);
   }
 };
 

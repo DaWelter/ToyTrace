@@ -42,6 +42,20 @@ BSDFSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfa
 
 
 
+Spectral InvisibleShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
+{
+  if (pdf)
+    *pdf = 1.;
+  return Spectral{0.};
+}
+
+
+BSDFSample InvisibleShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const
+{
+  return BSDFSample{-incident_dir, Spectral{1.}, 1.};
+}
+
+
 
 
 Spectral VacuumMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const

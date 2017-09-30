@@ -159,6 +159,13 @@ inline typename Eigen::internal::traits<Derived>::Scalar Length(const Eigen::Mat
   return a.norm();
 }
 
+template<class Derived>
+inline typename Eigen::internal::traits<Derived>::Scalar LengthSqr(const Eigen::MatrixBase<Derived> &a)
+{
+  return a.squaredNorm();
+}
+
+
 template<class T>
 inline void Normalize(Vec<T,3>& u)
 {

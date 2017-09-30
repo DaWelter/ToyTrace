@@ -49,6 +49,15 @@ public:
 };
 
 
+class InvisibleShader : public Shader
+{
+public:
+  InvisibleShader() = default;
+  BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
+  Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
+};
+
+
 
 class Medium
 {

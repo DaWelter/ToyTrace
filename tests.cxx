@@ -12,6 +12,15 @@
 #include "scene.hxx"
 #include "renderingalgorithms.hxx"
 #include "sphere.hxx"
+#include "triangle.hxx"
+
+
+void EXPECT_NEAR_DOUBLE3(const Double3 &a, const Double3 &b, double abs_tol)
+{
+  EXPECT_NEAR(a[0], b[0], abs_tol);
+  EXPECT_NEAR(a[1], b[1], abs_tol);
+  EXPECT_NEAR(a[2], b[2], abs_tol);
+}
 
 
 TEST(BasicAssumptions, EigenTypes)
@@ -115,6 +124,59 @@ TEST(TestMath, RaySphereIntersection)
   EXPECT_NEAR(intersect.normal[0], 0., 1.e-6);
   EXPECT_NEAR(intersect.normal[1], 0., 1.e-6);
   EXPECT_NEAR(intersect.normal[2], -1., 1.e-6);
+}
+
+
+TEST(TestMath, SphereIntersectionMadness)
+{
+  Sampler sampler;
+  Double3 sphere_org{0., 0., 2.};
+  double sphere_rad = 1.;
+  Sphere s{sphere_org, sphere_rad};
+  const int N = 100;
+  for (int num = 0; num < N; ++num)
+  {
+    // Sample random position outside the sphere as start point.
+    // And position inside the sphere as end point.
+    // Intersection is thus guaranteed.
+    Double3 org = 
+      SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare())
+      * sphere_rad * 10. + sphere_org;
+    Double3 target = 
+      SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare())
+      * sphere_rad * 0.75 + sphere_org;
+    Double3 dir = target - org; 
+    Normalize(dir);
+    
+    // Shoot ray to the inside. Expect intersection at the
+    // front side of the sphere.
+    RaySegment rs{{org, dir}, LargeNumber};
+    HitId hit1, hit2, hit3;
+    double length = LargeNumber;
+    bool bhit = s.Intersect(rs.ray, rs.length, hit1);
+    ASSERT_TRUE(bhit);
+    RaySurfaceIntersection intersect1{hit1, rs};
+    ASSERT_LE(Length(org - intersect1.pos), Length(org - sphere_org));
+    
+    // Put new ray origin at the intersection and ignore the
+    // intersection for further intersection computations.
+    // Now expect the next intersection at the back side of the sphere.
+    rs.ray.org = intersect1.pos;
+    rs.length = LargeNumber;
+    bhit = s.Intersect(rs.ray, rs.length, hit2, hit1, hit3);
+    ASSERT_TRUE(bhit);
+    RaySurfaceIntersection intersect2{hit2, rs};
+    ASSERT_LE(Length(org - intersect1.pos), Length(org - intersect2.pos));
+    ASSERT_GE((intersect1.pos - intersect2.pos).norm(), 1.e-3 * sphere_rad);
+
+    // Put the ray origin back to the start. Now we ignore all two previous
+    // intersection. Hence we expect to get no new intersection.
+    rs.ray.org = org;
+    rs.length = LargeNumber;
+    bhit = s.Intersect(rs.ray, rs.length, hit3, hit1, hit2);
+    ASSERT_FALSE(bhit);
+    ASSERT_EQ(rs.length, LargeNumber);
+  }
 }
 
 
@@ -429,6 +491,15 @@ protected:
       fov,
       xres, yres);
   }
+
+  void ToNextIntersection(RaySegment &seg, RaySurfaceIntersection &intersection)
+  {
+    seg.length = LargeNumber;
+    HitId hit = scene.Intersect(seg.ray, seg.length, intersection.hitid);
+    EXPECT_TRUE(hit == true);
+    intersection = RaySurfaceIntersection{hit, seg};
+    seg.ray.org = intersection.pos;
+  }
 };
 
 
@@ -444,6 +515,72 @@ TEST_F(SimpleRenderTests, OnePixelBackground)
   ASSERT_FLOAT_EQ(col[2], 0.);
 }
 
+
+TEST_F(SimpleRenderTests, MediaTracker)
+{
+  scene.ParseNFF("scenes/test_media.nff");
+  scene.BuildAccelStructure();
+  const Medium *vac = &scene.GetEmptySpaceMedium();
+  const Medium *m1 = scene.GetPrimitive(0).medium;
+  const Medium *m2 = scene.GetPrimitive(1).medium;
+  std::printf("Pointers:\n vac=%p, m1=%p, m2=%p\n", vac, m1, m2);
+  for (int i=0; i<5; ++i)
+  {
+    std::printf("Medium of prim %i = %p\n", i, scene.GetPrimitive(i).medium);
+  }
+  MediumTracker mt(scene);
+  mt.initializePosition({0, 0, -10});
+  ASSERT_EQ(&mt.getCurrentMedium(), vac);
+  RaySegment seg{{{0, 0, -10}, {0, 0, 1}}, LargeNumber};
+  RaySurfaceIntersection intersection;
+  const Medium *media_after_intersect[] = {
+    m1, vac, m2, m2, m1, vac, m1, m2, m1, vac
+  };
+  double intersect_pos[] = {
+    -2, 0,   1,  2,  3,   4,  5,  5.5,6.5, 7
+  };
+  std::printf("Media Trace:\n");
+  for (int i=0; i<sizeof(media_after_intersect)/sizeof(void*); ++i)
+  {
+    ToNextIntersection(seg, intersection);
+    mt.goingThroughSurface(seg.ray.dir, intersection);
+    std::printf("IS[%i]: pos=%f, med_expect=%p, got=%p\n", i, intersection.pos[2], media_after_intersect[i], &mt.getCurrentMedium());
+    EXPECT_NEAR(intersection.pos[2], intersect_pos[i], 1.e-6);
+    ASSERT_EQ(&mt.getCurrentMedium(), media_after_intersect[i]);
+  }
+}
+
+
+TEST_F(SimpleRenderTests, ImportDAE)
+{
+  scene.ParseNFF("scenes/test_dae.nff");
+  constexpr double tol = 1.e-2;
+  Box outside; 
+  outside.Extend({-0.5-tol, -0.5-tol, -0.5-tol}); 
+  outside.Extend({0.5+tol, 0.5+tol, 0.5+tol});
+  Box inside;
+  inside.Extend({-0.5+tol, -0.5+tol, -0.5+tol});
+  inside.Extend({0.5-tol, 0.5-tol, 0.5-tol});
+  EXPECT_EQ(scene.GetNumPrimitives(), 6 * 2);
+  for (int i=0; i<scene.GetNumPrimitives(); ++i)
+  {
+    auto* prim = dynamic_cast<const Triangle*>(&scene.GetPrimitive(i));
+    ASSERT_NE(prim, nullptr);
+    Box b = prim->CalcBounds();
+    ASSERT_TRUE(b.InBox(outside));
+    ASSERT_TRUE(!b.InBox(inside));
+  }
+}
+
+
+TEST_F(SimpleRenderTests, ImportDAE2)
+{
+  scene.ParseNFF("scenes/test_dae2.nff");
+  Box b = scene.CalcBounds();
+  double size = Length(b.max - b.min);
+  ASSERT_GE(size, 1.);
+  ASSERT_LE(size, 3.);
+}
 
 
 

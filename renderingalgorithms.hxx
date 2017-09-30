@@ -62,9 +62,9 @@ void MediumTracker::enterVolume(const Medium* medium)
   // Set one of the array entries that is currently nullptr to the new medium pointer.
   // But only if there is room left. Otherwise the new medium is ignored.
   bool is_null = false;
-  for (int i = 0; i < media.size() && !is_null; ++i)
+  for (int i = 0; (i < media.size()) && !is_null; ++i)
   {
-    bool is_null = media[i]==nullptr;
+    is_null = media[i]==nullptr;
     media[i] = is_null ? medium : media[i];
   }
   current = (is_null && medium->priority > current->priority) ? medium : current;
@@ -76,9 +76,9 @@ void MediumTracker::leaveVolume(const Medium* medium)
   // If the medium is in the media stack, remove it.
   // And also make the medium of highest prio the current one.
   bool is_eq = false;
-  for (int i = 0; i < media.size() && !is_eq; ++i)
+  for (int i = 0; (i < media.size()) && !is_eq; ++i)
   {
-    bool is_eq = media[i] == medium;
+    is_eq = media[i] == medium;
     media[i] = is_eq ? nullptr : media[i];
   }
   if (medium == current)
@@ -308,6 +308,7 @@ public:
       (start_pos_sample.measurement_contribution*start.measurement_contribution) 
       / start_pos_sample.pdf_of_pos /  start.pdf;
     
+    this->medium_tracker_root.initializePosition(start_pos_sample.pos);
     Spectral eye_tree_factor = Trace(start.ray_out, 1, this->medium_tracker_root);
 
     return camera_factor * eye_tree_factor;
