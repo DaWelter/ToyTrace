@@ -12,8 +12,7 @@ class Scene
 {
   // parse an NFF file 'fileName', add all its primitives
   // to the specified group...
-  void ParseNFF(FILE *file, char *fileName);
-  void ParseMesh(char *filename);
+  //void ParseMesh(char *filename);
   friend class NFFParser;
 
   BSPTree bsptree;
@@ -35,6 +34,8 @@ public:
   {
   };
 
+  void ParseNFF(const char *fileName);
+  
   template<class CameraType, class... Args>
   void SetCamera(Args&&... args)
   {
@@ -82,10 +83,16 @@ public:
     return *prim;
   }
 
-  // parse an NFF file 'fileName', store all its primitives
-  void ParseNFF(char *fileName);
-
-
+  const Primitive& GetPrimitive(int i) const
+  {
+    return *primitives[i];
+  }
+  
+  int GetNumPrimitives() const 
+  {
+    return primitives.size();
+  }
+  
   bool Occluded(const Ray &ray, double ray_length, const HitId &to_ignore1 = HitId(), const HitId &to_ignore2 = HitId()) const
   { 
     HitId hit;

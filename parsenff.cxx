@@ -7,6 +7,7 @@
 
 #define LINESIZE 1000
 
+#include <libgen.h> // unix specific. Need for dirname.
 #include <vector>
 #include <cstdio>
 #include <unordered_map>
@@ -42,8 +43,9 @@ public:
     }
     else
     {
-      std::printf("Error: %s %s not defined. Define it in the NFF file prior to referencing it.\n", this->name.c_str(), name.c_str());
-      exit(0);
+      char buffer[1024];
+      std::snprintf(buffer, 1024, "Error: %s %s not defined. Define it in the NFF file prior to referencing it.", this->name.c_str(), name.c_str());
+      throw std::runtime_error(buffer);
     }
   }
   
@@ -65,18 +67,20 @@ class NFFParser
   Scene* scene;
   CurrentThing<Shader> shaders;
   CurrentThing<Medium> mediums;
+  std::string dirname;
   friend class AssimpReader;
 public:
   NFFParser(Scene* _scene) :
     scene(_scene),
-    shaders("Shader", "default", new DiffuseShader(Double3(0.8, 0.8, 0.8))),
+    shaders("Shader", "invisible", new InvisibleShader()),
     mediums("Medium", "default", new VacuumMedium())
   {
+    shaders.set_and_activate("default", new DiffuseShader(Double3(0.8, 0.8, 0.8)));
   }
-  void Parse(char *fileName);
+  void Parse(const char *fileName);
 private:
   void AssignCurrentMaterialParams(Primitive &primitive);
-  void ParseMesh(char *filename);
+  void ParseMesh(const char *filename);
 };
 
 
@@ -89,18 +93,26 @@ void NFFParser::AssignCurrentMaterialParams(Primitive& primitive)
 }
 
 
-void NFFParser::Parse(char *fileName)
+void NFFParser::Parse(const char* fileName)
 {
   char line[LINESIZE+1];
   char token[LINESIZE+1];
   char *str;
   int i;
 
+  {
+    auto *dirnamec_storage = strdup(fileName); // modifies its argument.
+    auto *dirnamec = ::dirname(dirnamec_storage);
+    this->dirname.assign(dirnamec);
+    free(dirnamec_storage);
+  }
+  
   FILE *file = fopen(fileName,"r");
   if (!file) 
   {
-    std::cerr << "could not open input file " << fileName << std::endl;
-    exit(1);
+    char buffer[1024];
+    std::snprintf(buffer, 1024, "could not open input file %s", fileName);
+    throw std::runtime_error(buffer);
   }
   
   int line_no = 0;
@@ -254,10 +266,13 @@ void NFFParser::Parse(char *fileName)
     
     /* include new NFF file */
     
-    if (!strcmp(token,"include")) {
-      if (!fgets(line,LINESIZE,file)) {
-			std::cerr << " error in include, cannot read filename to include" << std::endl;
-			exit(0);
+    if (!strcmp(token,"include")) 
+    {
+      if (!fgets(line,LINESIZE,file)) 
+      {
+        char buffer[1024];
+        std::snprintf(buffer, 1024, "error in include, cannot read filename to include");
+        throw std::runtime_error(buffer);
       }
       line[strlen(line)-1] = 0; // remove trailing eol indicator '\n'
       std::cout << "including file " << line << std::endl;
@@ -279,19 +294,13 @@ void NFFParser::Parse(char *fileName)
       {
         shaders.activate(name);
       }
-      else if(num==9) 
+      else if(num >= 5) 
       {
         //currentShader = new PhongShader(color,color,Double3(1.),0.1,kd,ks,shine,ks);
         shaders.set_and_activate(name, 
-                         new DiffuseShader(color)
+                         new DiffuseShader(kd * color)
                         );
       } 
-      else if(num==10) 
-      {
-        shaders.set_and_activate(name, 
-                         new DiffuseShader(color)
-                        );
-      }
       else {
         std::cout << "error in " << fileName << " : " << line << std::endl;
       }
@@ -317,6 +326,7 @@ void NFFParser::Parse(char *fileName)
       {
         std::cout << "error in " << fileName << " : " << line << std::endl;
       }
+      continue;
     }
     
     /* lightsource */
@@ -364,7 +374,8 @@ void NFFParser::Parse(char *fileName)
     int num = sscanf(line, "m %s", meshfile);
     if (num == 1)
     {
-      ParseMesh(meshfile);
+      std::string fullpath = dirname + (dirname.empty() ? "" : "/") + std::string(meshfile);
+      ParseMesh(fullpath.c_str());
     }
     else
     {
@@ -381,10 +392,9 @@ void NFFParser::Parse(char *fileName)
       continue;
     }
   
-  /* unknown command */
-    
-    std::cout << "error in " << fileName << " : " << line << std::endl;
-    exit(0);
+    char buffer[1024];
+    std::snprintf(buffer, 1024, "Unkown directive in %s : %s", fileName, line);
+    throw std::runtime_error(buffer);
   }
   
   fclose(file);
@@ -394,8 +404,16 @@ void NFFParser::Parse(char *fileName)
 // Example see: https://github.com/assimp/assimp/blob/master/samples/SimpleOpenGL/Sample_SimpleOpenGL.c
 class AssimpReader
 {
+  struct NodeRef
+  {
+    NodeRef(aiNode* _node, const aiMatrix4x4 &_mTrafoParent)
+      : node(_node), local_to_world(_mTrafoParent * _node->mTransformation)
+    {}
+    aiMatrix4x4 local_to_world;
+    aiNode* node;
+  };
 public:
-  void Read(char *filename, NFFParser* parser, Scene *scene)
+  void Read(const char *filename, NFFParser* parser, Scene *scene)
   {
     std::printf("Reading Mesh: %s\n", filename);
     this->aiscene = aiImportFile(filename, 0);
@@ -404,33 +422,37 @@ public:
     
     if (!aiscene)
     {
-      std::printf("Error: could not load file.");
-      exit(0);
+      char buffer[1024];
+      std::snprintf(buffer, 1024, "Error: could not load file %s. because: %s", filename, aiGetErrorString());
+      throw std::runtime_error(buffer);
     }
     
-    std::vector<aiNode*> nodestack{ aiscene->mRootNode };
+    std::vector<NodeRef> nodestack{ {aiscene->mRootNode, aiMatrix4x4{}} };
     while (!nodestack.empty())
     {
-      const auto *nd = nodestack.back();
+      auto ndref = nodestack.back();
       nodestack.pop_back();
-      for (unsigned int i = 0; i< nd->mNumChildren; ++i)
+      for (unsigned int i = 0; i< ndref.node->mNumChildren; ++i)
       {
-        nodestack.push_back(nd->mChildren[i]);
+        nodestack.push_back({ndref.node->mChildren[i], ndref.local_to_world});
       }
       
-      ReadNode(nd);
+      ReadNode(ndref);
     }
+    
+    aiReleaseImport(this->aiscene);
   }
   
 private:
-  void ReadNode(const aiNode* nd)
+  void ReadNode(const NodeRef &ndref)
   {
+    const auto *nd = ndref.node;
     for (unsigned int mesh_idx = 0; mesh_idx < nd->mNumMeshes; ++mesh_idx)
     {
       const aiMesh* mesh = aiscene->mMeshes[nd->mMeshes[mesh_idx]];
       std::printf("Mesh %i (%s), mat_idx=%i\n", mesh_idx, mesh->mName.C_Str(), mesh->mMaterialIndex);
       DealWithTheMaterialOf(mesh);
-      ReadMesh(mesh);
+      ReadMesh(mesh, ndref);
     }
   }
   
@@ -442,16 +464,17 @@ private:
     }
   }
   
-  void ReadMesh(const aiMesh* mesh)
+  void ReadMesh(const aiMesh* mesh, const NodeRef &ndref)
   {
+    auto m = ndref.local_to_world;
     for (unsigned int face_idx = 0; face_idx < mesh->mNumFaces; ++face_idx)
     {
       const aiFace* face = &mesh->mFaces[face_idx];
-      auto vertex0 = aiVector3_to_myvector(mesh->mVertices[face->mIndices[0]]);
+      auto vertex0 = aiVector3_to_myvector(m * mesh->mVertices[face->mIndices[0]]);
       for (int i=2; i<face->mNumIndices; i++)
       {
-        auto vertex1 = aiVector3_to_myvector(mesh->mVertices[face->mIndices[i-1]]);
-        auto vertex2 = aiVector3_to_myvector(mesh->mVertices[face->mIndices[i  ]]);
+        auto vertex1 = aiVector3_to_myvector(m * mesh->mVertices[face->mIndices[i-1]]);
+        auto vertex2 = aiVector3_to_myvector(m * mesh->mVertices[face->mIndices[i  ]]);
         parser->AssignCurrentMaterialParams(
           scene->AddPrimitive<Triangle>(
               vertex0,
@@ -489,13 +512,13 @@ private:
 };
 
 
-void NFFParser::ParseMesh(char *filename)
+void NFFParser::ParseMesh(const char* filename)
 {
   AssimpReader().Read(filename, this, scene);
 }
 
 
-void Scene::ParseNFF(char *fileName)
+void Scene::ParseNFF(const char* fileName)
 {
   // parse file, add all items to 'primitives'
   NFFParser(this).Parse(fileName);
