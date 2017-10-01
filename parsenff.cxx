@@ -67,6 +67,7 @@ class NFFParser
   Scene* scene;
   CurrentThing<Shader> shaders;
   CurrentThing<Medium> mediums;
+  Eigen::Transform<double,3,Eigen::Affine> currentTransform;
   std::string dirname;
   friend class AssimpReader;
 public:
@@ -76,13 +77,27 @@ public:
     mediums("Medium", "default", new VacuumMedium())
   {
     shaders.set_and_activate("default", new DiffuseShader(Double3(0.8, 0.8, 0.8)));
+    currentTransform = decltype(currentTransform)::Identity();
   }
   void Parse(const char *fileName);
 private:
   void AssignCurrentMaterialParams(Primitive &primitive);
+  Double3 ApplyTransform(const Double3 &p) const;
+  Double3 ApplyTransformNormal(const Double3 &v) const;
   void ParseMesh(const char *filename);
 };
 
+
+Double3 NFFParser::ApplyTransform(const Double3 &p) const
+{
+  return currentTransform * p;
+}
+
+
+Double3 NFFParser::ApplyTransformNormal(const Double3 &v) const
+{
+  return currentTransform.linear() * v;
+}
 
 
 void NFFParser::AssignCurrentMaterialParams(Primitive& primitive)
@@ -142,6 +157,26 @@ void NFFParser::Parse(const char* fileName)
       continue;
     }
     
+    if (!strcmp(token, "transform"))
+    {
+      Double3 t, r;
+      int n = std::sscanf(str,"transform %lg %lg %lg %lg %lg %lg\n",&t[0], &t[1], &t[2], &r[0], &r[1], &r[2]);
+      if (n == 6)
+      {
+        // The heading, pitch, bank convention assuming Y is up and Z is forward!
+        Eigen::Matrix3d m{
+          Eigen::AngleAxisd(r[0], Eigen::Vector3d::UnitY()) *
+          Eigen::AngleAxisd(r[1], Eigen::Vector3d::UnitX()) * 
+          Eigen::AngleAxisd(r[2], Eigen::Vector3d::UnitZ()) };
+        currentTransform = Eigen::Translation3d(t) * m;
+        std::cout << "Transform: t=\n" << currentTransform.translation() << "\nr=\n" << currentTransform.linear() << std::endl;
+        continue;
+      }
+      else
+      {
+        throw std::runtime_error(strconcat("error in ", fileName, " : ", line));
+      }
+    }
     /* camera */
 
     if (!strcmp(token,"v")) {
@@ -186,10 +221,13 @@ void NFFParser::Parse(const char* fileName)
       Double3 *vertex = new Double3[vertices];
       Double3 *normal = new Double3[vertices];
 
-      for (i=0;i<vertices;i++) {
-			fscanf(file,"%lg %lg %lg %lg %lg %lg\n",
-			&vertex[i][0],&vertex[i][1],&vertex[i][2],
-			&normal[i][0],&normal[i][1],&normal[i][2]);
+      for (i=0;i<vertices;i++) 
+      {
+        fscanf(file,"%lg %lg %lg %lg %lg %lg\n",
+          &vertex[i][0],&vertex[i][1],&vertex[i][2],
+          &normal[i][0],&normal[i][1],&normal[i][2]);
+        vertex[i] = ApplyTransform(vertex[i]);
+        normal[i] = ApplyTransformNormal(normal[i]);
       }
 
       for (i=2;i<vertices;i++) 
@@ -217,11 +255,14 @@ void NFFParser::Parse(const char* fileName)
 		Double3 *normal = new Double3[vertices];
 		Double3 *uv     = new Double3[vertices];
 
-		for (i=0;i<vertices;i++) {
+		for (i=0;i<vertices;i++) 
+    {
 			fscanf(file,"%lg %lg %lg %lg %lg %lg %lg %lg %lg\n",
-			&vertex[i][0],&vertex[i][1],&vertex[i][2],
-			&normal[i][0],&normal[i][1],&normal[i][2],
-			&uv[i][0],&uv[i][1],&uv[i][2]);
+        &vertex[i][0],&vertex[i][1],&vertex[i][2],
+        &normal[i][0],&normal[i][1],&normal[i][2],
+        &uv[i][0],&uv[i][1],&uv[i][2]);
+      vertex[i] = ApplyTransform(vertex[i]);
+      normal[i] = ApplyTransformNormal(normal[i]);
 		}
 
 		for (i=2;i<vertices;i++) {
@@ -249,8 +290,10 @@ void NFFParser::Parse(const char* fileName)
 		int vertices;
 		sscanf(str,"p %d",&vertices);
 		Double3 *vertex = new Double3[vertices];
-		for (i=0;i<vertices;i++) {
+		for (i=0;i<vertices;i++) 
+    {
 			fscanf(file,"%lg %lg %lg\n",&vertex[i][0],&vertex[i][1],&vertex[i][2]);
+      vertex[i] = ApplyTransform(vertex[i]);
 		}
 
 		for (i=2;i<vertices;i++) {
@@ -458,7 +501,7 @@ private:
   
   void DealWithTheMaterialOf(const aiMesh* mesh)
   {
-    if (mesh->mMaterialIndex >= 0 && mesh->mMaterialIndex < aiscene->mNumMaterials)
+    if (mesh->mMaterialIndex < aiscene->mNumMaterials)
     {
       SetCurrentShader(aiscene->mMaterials[mesh->mMaterialIndex]);
     }
@@ -470,11 +513,14 @@ private:
     for (unsigned int face_idx = 0; face_idx < mesh->mNumFaces; ++face_idx)
     {
       const aiFace* face = &mesh->mFaces[face_idx];
-      auto vertex0 = aiVector3_to_myvector(m * mesh->mVertices[face->mIndices[0]]);
+      auto vertex0 = parser->ApplyTransform(
+        aiVector3_to_myvector(m * mesh->mVertices[face->mIndices[0]]));
       for (int i=2; i<face->mNumIndices; i++)
       {
-        auto vertex1 = aiVector3_to_myvector(m * mesh->mVertices[face->mIndices[i-1]]);
-        auto vertex2 = aiVector3_to_myvector(m * mesh->mVertices[face->mIndices[i  ]]);
+        auto vertex1 = parser->ApplyTransform(
+          aiVector3_to_myvector(m * mesh->mVertices[face->mIndices[i-1]]));
+        auto vertex2 = parser->ApplyTransform(
+          aiVector3_to_myvector(m * mesh->mVertices[face->mIndices[i  ]]));
         parser->AssignCurrentMaterialParams(
           scene->AddPrimitive<Triangle>(
               vertex0,
@@ -496,8 +542,8 @@ private:
     aiString ainame;
     mat->Get(AI_MATKEY_NAME,ainame);
     auto name = std::string(ainame.C_Str());
-    
-    parser->shaders.activate(name);
+    if (name != "DefaultMaterial")
+      parser->shaders.activate(name);
   }
 
 private:
