@@ -226,4 +226,36 @@ inline T Sqr(const T &x)
   return x*x;
 }
 
+
+namespace strconcat_internal
+{
+
+/* Terminate the recursion. */
+inline void impl(std::stringstream &ss)
+{
+}
+/* Concatenate arbitrary objects recursively into a string using a stringstream.
+   Adapted from https://en.wikipedia.org/wiki/Variadic_template
+*/
+template<class T, class ... Args>
+inline void impl(std::stringstream &ss, const T& x, Args&& ... args)
+{
+  ss << x;
+  impl(ss, args...);
+}
+
+}
+
+/* A simple, safe, replacement for sprintf with automatic memory management.
+   I will probably implement this for String, too.
+*/
+template<class ... Args>
+std::string strconcat(Args&& ...args)
+{
+  std::stringstream ss;
+  strconcat_internal::impl(ss, args...);
+  return ss.str();
+}
+
+
 #endif
