@@ -66,6 +66,8 @@ TEST(TestRaySegment, ExprTemplates)
   ASSERT_EQ(typeid(e.eval()), typeid(Eigen::Matrix<double, 3, 1>));
 }
 
+
+
 TEST(TestRaySegment, EndPointNormal)
 {
   Double3 p = RaySegment{{Double3(1., 0., 0.), Double3(0., 1., 0.)}, 2.}.EndPoint();
@@ -73,6 +75,7 @@ TEST(TestRaySegment, EndPointNormal)
   ASSERT_EQ(p[1], 2.);
   ASSERT_EQ(p[2], 0.);
 }
+
 
 
 TEST(TestMath, OrthogonalSystemZAligned)
@@ -100,22 +103,79 @@ TEST(TestMath, OrthogonalSystemZAligned)
 
 
 
-TEST(TestMath, RaySphereIntersection)
+class TestIntersection : public testing::Test
+{
+protected:
+  RaySurfaceIntersection intersection;
+  double distance;
+  
+  void Intersect(const Primitive &prim, const Ray &ray, bool expect_hit = true)
+  {
+    RaySegment rs{ray, LargeNumber};
+    HitId hit;
+    bool bhit = prim.Intersect(rs.ray, rs.length, hit);
+    ASSERT_TRUE(bhit == expect_hit);
+    if (bhit)
+    {
+      distance = rs.length;
+      intersection = RaySurfaceIntersection{hit, rs};
+    }
+  }
+  
+  void CheckPosition(const Double3 &p) const
+  {
+    for (int i=0; i<3; ++i)
+      EXPECT_NEAR(intersection.pos[i], p[i], 1.e-6);
+  }
+  
+  void CheckNormal(const Double3 &n)
+  {
+    for (int i=0; i<3; ++i)
+      EXPECT_NEAR(intersection.normal[i], n[i], 1.e-6);
+  }
+};
+
+
+TEST_F(TestIntersection, Sphere)
 {
   Sphere s{{0., 0., 2.}, 2.};
-  RaySegment rs{Ray{{0., 0., -1.},{0., 0., 1.}}, LargeNumber};
-  HitId hit;
-  double length = LargeNumber;
-  bool bhit = s.Intersect(rs.ray, rs.length, hit);
-  EXPECT_NEAR(rs.length, 1., 1.e-6);
-  ASSERT_TRUE(bhit);
-  RaySurfaceIntersection intersect{hit, rs};
-  EXPECT_NEAR(intersect.pos[0], 0., 1.e-6);
-  EXPECT_NEAR(intersect.pos[1], 0., 1.e-6);
-  EXPECT_NEAR(intersect.pos[2], 0., 1.e-6);
-  EXPECT_NEAR(intersect.normal[0], 0., 1.e-6);
-  EXPECT_NEAR(intersect.normal[1], 0., 1.e-6);
-  EXPECT_NEAR(intersect.normal[2], -1., 1.e-6);
+  Intersect(s, {{0., 0., -1.},{0., 0., 1.}});
+  EXPECT_NEAR(distance, 1., 1.e-6);
+  CheckPosition({0., 0., 0.});
+  CheckNormal({0.,0.,-1.});
+}
+
+
+TEST_F(TestIntersection, Triangle)
+{
+  /*     x
+   *   / |
+   *  /  |
+   * x---x
+   * Depiction of the triangle */
+  double q = 0.5;
+  Triangle prim{{-q, -q, 0}, {q, -q, 0}, {q, q, 0}};
+  Intersect(prim, Ray{{0.1, 0., -1.},{0., 0., 1.}});
+  EXPECT_NEAR(distance, 1., 1.e-6);
+  CheckPosition({0.1, 0., 0.});
+  CheckNormal({0., 0., -1.});
+}
+
+
+TEST_F(TestIntersection, TriangleEdgeCase)
+{
+  double q = 0.5;
+  Triangle prim{{-q, -q, 0}, {q, -q, 0}, {q, q, 0}};
+  Intersect(prim, Ray{{0., 0., -1.},{0., 0., 1.}});
+  EXPECT_NEAR(distance, 1., 1.e-6);
+  CheckPosition({0., 0., 0.});
+  CheckNormal({0., 0., -1.});
+  // Slightly offset the ray, there should be no intersection.
+  Intersect(prim, Ray{{-Epsilon, 0., -1.},{0., 0., 1.}}, false);
+  // An adjacent triangle should catch the ray, however.
+  // This one covers the top left corner.
+  Triangle prim_top_left{{-q, -q, 0}, {-q, q, 0}, {q, q, 0}};
+  Intersect(prim_top_left, Ray{{-Epsilon, 0., -1.},{0., 0., 1.}}, true);
 }
 
 

@@ -32,7 +32,7 @@ public:
     {
 			Double3 w = Cross(n,edge[i]);
 			double t = Dot(q-p[i],w);
-			if(t<Epsilon) return false;
+			if(t<0.) return false;
 		}
 		ray_length = s;
     hit.primitive = this;
@@ -118,7 +118,6 @@ public:
 		Double3 normal = n[0]*hit.barry[0]+
 					   n[1]*hit.barry[1] +
 				       n[2]*hit.barry[2];
-// 		Double3 normal = Cross(p[1]-p[0],p[2]-p[0]) ;
 		Normalize(normal);
 		return normal;
 	}
