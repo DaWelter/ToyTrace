@@ -24,8 +24,9 @@ int main(int argc, char *argv[])
   ImageDisplay display;
   auto time_of_last_display = std::chrono::steady_clock::now();
 
-  Bdpt algo(scene);
-  //Raytracing algo(scene);
+  //Bdpt algo(scene);
+  Raytracing algo(scene);
+  //NormalVisualizer algo(scene);
   
   const int nsmpl = 4;
   

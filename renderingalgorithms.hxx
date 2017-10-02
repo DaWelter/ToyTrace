@@ -120,6 +120,33 @@ public:
 
 
 
+class NormalVisualizer : public BaseAlgo
+{
+public:
+  NormalVisualizer(const Scene &_scene) : BaseAlgo(_scene) {}
+  
+  Spectral MakePrettyPixel() override
+  {
+    RadianceOrImportance::Sample start_pos_sample = scene.GetCamera().TakePositionSample(sampler);
+    RadianceOrImportance::DirectionalSample start = scene.GetCamera().TakeDirectionSampleFrom(start_pos_sample.pos, sampler);
+    
+    RaySegment seg{start.ray_out, LargeNumber};
+    HitId hit = scene.Intersect(seg.ray, seg.length);
+    if (hit)
+    {
+      RaySurfaceIntersection intersection{hit, seg};
+      Spectral col = (intersection.normal.array() * 0.5 + 0.5);
+      return col;
+    }
+    else
+    {
+      return Spectral{0.};
+    }
+  };
+};
+
+
+
 class Raytracing : public BaseAlgo
 {
   int max_level = 5;
