@@ -15,14 +15,6 @@
 #include "triangle.hxx"
 
 
-void EXPECT_NEAR_DOUBLE3(const Double3 &a, const Double3 &b, double abs_tol)
-{
-  EXPECT_NEAR(a[0], b[0], abs_tol);
-  EXPECT_NEAR(a[1], b[1], abs_tol);
-  EXPECT_NEAR(a[2], b[2], abs_tol);
-}
-
-
 TEST(BasicAssumptions, EigenTypes)
 {
   // Spectral is currently an Eigen::Array type. It is still a row vector/array.
@@ -582,6 +574,25 @@ TEST_F(SimpleRenderTests, ImportDAE2)
   ASSERT_LE(size, 3.);
 }
 
+
+TEST_F(SimpleRenderTests, MediaTransmission)
+{
+  scene.ParseNFF("scenes/test_dae3.nff");
+  scene.BuildAccelStructure();
+  scene.PrintInfo();
+  Raytracing rt(scene);
+  MediumTracker medium_tracker(scene);
+  medium_tracker.initializePosition({0.,0.,-10.});
+  double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
+  RaySegment seg{{{ray_offset,0.,-10.}, {0.,0.,1.}}, LargeNumber};
+  auto res = rt.TransmittanceEstimate(seg, HitId(), medium_tracker);
+  
+  auto sigma_e = Spectral{3.};
+  Spectral expected = (-2.*sigma_e).exp();
+  
+  for (int i=0; i<static_size<Spectral>(); ++i)
+    ASSERT_NEAR(res[i], expected[i], 1.e-3);
+}
 
 
 int main(int argc, char **argv) {
