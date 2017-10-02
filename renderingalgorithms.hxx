@@ -218,6 +218,7 @@ public:
     const auto &medium = medium_tracker_parent.getCurrentMedium();
     auto phase_func = medium.EvaluatePhaseFunction(-incident_dir, pos, dir_to_light, nullptr);
     auto ret = phase_func * light_value;
+    return ret;
   }
   
   
@@ -290,6 +291,7 @@ public:
         auto result = PropagationAtIntersection(ray.dir, intersection, level, medium_tracker_parent);
         // Direct lighting.
         result += LightConnection(ray.dir, intersection, medium_tracker_parent);
+        return result;
       }
       else
       {
@@ -455,6 +457,7 @@ PathNode& PathNode::operator=(const PathNode& other)
 {
   this->~PathNode();
   new (this) PathNode(other);
+  return *this;
 }
 
 
