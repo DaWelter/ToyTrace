@@ -20,44 +20,48 @@ int main(int argc, char *argv[])
   scene.BuildAccelStructure();
   scene.PrintInfo();
   
-  Image bm(scene.GetCamera().xres,scene.GetCamera().yres);
+  int xres = scene.GetCamera().xres;
+  int yres = scene.GetCamera().yres;
+  
+  Image bm(xres, yres);
   ImageDisplay display;
   auto time_of_last_display = std::chrono::steady_clock::now();
 
   //Bdpt algo(scene);
   Raytracing algo(scene);
   //NormalVisualizer algo(scene);
+
+  SpectralImageBuffer buffer{xres, yres};
   
   const int nsmpl = 4;
   
+  int image_conversion_y_start = 0;
   std::cout << std::endl;
   std::cout << "Rendering ..." << std::endl;
-  for (int y=0;y<scene.GetCamera().yres;y++) 
+  for (int y=0;y<yres;y++) 
   {
-    for (int x=0;x<scene.GetCamera().xres;x++) 
-    {
-      scene.GetCamera().current_pixel_x = x;
-      scene.GetCamera().current_pixel_y = y;
-      
-      Spectral col(0);
+    for (int x=0;x<xres;x++) 
+    {    
+      int pixel_index = scene.GetCamera().PixelToUnit({x,y});
       for(int i=0;i<nsmpl;i++)
       {
-        Spectral smpl_col = algo.MakePrettyPixel();
-        col += smpl_col;
+        Spectral smpl = algo.MakePrettyPixel(pixel_index);
+        buffer.Insert(pixel_index, smpl);
       }
-      col *= 1.0/nsmpl;
-      Clip(col[0],0.,1.); Clip(col[1],0.,1.); Clip(col[2],0.,1.);
-      bm.set_pixel(x, bm.height() - y, col[0]*255.99999999,col[1]*255.99999999,col[2]*255.99999999);
     }
     
     auto time = std::chrono::steady_clock::now();
     if (time - time_of_last_display > std::chrono::seconds(1))
     {
+      buffer.ToImage(bm, image_conversion_y_start, y);
+      image_conversion_y_start = y;
       display.show(bm);
       time_of_last_display = time;
     }
   }
 
+  buffer.ToImage(bm, image_conversion_y_start, yres);
+  
   bm.write("raytrace.tga");
 
   return 1;

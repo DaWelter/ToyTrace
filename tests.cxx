@@ -487,14 +487,12 @@ public:
     At distance z=1:
     x=0                   x=i/xres                 x=2/xres           ....   x=(xres-1)/xres          x=1
   */
-    cam->current_pixel_x = _pixel_x;
-    cam->current_pixel_y = _pixel_y;
     Double3 possum{0,0,0}, possqr{0,0,0};
     Box box;
     constexpr int Nsamples = 100;
     for (int i = 0; i < Nsamples; ++i)
     {
-      auto s = cam->TakeDirectionSampleFrom(pos, sampler);
+      auto s = cam->TakeDirectionSampleFrom(cam->PixelToUnit({_pixel_x, _pixel_y}), pos, sampler);
       HitId hit;
       double length = 100.;
       bool is_hit = imageplane.Intersect(s.ray_out, length, hit);
@@ -508,10 +506,10 @@ public:
     // s = 1 -> std = 0.577
     Double3 average = possum / Nsamples;
     Double3 stddev  = (possqr / Nsamples - Product(average, average)).array().sqrt().matrix();
-    std::cout << "@Pixel: ix=" << cam->current_pixel_x << "," << cam->current_pixel_y << std::endl;
+    std::cout << "@Pixel: ix=" << _pixel_x << "," << _pixel_y << std::endl;
     std::cout << "Pixel: " << average << " +/- " << stddev << std::endl;
-    Double3 exactpos {((cam->current_pixel_x + 0.5) * 2.0 / cam->xres - 1.0),
-                      ((cam->current_pixel_y + 0.5) * 2.0 / cam->yres - 1.0),
+    Double3 exactpos {((_pixel_x + 0.5) * 2.0 / cam->xres - 1.0),
+                      ((_pixel_y + 0.5) * 2.0 / cam->yres - 1.0),
                       1.0};
     std::cout << "Box: " << box.min << " to " << box.max << std::endl;
     Double3 radius { 2.0/cam->xres, 2.0/cam->yres, 0. };
@@ -561,7 +559,7 @@ TEST_F(SimpleRenderTests, OnePixelBackground)
   scene.bgColor = Double3{ 0.5, 0., 0. };
   scene.BuildAccelStructure();
   Raytracing rt(scene);
-  auto col = rt.MakePrettyPixel();
+  auto col = rt.MakePrettyPixel(0);
   ASSERT_FLOAT_EQ(col[0], 0.5);
   ASSERT_FLOAT_EQ(col[1], 0.);
   ASSERT_FLOAT_EQ(col[2], 0.);

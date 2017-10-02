@@ -94,6 +94,44 @@ void MediumTracker::leaveVolume(const Medium* medium)
 }
 
 
+class SpectralImageBuffer
+{
+  std::vector<int> count;
+  std::vector<Spectral>  accumulator;
+  int xres, yres;
+public:
+  SpectralImageBuffer(int _xres, int _yres)
+    : xres(_xres), yres(_yres)
+  {
+    int sz = _xres * _yres;
+    count.resize(sz, 0);
+    accumulator.resize(sz, Spectral{0.});
+  }
+  
+  void Insert(int pixel_index, const Spectral &value)
+  {
+    ++count[pixel_index];
+    accumulator[pixel_index] += value; 
+  }
+  
+  void ToImage(Image &dest, int ystart, int yend) const
+  {
+    for (int y=ystart; y<yend; ++y)
+    for (int x=0; x<xres; ++x)
+    {
+      int pixel_index = xres * y + x;
+      Spectral average = accumulator[pixel_index]/count[pixel_index];
+      Image::uchar rgb[3];
+      for (int i=0; i<3; ++i)
+      {
+        Clip(average[i],0.,1.);
+        rgb[i] = std::isfinite(average[i]) ? average[i]*255.999 : (i==0 ? 255 : 0);
+      }
+      dest.set_pixel(x, dest.height() - y, rgb[0], rgb[1], rgb[2]);
+    }
+  }
+};
+
 
 class BaseAlgo
 {
@@ -101,7 +139,7 @@ protected:
   const Scene &scene;
   Sampler sampler;
   MediumTracker medium_tracker_root;
-
+  
 public:
   BaseAlgo(const Scene &_scene)
     : scene{_scene},
@@ -115,7 +153,7 @@ public:
     return std::make_tuple(&light, pmf_of_light);
   }
   
-  virtual Spectral MakePrettyPixel() = 0;
+  virtual Spectral MakePrettyPixel(int pixel_index) = 0;
 };
 
 
@@ -125,12 +163,11 @@ class NormalVisualizer : public BaseAlgo
 public:
   NormalVisualizer(const Scene &_scene) : BaseAlgo(_scene) {}
   
-  Spectral MakePrettyPixel() override
+  Spectral MakePrettyPixel(int pixel_index) override
   {
-    RadianceOrImportance::Sample start_pos_sample = scene.GetCamera().TakePositionSample(sampler);
-    RadianceOrImportance::DirectionalSample start = scene.GetCamera().TakeDirectionSampleFrom(start_pos_sample.pos, sampler);
+    auto cam_sample = TakeRaySample(scene.GetCamera(), pixel_index, sampler);
     
-    RaySegment seg{start.ray_out, LargeNumber};
+    RaySegment seg{cam_sample.ray_out, LargeNumber};
     HitId hit = scene.Intersect(seg.ray, seg.length);
     if (hit)
     {
@@ -207,7 +244,7 @@ public:
     // TODO: consider case of infinitely far away light!!
     auto transmittance = TransmittanceEstimate(segment_to_light, last_hit, medium_tracker_parent);
     auto sample_value = (transmittance * light_sample.measurement_contribution)
-                         / (light_sample.pdf_of_pos * Sqr(segment_to_light.length));
+                         / (light_sample.pdf * Sqr(segment_to_light.length));
     
     return std::make_pair(sample_value, segment_to_light.ray.dir);
   }
@@ -328,24 +365,19 @@ public:
   }
   
   
-  Spectral MakePrettyPixel() override
+  Spectral MakePrettyPixel(int pixel_index) override
   {
-    RadianceOrImportance::Sample start_pos_sample = scene.GetCamera().TakePositionSample(sampler);
-    RadianceOrImportance::DirectionalSample start = scene.GetCamera().TakeDirectionSampleFrom(start_pos_sample.pos, sampler);
+    auto cam_sample = TakeRaySample(scene.GetCamera(), pixel_index, sampler);
     
-    Spectral camera_factor = 
-      (start_pos_sample.measurement_contribution*start.measurement_contribution) 
-      / start_pos_sample.pdf_of_pos /  start.pdf;
-    
-    this->medium_tracker_root.initializePosition(start_pos_sample.pos);
-    Spectral eye_tree_factor = Trace(start.ray_out, 1, this->medium_tracker_root);
+    this->medium_tracker_root.initializePosition(cam_sample.ray_out.org);
+    Spectral eye_tree_factor = Trace(cam_sample.ray_out, 1, this->medium_tracker_root);
 
-    return camera_factor * eye_tree_factor;
+    return cam_sample.measurement_contribution * eye_tree_factor / cam_sample.pdf;
   };
 };
 
 
-#if 1
+#if 0
 // TODO: Turn this abomination into a polymorphic type with custom allocator??
 //       Use factory to hide allocation in some given buffer (stack or heap).
 //       Something like this https://stackoverflow.com/questions/13340664/polymorphism-without-new
@@ -646,7 +678,7 @@ public:
   {
     RadianceOrImportance::Sample sample = emitter.TakePositionSample(sampler);
     history.MultiplyNodeValues(0, 
-                               sample.pdf_of_pos, 
+                               sample.pdf, 
                                sample.measurement_contribution);
     history.Copy(0, 1);
     // Return value optimization???

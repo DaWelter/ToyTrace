@@ -173,7 +173,8 @@ inline void Normalize(Vec<T,3>& u)
 }
 
 template<class Scalar>
-inline Scalar Clip(Scalar &x, Scalar a,Scalar b){
+inline Scalar Clip(Scalar &x, Scalar a,Scalar b) {
+  // TODO: Change this so that it preserve NaN input in x;
   if(x>b) x = b;
   else if(x<a) x = a;
   return x;
