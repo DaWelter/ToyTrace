@@ -44,9 +44,12 @@ BSDFSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfa
 
 Spectral InvisibleShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
 {
+  constexpr double tol = Epsilon;
+  double u = LengthSqr(incident_dir + out_direction);
+  u = u<tol ? 1. : 0.;
   if (pdf)
-    *pdf = 1.;
-  return Spectral{0.};
+    *pdf = u;
+  return Spectral{u};
 }
 
 
