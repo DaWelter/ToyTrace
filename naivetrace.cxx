@@ -4,44 +4,171 @@
 #include <chrono>
 #include <atomic>
 #include <thread>
+#include <memory>
 
-static constexpr int COMM_WAITING = 0;
-static constexpr int COMM_HALT = 1;
-static constexpr int COMM_GO   = 2;
+static constexpr int SAMPLES_PER_PIXEL = 16;
+static constexpr int NUM_THREADS = 4;
 
-
-void ThreadWorker(std::atomic_int &shared_pixel_index, int end_index, SpectralImageBuffer &buffer, const Scene &scene, std::atomic_int &shared_comms)
+class Worker
 {
-  Raytracing algo(scene);
-  while (true)
+  const Scene &scene;
+  SpectralImageBuffer &buffer;
+  Raytracing algo;
+  //NormalVisualizer algo;
+  const int pixel_stride = 64 / sizeof(Spectral);
+  int num_pixels;
+  std::atomic_int &shared_pixel_index;
+  std::atomic_int shared_request, shared_state;
+public:
+  Worker(const Worker &) = delete;
+  Worker(Worker &&) = delete;
+  
+  enum State : int {
+    THREAD_WAITING = 0,
+    THREAD_RUNNING = 1,
+    THREAD_TERMINATED = 2,
+  };
+
+  enum Request : int {
+    REQUEST_NONE      = -1,
+    REQUEST_TERMINATE = 0,
+    REQUEST_HALT      = 1,
+    REQUEST_GO        = 2,
+  };
+  
+  Worker(std::atomic_int &_shared_pixel_index, SpectralImageBuffer &_buffer, const Scene &_scene) :
+    shared_request(REQUEST_NONE),
+    shared_state(THREAD_WAITING),
+    shared_pixel_index(_shared_pixel_index),
+    buffer(_buffer),
+    scene(_scene),
+    algo(_scene)
   {
-    int comms = shared_comms.load();
-    if (comms == COMM_HALT)
+    num_pixels = scene.GetCamera().xres * scene.GetCamera().yres;
+    //std::cout << "thread ctor " << this << std::endl;
+  }
+  
+  void IssueRequest(Request cmd)
+  {
+    shared_request.store(cmd);
+  }
+
+  State GetState() const
+  {
+    return (State)shared_state.load();
+  }
+  
+  static void Run(Worker *worker)
+  {
+    //std::cout << "thread running ... " << worker << std::endl;
+    bool run = true;
+    while (run)
     {
-      shared_comms.store(COMM_WAITING);
+      worker->ProcessCommandRequest();
+      worker->ExecuteState(run);
     }
-    else if (comms == COMM_WAITING)
+  }
+  
+private:
+  void SetState(State _state)
+  {
+    shared_state.store(_state);
+  }
+  
+  void ProcessCommandRequest()
+  {
+    Request comms = (Request)shared_request.load();
+    switch(comms)
     {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    else if (comms == COMM_GO)
-    {
-      const int pixel_stride = 64 / sizeof(Spectral);
-      int pixel_index = shared_pixel_index.fetch_add(pixel_stride);
-      if (pixel_index >= end_index)
+      case REQUEST_NONE:
         break;
-      int current_end_index = std::min(pixel_index + pixel_stride, end_index);
-      for (; pixel_index < current_end_index; ++pixel_index)
+      case REQUEST_HALT:
+        SetState(THREAD_WAITING); 
+        shared_request.store(REQUEST_NONE);
+        break;
+      case REQUEST_GO:
+        SetState(THREAD_RUNNING); 
+        shared_request.store(REQUEST_NONE);
+        break;
+      case REQUEST_TERMINATE:
+        SetState(THREAD_TERMINATED); 
+        shared_request.store(REQUEST_NONE);
+        break;
+    }
+  }
+  
+  void ExecuteState(bool &run)
+  {
+    int state = GetState();
+    //std::cout << "state within thread " << this << " is " << state << std::endl;
+    switch (state) 
+    {
+      case THREAD_WAITING:
+        StateWaiting();
+        break;
+      case THREAD_RUNNING: 
+        StateRunning();
+        break;
+      case THREAD_TERMINATED:
+        run = false;
+        break;
+    }
+  }
+  
+  void StateWaiting()
+  {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  
+  void StateRunning()
+  {
+    int pixel_index = shared_pixel_index.fetch_add(pixel_stride);
+    if (pixel_index >= num_pixels)
+    {
+      SetState(THREAD_WAITING);
+    }
+    else
+    {
+      Render(pixel_index);
+    }
+  }
+  
+  void Render(int pixel_index)
+  {
+    int current_end_index = std::min(pixel_index + pixel_stride, num_pixels);
+    for (; pixel_index < current_end_index; ++pixel_index)
+    {
+      const int nsmpl = SAMPLES_PER_PIXEL;
+      for(int i=0;i<nsmpl;i++)
       {
-        const int nsmpl = 64;
-        for(int i=0;i<nsmpl;i++)
-        {
-          Spectral smpl = algo.MakePrettyPixel(pixel_index);
-          buffer.Insert(pixel_index, smpl);
-        }
+        Spectral smpl = algo.MakePrettyPixel(pixel_index);
+        buffer.Insert(pixel_index, smpl);
       }
     }
   }
+};
+
+
+void IssueRequest(std::vector<std::unique_ptr<Worker>> &workers, Worker::Request request)
+{
+  //std::cout << "Request " << request << std::endl;
+  for (auto &worker : workers)
+    worker->IssueRequest(request);
+}
+
+
+void WaitForWorkers(std::vector<std::unique_ptr<Worker>> &workers)
+{
+  //std::cout << "Waiting ..." << std::endl;
+  for (auto &worker : workers)
+  {
+    while (worker->GetState() != Worker::THREAD_WAITING)
+    {
+      //std::cout << "worker " << w << " state = " << w->GetState() << std::endl;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+  //std::cout << " Threads are waiting now." << std::endl;
 }
 
 
@@ -66,68 +193,88 @@ int main(int argc, char *argv[])
   int num_pixels = xres*yres;
   
   Image bm(xres, yres);
+  bm.SetColor(0, 0, 128);
+  bm.DrawRect(0, 0, xres-1, yres-1);
   ImageDisplay display;
-
-  //Bdpt algo(scene);
-  Raytracing algo(scene);
-  //NormalVisualizer algo(scene);
-
-  SpectralImageBuffer buffer{xres, yres};
-  
-  const int num_threads = 4;
+  display.show(bm);
   
   auto start_time = std::chrono::steady_clock::now();
   
-  int image_conversion_y_start = 0;
+  SpectralImageBuffer buffer{xres, yres};
   
-  std::atomic_int shared_pixel_index(0);
-  
-  std::vector<std::atomic_int> thread_comm(num_threads);
-  std::vector<std::thread> threads;
-  
-  for (int i=0; i<num_threads; ++i)
-  {
-    thread_comm[i].store(COMM_GO);
-    threads.push_back(std::thread{
-      ThreadWorker, std::ref(shared_pixel_index), num_pixels, std::ref(buffer), std::cref(scene), std::ref(thread_comm[i])
-    });
-  }
-  std::cout << std::endl;
-  std::cout << "Rendering ..." << std::endl;
+  const int num_threads = NUM_THREADS;
 
-  while (shared_pixel_index.load() < num_pixels)
-  {
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+  if (num_threads > 0)
+  { 
+    std::atomic_int shared_pixel_index(std::numeric_limits<int>::max());
     
-    bool ok = false;
-    for (auto &comm : thread_comm)
-      comm.store(COMM_HALT);
-    for (auto &comm : thread_comm)
+    std::vector<std::unique_ptr<Worker>> workers;
+    std::vector<std::thread> threads;
+    
+    for (int i=0; i<num_threads; ++i)
+      workers.push_back(std::make_unique<Worker>(shared_pixel_index, buffer, scene));
+    for (int i=0; i<num_threads; ++i)
+      threads.push_back(std::thread{Worker::Run, workers[i].get()});
+      
+    std::cout << std::endl;
+    std::cout << "Rendering ..." << std::endl;
+    
+    while (display.is_open())
     {
-      while (comm.load() != COMM_WAITING && shared_pixel_index.load() < num_pixels)
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      shared_pixel_index.store(0);
+      IssueRequest(workers, Worker::REQUEST_GO);
+      
+      int image_conversion_y_start = 0;  
+      
+      while (shared_pixel_index.load() < num_pixels && display.is_open())
+      {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        
+        IssueRequest(workers, Worker::REQUEST_HALT);
+        WaitForWorkers(workers);
+        
+        int pixel_index = shared_pixel_index.load();
+        int y = pixel_index/xres;
+        buffer.ToImage(bm, image_conversion_y_start, std::min(yres, y+1));
+
+        IssueRequest(workers, Worker::REQUEST_GO);
+
+        image_conversion_y_start = y;      
+        display.show(bm);
+      }
+
+      IssueRequest(workers, Worker::REQUEST_HALT);
+      WaitForWorkers(workers);
+      
+      buffer.ToImage(bm, image_conversion_y_start, yres);
+      display.show(bm);
+      bm.write("raytrace.tga");
     }
     
-    int pixel_index = shared_pixel_index.load();
-    int y = pixel_index/xres - 1;
-    buffer.ToImage(bm, image_conversion_y_start, y);
-    image_conversion_y_start = y;
-
-    for (auto &comm : thread_comm)
-      comm.store(COMM_GO);    
-    
-    display.show(bm);
+    for (auto &worker : workers)
+      worker->IssueRequest(Worker::REQUEST_TERMINATE);
+    for (auto &thread : threads)
+      thread.join();
+  }
+  else
+  {
+    NormalVisualizer algo(scene);
+    for (int y = 0; y < yres; ++y)
+    {
+      for (int x = 0; x < xres; ++x)
+      {
+        int pixel_index = scene.GetCamera().PixelToUnit({x, y});
+        Spectral smpl = algo.MakePrettyPixel(pixel_index);
+        buffer.Insert(pixel_index, smpl);
+      }
+      buffer.ToImage(bm, y, y+1);
+      display.show(bm);
+    }
+    bm.write("raytrace.tga");
   }
   
-  for (int i=0; i<threads.size(); ++i)
-    threads[i].join();
-
   auto end_time = std::chrono::steady_clock::now();
   std::cout << "Rendering time: " << std::chrono::duration<double>(end_time - start_time).count() << std::endl;
-
-  buffer.ToImage(bm, image_conversion_y_start, yres);
-  
-  bm.write("raytrace.tga");
 
   return 0;
 }

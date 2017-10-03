@@ -289,6 +289,13 @@ void ImageDisplay::show(const Image& img)
 //   }
 }
 
+
+bool ImageDisplay::is_open()
+{
+  return !impl()->is_closed();
+}
+
+
 const cimg_library::CImgDisplay* ImageDisplay::impl() const
 {
   return reinterpret_cast<const cimg_library::CImgDisplay*>(priv.buffer);

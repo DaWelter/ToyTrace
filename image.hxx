@@ -99,6 +99,7 @@ class ImageDisplay
 public:
   ImageDisplay();
   void show(const Image &img);
+  bool is_open();
   
 private:
   struct Impl

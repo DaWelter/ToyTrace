@@ -122,12 +122,15 @@ public:
       int pixel_index = xres * y + x;
       Spectral average = accumulator[pixel_index]/count[pixel_index];
       Image::uchar rgb[3];
-      for (int i=0; i<3; ++i)
+      bool isfinite = average.isFinite().all();
+      //bool iszero = (accumulator[pixel_index]==0.).all();
+      average = average.max(0.).min(1.);
+      if (isfinite)
       {
-        Clip(average[i],0.,1.);
-        rgb[i] = std::isfinite(average[i]) ? average[i]*255.999 : (i==0 ? 255 : 0);
+        for (int i=0; i<3; ++i)
+          rgb[i] = average[i]*255.999;
+        dest.set_pixel(x, dest.height() - y, rgb[0], rgb[1], rgb[2]);
       }
-      dest.set_pixel(x, dest.height() - y, rgb[0], rgb[1], rgb[2]);
     }
   }
 };
