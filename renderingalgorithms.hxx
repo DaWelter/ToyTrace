@@ -262,7 +262,6 @@ public:
     if (light_value.abs().sum() <= 1.e-6)
       return Spectral{0.};
     
-
     const auto &shader = intersection.shader();
     Spectral bsdf_value = shader.EvaluateBSDF(-incident_dir, intersection, dir_to_light, nullptr);
     double d_factor = std::max(0., Dot(intersection.normal, dir_to_light));
@@ -280,7 +279,6 @@ public:
     
     if (light_value.abs().sum() <= 1.e-6)
       return Spectral{0.};
-    
     
     const auto &medium = medium_tracker_parent.getCurrentMedium();
     auto phase_func = medium.EvaluatePhaseFunction(-incident_dir, pos, dir_to_light, nullptr);
@@ -305,7 +303,7 @@ public:
     {
       medium_tracker.goingThroughSurface(surface_sample.dir, intersection);
     }
-    auto ret = Trace({intersection.pos, surface_sample.dir}, level+1,  medium_tracker);
+    auto ret = Trace({intersection.pos, surface_sample.dir}, level,  medium_tracker, intersection.hitid);
     
     double d_factor = std::abs(Dot(intersection.normal, surface_sample.dir));
     ret *= d_factor / surface_sample.pdf * surface_sample.scatter_function;
@@ -320,19 +318,19 @@ public:
     const Medium& medium = medium_tracker_parent.getCurrentMedium();
     
     auto scatter_smpl = medium.SamplePhaseFunction(-incident_dir, pos, sampler);
-    auto result = Trace({pos, scatter_smpl.dir}, level+1, medium_tracker_parent);
+    auto result = Trace({pos, scatter_smpl.dir}, level, medium_tracker_parent, HitId());
     
     result *= scatter_smpl.phase_function / scatter_smpl.pdf;
     return result;
   }
   
   
-  Spectral Trace(const Ray &ray, int level, const MediumTracker &medium_tracker_parent)
+  Spectral Trace(const Ray &ray, int level, const MediumTracker &medium_tracker_parent, const HitId &to_ignore)
   {
     const Medium& medium = medium_tracker_parent.getCurrentMedium();
     auto segment = RaySegment{ray, LargeNumber};
 
-    HitId hit = scene.Intersect(segment.ray, segment.length);  
+    HitId hit = scene.Intersect(segment.ray, segment.length, to_ignore);  
     auto medium_smpl = medium.SampleInteractionPoint(segment, sampler);
     
     if (medium_smpl.t < segment.length)
@@ -341,7 +339,7 @@ public:
       auto result = PropagationAtVolumeInteraction(
         pos,
         ray.dir,
-        level,
+        level+1,
         medium_tracker_parent
       );
       
@@ -355,14 +353,15 @@ public:
       {
         RaySurfaceIntersection intersection{hit, segment};
         // Compute specular and translucency path components.
-        auto result = PropagationAtIntersection(ray.dir, intersection, level, medium_tracker_parent);
+        auto result = PropagationAtIntersection(ray.dir, intersection, level+1, medium_tracker_parent);
         // Direct lighting.
         result += LightConnection(ray.dir, intersection, medium_tracker_parent);
         return result;
       }
       else
       {
-        return scene.bgColor;
+        //return scene.bgColor;
+        return Spectral{0.};
       }
     }
   }
@@ -373,7 +372,7 @@ public:
     auto cam_sample = TakeRaySample(scene.GetCamera(), pixel_index, sampler);
     
     this->medium_tracker_root.initializePosition(cam_sample.ray_out.org);
-    Spectral eye_tree_factor = Trace(cam_sample.ray_out, 1, this->medium_tracker_root);
+    Spectral eye_tree_factor = Trace(cam_sample.ray_out, 1, this->medium_tracker_root, HitId());
 
     return cam_sample.measurement_contribution * eye_tree_factor / cam_sample.pdf;
   };

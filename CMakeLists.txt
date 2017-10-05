@@ -17,7 +17,7 @@ find_package(GTest REQUIRED)
 include_directories(${PNG_INCLUDE_DIR} ${JPEG_INCLUDE_DIR})
 link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSIMP_LIBRARY} ${X11_LIBRARIES})
 
-set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx)
+set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx bsptree.cxx)
 add_executable(naivetrace naivetrace.cxx ${SOURCES})
 add_executable(tests tests.cxx ${SOURCES})
 
