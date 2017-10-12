@@ -96,6 +96,7 @@ void MediumTracker::leaveVolume(const Medium* medium)
 
 class SpectralImageBuffer
 {
+  // TODO: Cache aligned allocation!
   std::vector<int> count;
   std::vector<Spectral>  accumulator;
   int xres, yres;
@@ -189,7 +190,7 @@ public:
 
 class Raytracing : public BaseAlgo
 {
-  int max_level = 5;
+  int max_level = 10;
 public:
   Raytracing(const Scene &_scene) : BaseAlgo(_scene) {}
   
@@ -299,13 +300,14 @@ public:
     // By definition, intersection.normal points to where the intersection ray is comming from.
     // Thus we can determine if the sampled direction goes through the surface by looking
     // if the direction goes in the opposite direction of the normal.
-    if (Dot(surface_sample.dir, intersection.normal) < 0.)
+    auto out_dir_dot_normal = Dot(surface_sample.dir, intersection.normal);
+    if (out_dir_dot_normal < 0.)
     {
       medium_tracker.goingThroughSurface(surface_sample.dir, intersection);
     }
     auto ret = Trace({intersection.pos, surface_sample.dir}, level,  medium_tracker, intersection.hitid);
     
-    double d_factor = std::abs(Dot(intersection.normal, surface_sample.dir));
+    double d_factor = out_dir_dot_normal >= 0. ? out_dir_dot_normal : 1.;
     ret *= d_factor / surface_sample.pdf * surface_sample.scatter_function;
     return ret;
   }
