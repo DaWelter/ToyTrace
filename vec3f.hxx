@@ -1,13 +1,12 @@
 #ifndef VEC3F_HXX
 #define VEC3F_HXX
 
-#include <cassert>
 #include <iostream>
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Geometry>
 #include <eigen3/Eigen/LU>
-#include <boost/format.hpp>
-#include <boost/functional/hash.hpp>
+//#include <boost/format.hpp>
+//#include <boost/functional/hash.hpp>
 
 template<class T, int d>
 class Vec : public Eigen::Matrix<T, d, 1>
@@ -75,20 +74,21 @@ constexpr int static_size<Spectral>()
 }
 
 
-namespace std
-{
-  template<class T, int dim>
-  struct hash<Vec<T,dim> >
-  {
-    std::size_t operator()(const Vec<T, dim> &key) const
-    {
-      std::size_t seed = 0;
-      for (int i=0; i<dim; ++i)
-        boost::hash_combine(seed, boost::hash_value(key[i]));
-      return seed;
-    }
-  };
-}
+// Don't need.
+// namespace std
+// {
+//   template<class T, int dim>
+//   struct hash<Vec<T,dim> >
+//   {
+//     std::size_t operator()(const Vec<T, dim> &key) const
+//     {
+//       std::size_t seed = 0;
+//       for (int i=0; i<dim; ++i)
+//         boost::hash_combine(seed, boost::hash_value(key[i]));
+//       return seed;
+//     }
+//   };
+// }
 
 //namespace Eigen
 //{
@@ -211,52 +211,6 @@ constexpr auto LargeNumber = std::numeric_limits<double>::max()/16;
 constexpr auto NaN = std::numeric_limits<double>::quiet_NaN();
 constexpr auto UnitSphereSurfaceArea = 4.*Pi;
 constexpr auto UnitHalfSphereSurfaceArea = 2.*Pi;
-
-#if 0 // if using c++11
-namespace std {
-template<typename T, typename... Args>
-std::unique_ptr<T> make_unique(Args&&... args) {
-    return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
-}
-}
-#endif
-
-template<class T>
-inline T Sqr(const T &x)
-{
-  return x*x;
-}
-
-
-namespace strconcat_internal
-{
-
-/* Terminate the recursion. */
-inline void impl(std::stringstream &ss)
-{
-}
-/* Concatenate arbitrary objects recursively into a string using a stringstream.
-   Adapted from https://en.wikipedia.org/wiki/Variadic_template
-*/
-template<class T, class ... Args>
-inline void impl(std::stringstream &ss, const T& x, Args&& ... args)
-{
-  ss << x;
-  impl(ss, args...);
-}
-
-}
-
-/* A simple, safe, replacement for sprintf with automatic memory management.
-   I will probably implement this for String, too.
-*/
-template<class ... Args>
-std::string strconcat(Args&& ...args)
-{
-  std::stringstream ss;
-  strconcat_internal::impl(ss, args...);
-  return ss.str();
-}
 
 
 #endif

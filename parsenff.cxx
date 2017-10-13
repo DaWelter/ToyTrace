@@ -4,6 +4,7 @@
 #include "infiniteplane.hxx"
 #include "triangle.hxx"
 #include "shader.hxx"
+#include "util.hxx"
 
 #define LINESIZE 1000
 

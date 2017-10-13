@@ -1,5 +1,5 @@
 #include "scene.hxx"
-
+#include "util.hxx"
 
 /* This thing tracks overlapping media volumes. Since it is a bit complicated
  * to physically correctly handle mixtures of media that would occur
