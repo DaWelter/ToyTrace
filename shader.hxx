@@ -20,22 +20,21 @@ struct BSDFSample
 };
 
 
-// enum ShaderFlags
-// {
-//   // Probability of scattered directions described by point mass functions?
-//   TRANSMISSION_IS_PMF = 1, 
-//   REFLECTION_IS_PMF = 2,
-// };
-// ?????
+enum ShaderFlags : int
+{
+  REFLECTION_IS_SPECULAR = 1,
+};
 
 
 class Shader
 {
+  int flags;
 public:
+  Shader(int _flags = 0) : flags(_flags) {}
   virtual ~Shader() {}
   virtual BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const = 0;
   virtual Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, double *pdf) const = 0;
-  //int flags;
+  bool IsReflectionSpecular() const { return flags & REFLECTION_IS_SPECULAR; }
 };
 
 
@@ -52,7 +51,7 @@ public:
 class InvisibleShader : public Shader
 {
 public:
-  InvisibleShader() = default;
+  InvisibleShader() : Shader(REFLECTION_IS_SPECULAR) {}
   BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
   Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
 };

@@ -5,7 +5,8 @@
 
 
 DiffuseShader::DiffuseShader(const Spectral &_reflectance)
-  : kr_d(_reflectance)
+  : Shader(0),
+    kr_d(_reflectance)
 {
   // Wtf? kr_d is the (constant) Lambertian BRDF. Energy conservation
   // demands Int|_Omega kr_d cos(theta) dw <= 1. Working out the math

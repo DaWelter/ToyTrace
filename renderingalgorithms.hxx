@@ -235,56 +235,53 @@ public:
   }
   
   
-  std::pair<Spectral, Double3> LightEmissionWithTransmittanceTo(const Double3 &pos, const HitId &last_hit, const MediumTracker &medium_tracker_parent)
+  Spectral LightConnection(const Double3 &pos, const Double3 &incident_dir, const RaySurfaceIntersection *intersection, const MediumTracker &medium_tracker_parent)
   {
     if (scene.GetNumLights() <= 0)
-      return std::make_pair(Spectral{0.}, Double3{0.});
+      return Spectral{0.};
 
     const Light* light; double pmf_of_light; std::tie(light, pmf_of_light) = PickLightUniform();
 
     RadianceOrImportance::Sample light_sample = light->TakePositionSample(sampler);
     RaySegment segment_to_light = MakeSegmentToLight(pos, light_sample);
+
+    double d_factor = 1.;
+    Spectral scatter_factor;
+    if (intersection)
+    {
+      d_factor = std::max(0., Dot(intersection->normal, segment_to_light.ray.dir));
+      const auto &shader = intersection->shader();
+      scatter_factor = shader.EvaluateBSDF(-incident_dir, *intersection, segment_to_light.ray.dir, nullptr);
+      
+    }
+    else
+    {
+      const auto &medium = medium_tracker_parent.getCurrentMedium();
+      scatter_factor = medium.EvaluatePhaseFunction(-incident_dir, pos, segment_to_light.ray.dir, nullptr);
+    }
+    
+    if (d_factor <= 0.)
+      return Spectral{0.};
     
     // TODO: consider case of infinitely far away light!!
-    auto transmittance = TransmittanceEstimate(segment_to_light, last_hit, medium_tracker_parent);
-    auto sample_value = (transmittance * light_sample.measurement_contribution)
-                         / (light_sample.pdf * Sqr(segment_to_light.length));
+    auto transmittance = TransmittanceEstimate(segment_to_light, (intersection ? intersection->hitid : HitId()), medium_tracker_parent);
     
-    return std::make_pair(sample_value, segment_to_light.ray.dir);
+    auto sample_value = (transmittance * light_sample.measurement_contribution * scatter_factor)
+                        * d_factor / (light_sample.pdf * Sqr(segment_to_light.length) * pmf_of_light);
+    
+    return sample_value;
   }
   
   
   Spectral LightConnection(const Double3 &incident_dir, const RaySurfaceIntersection &intersection, const MediumTracker &medium_tracker_parent)
   {
-    Spectral light_value;
-    Double3 dir_to_light;
-    std::tie(light_value, dir_to_light) = LightEmissionWithTransmittanceTo(intersection.pos, intersection.hitid, medium_tracker_parent);
-    
-    if (light_value.abs().sum() <= 1.e-6)
-      return Spectral{0.};
-    
-    const auto &shader = intersection.shader();
-    Spectral bsdf_value = shader.EvaluateBSDF(-incident_dir, intersection, dir_to_light, nullptr);
-    double d_factor = std::max(0., Dot(intersection.normal, dir_to_light));
-    
-    auto ret = d_factor * bsdf_value * light_value;
-    return ret;
+    return LightConnection(intersection.pos, incident_dir, &intersection, medium_tracker_parent);
   }
   
   
   Spectral LightConnection(const Double3 &pos, const Double3 &incident_dir, const MediumTracker &medium_tracker_parent)
   {
-    Spectral light_value;
-    Double3 dir_to_light;
-    std::tie(light_value, dir_to_light) = LightEmissionWithTransmittanceTo(pos, HitId(), medium_tracker_parent);
-    
-    if (light_value.abs().sum() <= 1.e-6)
-      return Spectral{0.};
-    
-    const auto &medium = medium_tracker_parent.getCurrentMedium();
-    auto phase_func = medium.EvaluatePhaseFunction(-incident_dir, pos, dir_to_light, nullptr);
-    auto ret = phase_func * light_value;
-    return ret;
+    return LightConnection(pos, incident_dir, nullptr, medium_tracker_parent);
   }
   
   
@@ -354,15 +351,13 @@ public:
       if (hit)
       {
         RaySurfaceIntersection intersection{hit, segment};
-        // Compute specular and translucency path components.
         auto result = PropagationAtIntersection(ray.dir, intersection, level+1, medium_tracker_parent);
-        // Direct lighting.
-        result += LightConnection(ray.dir, intersection, medium_tracker_parent);
+        if (!intersection.shader().IsReflectionSpecular())
+          result += LightConnection(ray.dir, intersection, medium_tracker_parent);
         return result;
       }
       else
       {
-        //return scene.bgColor;
         return Spectral{0.};
       }
     }
