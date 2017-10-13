@@ -98,7 +98,7 @@ class SpectralImageBuffer
 {
   // TODO: Cache aligned allocation!
   std::vector<int> count;
-  std::vector<Spectral>  accumulator;
+  std::vector<Spectral, AlignmentAllocator<Spectral, 128> >  accumulator;
   int xres, yres;
 public:
   SpectralImageBuffer(int _xres, int _yres)

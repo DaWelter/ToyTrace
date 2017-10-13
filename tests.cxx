@@ -26,6 +26,13 @@ TEST(BasicAssumptions, EigenTypes)
 };
 
 
+TEST(BasicAssumptions, AlignmentAllocator)
+{
+  std::vector<double, AlignmentAllocator<double, 128>> v{1., 2., 3.};
+  EXPECT_EQ(((std::size_t)&v[0]) % 128, 0);
+}
+
+
 // Throw a one with probability p and zero with probability 1-p.
 // Let this be reflected by random variable X \in {0, 1}.
 // What is the expectation E[X] and std deviation sqrt(Var[X])?
