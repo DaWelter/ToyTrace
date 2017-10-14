@@ -14,6 +14,7 @@ public:
 
   inline bool PotentialDistances(const Ray &ray, double ray_length, double &t1, double &t2) const
   {
+    ASSERT_NORMALIZED(ray.dir);
     Double3 q = center-ray.org;
     double t = Dot(q,ray.dir);
     if(t>ray_length+Epsilon+radius || t<-radius+Epsilon) return false;
@@ -26,6 +27,26 @@ public:
     if (t1<0. || t2>ray_length) return false;
     return true;
   }
+  
+
+  /* To fix precision issues I tried to move the intersection point closer
+   * to the sphere surface by refining t via Newton iterations.
+   * That worked. However since the introduction of Duff's
+   * orthonormal basis code the precision problems are gone either way. 
+     To use like this:
+   t1 = Refine(t1, Dot(q,q), -Dot(q, ray.dir), Dot(ray.dir, ray.dir));
+   t2 = Refine(t2, Dot(q,q), -Dot(q, ray.dir), Dot(ray.dir, ray.dir));
+
+  inline double Refine(double t, double qq, double qv, double vv) const
+  {
+    // Newton iterations.
+    for (int n = 0; n < 5; ++n)
+    {
+      t = (t*t*vv - qq + radius*radius) / (2.*qv + 2.*t*vv);
+    }
+    return t;
+  }
+  */  
   
   bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const override
   {
@@ -42,7 +63,7 @@ public:
   bool CheckIsNearHit(const Ray &ray, double t, const Double3 &p, const HitId &to_ignore) const
   {
     // TODO: use error estimates of t and to_ignore.barry. Because this is really unreliable.
-    const double tol = 1.e-10; //Epsilon * radius;
+    const double tol = 10. * Epsilon * radius;
     double uu = LengthSqr(to_ignore.barry - p);
     return uu < tol*tol;
   }

@@ -172,6 +172,14 @@ inline void Normalize(Vec<T,3>& u)
   return u.normalize();
 }
 
+
+#ifndef NDEBUG
+#define ASSERT_NORMALIZED(v) assert(std::abs(LengthSqr(v) - 1.) < 1.e-6)
+#else
+#define ASSERT_NORMALIZED(v) ((void)0)
+#endif
+
+
 template<class Scalar>
 inline Scalar Clip(Scalar &x, Scalar a,Scalar b) {
   // TODO: Change this so that it preserve NaN input in x;
@@ -190,7 +198,8 @@ inline OrthogonalSystemZAligned(const Eigen::MatrixBase<Derived> &_Z)
   auto X = m.col(0);
   auto Y = m.col(1);
   Z = _Z;
-  Z.normalize();
+  ASSERT_NORMALIZED(Z);
+  //Z.normalize();
   
   // Listing 3 in Duff et al. (2017) "Building an Orthonormal Basis, Revisited".
   float sign = std::copysignf(1.0f, Z[2]);
