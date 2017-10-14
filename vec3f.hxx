@@ -191,18 +191,16 @@ inline OrthogonalSystemZAligned(const Eigen::MatrixBase<Derived> &_Z)
   auto Y = m.col(1);
   Z = _Z;
   Z.normalize();
-  if(Z.x()*Z.x() + Z.y()*Z.y() > 1.0e-6) 
-  {
-    Y = Cross(Z, Double3(0.,0.,1.));
-    X = Cross(Y,Z);
-  } 
-  else 
-  {
-    Y = Float3(0,1,0);
-    X = Float3(1,0,0);
-  }
+  
+  // Listing 3 in Duff et al. (2017) "Building an Orthonormal Basis, Revisited".
+  float sign = std::copysignf(1.0f, Z[2]);
+  const float a = -1.0f / (sign + Z[2]);
+  const float b = Z[0] * Z[1] * a;
+  X = Double3(1.0f + sign * Z[0] * Z[0] * a, sign * b, -sign * Z[0]);
+  Y = Double3(b, sign + Z[1] * Z[1] * a, -Z[1]);
   return m;
 }
+
 
 constexpr auto Epsilon = std::numeric_limits<double>::epsilon();
 constexpr auto Pi      = double(3.14159265358979323846264338327950288419716939937510);
