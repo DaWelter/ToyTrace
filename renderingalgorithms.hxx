@@ -27,7 +27,7 @@ public:
 
 MediumTracker::MediumTracker(const Scene& _scene)
   : scene{_scene}, current{nullptr}, media{}
-  // Note: Zero-initializes media array.
+  // Note: Ctor zero-initializes the media array.
 {
   
 }
@@ -96,7 +96,6 @@ void MediumTracker::leaveVolume(const Medium* medium)
 
 class SpectralImageBuffer
 {
-  // TODO: Cache aligned allocation!
   std::vector<int> count;
   std::vector<Spectral, AlignmentAllocator<Spectral, 128> >  accumulator;
   int xres, yres;
@@ -190,9 +189,20 @@ public:
 
 class Raytracing : public BaseAlgo
 {
-  int max_level = 10;
 public:
   Raytracing(const Scene &_scene) : BaseAlgo(_scene) {}
+  
+  
+  double RouletteSurvivalProb(const Spectral &s, int level)
+  {
+    static constexpr int MAX_LEVEL = 25;
+    static constexpr int MIN_LEVEL = 5;
+    static constexpr double LOW_CONTRIBUTION = 0.2;
+    return level>MAX_LEVEL ? 0. : (level<MIN_LEVEL ? 1. : std::min(1., s.maxCoeff() / LOW_CONTRIBUTION));
+    
+    //return level>max_level ? 0. : 1.;
+  }
+  
   
   RaySegment MakeSegmentToLight(const Double3 &pos_to_be_lit, const RadianceOrImportance::Sample &light_sample)
   {
@@ -285,46 +295,56 @@ public:
   }
   
   
-  Spectral PropagationAtIntersection(const Double3 &incident_dir, const RaySurfaceIntersection &intersection, int level, const MediumTracker &medium_tracker_parent)
+  void PropagationAtIntersection(Spectral &parent_sample_value, const Double3 &incident_dir, const RaySurfaceIntersection &intersection, int level, const MediumTracker &medium_tracker_parent)
   {
-    if (level > max_level)
-      return Spectral{0.};
-    
     auto surface_sample  = intersection.shader().SampleBSDF(-incident_dir, intersection, sampler);
+
+    auto out_dir_dot_normal = Dot(surface_sample.dir, intersection.normal);
+    double d_factor = out_dir_dot_normal >= 0. ? out_dir_dot_normal : 1.;
+
+    parent_sample_value *= d_factor / surface_sample.pdf * surface_sample.scatter_function;
+    
+    double p_survive = RouletteSurvivalProb(parent_sample_value, level);
+    if (p_survive == 0. || sampler.Uniform01() > p_survive)
+    {
+      parent_sample_value = Spectral{0.};
+      return;
+    }
     // Preserve the information about current media. However, as we propagate the path further,
     // the current medium can change. Therefore we need to clone the medium tracker.
     MediumTracker medium_tracker(medium_tracker_parent);
+
     // By definition, intersection.normal points to where the intersection ray is comming from.
     // Thus we can determine if the sampled direction goes through the surface by looking
-    // if the direction goes in the opposite direction of the normal.
-    auto out_dir_dot_normal = Dot(surface_sample.dir, intersection.normal);
+    // if the direction goes in the opposite direction of the normal.    
     if (out_dir_dot_normal < 0.)
     {
       medium_tracker.goingThroughSurface(surface_sample.dir, intersection);
     }
-    auto ret = Trace({intersection.pos, surface_sample.dir}, level,  medium_tracker, intersection.hitid);
-    
-    double d_factor = out_dir_dot_normal >= 0. ? out_dir_dot_normal : 1.;
-    ret *= d_factor / surface_sample.pdf * surface_sample.scatter_function;
-    return ret;
+
+    Trace(parent_sample_value, {intersection.pos, surface_sample.dir}, level,  medium_tracker, intersection.hitid);
   }
   
   
-  Spectral PropagationAtVolumeInteraction(const Double3 &pos, const Double3 &incident_dir, int level, const MediumTracker &medium_tracker_parent)
+  void PropagationAtVolumeInteraction(Spectral &parent_sample_value, const Double3 &pos, const Double3 &incident_dir, int level, const MediumTracker &medium_tracker_parent)
   {
-    if (level > max_level)
-      return Spectral{0.};
     const Medium& medium = medium_tracker_parent.getCurrentMedium();
     
     auto scatter_smpl = medium.SamplePhaseFunction(-incident_dir, pos, sampler);
-    auto result = Trace({pos, scatter_smpl.dir}, level, medium_tracker_parent, HitId());
+    parent_sample_value *= scatter_smpl.phase_function / scatter_smpl.pdf;
+
+    double p_survive = RouletteSurvivalProb(parent_sample_value, level);
+    if (p_survive == 0. || sampler.Uniform01() > p_survive)
+    {
+      parent_sample_value = Spectral{0.};
+      return;
+    }
     
-    result *= scatter_smpl.phase_function / scatter_smpl.pdf;
-    return result;
+    Trace(parent_sample_value, {pos, scatter_smpl.dir}, level, medium_tracker_parent, HitId());
   }
   
   
-  Spectral Trace(const Ray &ray, int level, const MediumTracker &medium_tracker_parent, const HitId &to_ignore)
+  void Trace(Spectral &parent_sample_value, const Ray &ray, int level, const MediumTracker &medium_tracker_parent, const HitId &to_ignore)
   {
     const Medium& medium = medium_tracker_parent.getCurrentMedium();
     auto segment = RaySegment{ray, LargeNumber};
@@ -335,30 +355,34 @@ public:
     if (medium_smpl.t < segment.length)
     {
       auto pos = ray.org + medium_smpl.t * ray.dir;
-      auto result = PropagationAtVolumeInteraction(
+      auto ret1 = parent_sample_value.eval();
+      PropagationAtVolumeInteraction(
+        ret1,
         pos,
         ray.dir,
         level+1,
         medium_tracker_parent
       );
-      
-      result += LightConnection(pos, ray.dir, medium_tracker_parent);
-      result *= medium_smpl.sigma_s / medium_smpl.pdf;
-      return result;
+      auto ret2 = parent_sample_value * LightConnection(pos, ray.dir, medium_tracker_parent);
+      auto scatter_factor = medium_smpl.sigma_s / medium_smpl.pdf;
+      parent_sample_value = scatter_factor * (ret1 + ret2);
     }
     else
     {
       if (hit)
       {
         RaySurfaceIntersection intersection{hit, segment};
-        auto result = PropagationAtIntersection(ray.dir, intersection, level+1, medium_tracker_parent);
+        Spectral tmp = parent_sample_value;
+        PropagationAtIntersection(parent_sample_value, ray.dir, intersection, level+1, medium_tracker_parent);
         if (!intersection.shader().IsReflectionSpecular())
-          result += LightConnection(ray.dir, intersection, medium_tracker_parent);
-        return result;
+        {
+          auto lc = LightConnection(ray.dir, intersection, medium_tracker_parent);
+          parent_sample_value += lc * tmp;
+        }
       }
       else
       {
-        return Spectral{0.};
+        parent_sample_value = Spectral{0.};
       }
     }
   }
@@ -369,9 +393,11 @@ public:
     auto cam_sample = TakeRaySample(scene.GetCamera(), pixel_index, sampler);
     
     this->medium_tracker_root.initializePosition(cam_sample.ray_out.org);
-    Spectral eye_tree_factor = Trace(cam_sample.ray_out, 1, this->medium_tracker_root, HitId());
-
-    return cam_sample.measurement_contribution * eye_tree_factor / cam_sample.pdf;
+    
+    Spectral ret = cam_sample.measurement_contribution / cam_sample.pdf;
+    
+    Trace(ret, cam_sample.ray_out, 1, this->medium_tracker_root, HitId());
+    return ret;
   };
 };
 
