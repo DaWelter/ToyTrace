@@ -95,6 +95,95 @@ public:
 };
 
 
+class DistantDirectionalLight : public Light
+{
+  Spectral col;
+  Double3 dir_out;
+public:
+  DistantDirectionalLight(const Spectral &_col,const Double3 &_dir_out)
+    : col(_col),dir_out(_dir_out)
+    {}
+
+  Sample TakePositionSample(Sampler &sampler) const override
+  {
+    Sample s {
+      dir_out,
+      1.,
+      col,
+      true };
+    return s;
+  }
+  
+  DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler) const override
+  {
+    assert(false && !"not implemented");
+    return DirectionalSample{};
+  }
+  
+  Spectral EvaluatePositionComponent(const Double3 &pos, double *pdf) const override
+  {
+    assert (Length(pos - this->dir_out) <= Epsilon);
+    if (pdf) *pdf = 1.;
+    return col;
+  }
+  
+  Spectral EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, double *pdf) const override
+  {
+    if (pdf) *pdf = 1.;
+    return Spectral{1.};
+  }
+};
+
+
+class DistantDomeLight : public Light
+{
+  Spectral col;
+  Double3 down_dir;
+  Eigen::Matrix3d frame;
+public:
+  DistantDomeLight(const Spectral &_col, const Double3 &_up_dir)
+    : col(_col), down_dir(-_up_dir)
+  {
+    frame = OrthogonalSystemZAligned(down_dir);
+  }
+
+  Sample TakePositionSample(Sampler &sampler) const override
+  {
+    // Generate directions pointing away from the light by
+    // sampling the opposite hemisphere!
+    auto dir_out = frame * SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare());
+    double pdf = 1./UnitHalfSphereSurfaceArea;
+    Sample s {
+      dir_out,
+      pdf,
+      col,
+      true };
+    return s;
+  }
+  
+  DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler) const override
+  {
+    assert(false && !"not implemented");
+    return DirectionalSample{};
+  }
+  
+  Spectral EvaluatePositionComponent(const Double3 &pos, double *pdf) const override
+  {
+    if (pdf) *pdf = 1./UnitHalfSphereSurfaceArea;
+    // Similar rationale as above: light comes from the top hemisphere if
+    // the direction vector (here pos) points down.
+    auto above = Dot(pos, down_dir);
+    return above > 0 ? col : Spectral{0.};
+  }
+  
+  Spectral EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, double *pdf) const override
+  {
+    if (pdf) *pdf = 1.;
+    return Spectral{1.};
+  }
+};
+
+
 // class SpotLight : public Light
 // {
 // 	Double3 pos,dir,col;

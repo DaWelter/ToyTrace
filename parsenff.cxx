@@ -372,9 +372,50 @@ void NFFParser::Parse(const char* fileName)
       }
       continue;
     }
-    
+  
+  
+    if (!strcmp(token, "lddirection"))
+    {
+      Double3 dir_out;
+      Spectral col;
+      int num = sscanf(line,"lddirection %lg %lg %lg %lg %lg %lg",
+          &dir_out[0],&dir_out[1],&dir_out[2],
+          &col[0],&col[1],&col[2]);
+      Normalize(dir_out);
+      if (num == 6)
+      {
+        scene->AddLight(std::make_unique<DistantDirectionalLight>(col, dir_out));
+      }
+      else
+      {
+        std::cout << "error in " << fileName << " : " << line << std::endl;
+      }
+      continue;
+    }
+  
+  
+    if (!strcmp(token, "lddome"))
+    {
+      Double3 dir_up;
+      Spectral col;
+      int num = sscanf(line,"lddome %lg %lg %lg %lg %lg %lg",
+          &dir_up[0],&dir_up[1],&dir_up[2],
+          &col[0],&col[1],&col[2]);
+      Normalize(dir_up);
+      if (num == 6)
+      {
+        scene->AddLight(std::make_unique<DistantDomeLight>(col, dir_up));
+      }
+      else
+      {
+        std::cout << "error in " << fileName << " : " << line << std::endl;
+      }
+      continue;
+    }
+  
+  
     /* lightsource */
-    if (!strcmp(token,"l")) 
+  if (!strcmp(token,"l")) 
 	{
 		Double3 pos;
     Spectral col;
