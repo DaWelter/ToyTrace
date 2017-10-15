@@ -198,9 +198,9 @@ public:
     static constexpr int MAX_LEVEL = 25;
     static constexpr int MIN_LEVEL = 5;
     static constexpr double LOW_CONTRIBUTION = 0.2;
-    return level>MAX_LEVEL ? 0. : (level<MIN_LEVEL ? 1. : std::min(1., s.maxCoeff() / LOW_CONTRIBUTION));
+    return level>MAX_LEVEL ? 0. : (level<MIN_LEVEL ? 1. : std::min(0.9, s.maxCoeff() / LOW_CONTRIBUTION));
     
-    //return level>max_level ? 0. : 1.;
+//    return level>MAX_LEVEL ? 0. : 1.;
   }
   
   
@@ -272,12 +272,11 @@ public:
     
     if (d_factor <= 0.)
       return Spectral{0.};
-    
-    // TODO: consider case of infinitely far away light!!
+
     auto transmittance = TransmittanceEstimate(segment_to_light, (intersection ? intersection->hitid : HitId()), medium_tracker_parent);
     
     auto sample_value = (transmittance * light_sample.measurement_contribution * scatter_factor)
-                        * d_factor / (light_sample.pdf * Sqr(segment_to_light.length) * pmf_of_light);
+                        * d_factor / (light_sample.pdf * (light_sample.is_direction ? 1. : Sqr(segment_to_light.length)) * pmf_of_light);
     
     return sample_value;
   }
@@ -364,11 +363,15 @@ public:
         medium_tracker_parent
       );
       auto ret2 = parent_sample_value * LightConnection(pos, ray.dir, medium_tracker_parent);
-      auto scatter_factor = medium_smpl.sigma_s / medium_smpl.pdf;
+      auto scatter_factor = medium_smpl.sigma_s * medium_smpl.transmission / medium_smpl.pdf;
       parent_sample_value = scatter_factor * (ret1 + ret2);
     }
     else
     {
+      // TODO: This part needs a proper transmission estimate because
+      // Theta(t > t_hit) is only an estimator for the transmission
+      // if t is picked according p(t) = sigma_t*T(t).
+      // So this cannot work for chromatic collision coefficients.
       if (hit)
       {
         RaySurfaceIntersection intersection{hit, segment};
