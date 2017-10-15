@@ -7,7 +7,11 @@
 #include <memory>
 
 static constexpr int SAMPLES_PER_PIXEL = 16;
+#ifndef NDEBUG
+static constexpr int NUM_THREADS = 0;
+#else
 static constexpr int NUM_THREADS = 4;
+#endif
 
 class Worker
 {
@@ -258,11 +262,13 @@ int main(int argc, char *argv[])
   }
   else
   {
-    NormalVisualizer algo(scene);
+    Raytracing algo(scene);
     for (int y = 0; y < yres; ++y)
     {
       for (int x = 0; x < xres; ++x)
       {
+        //if (x != 47 || y != (128-75))
+        //  continue;
         int pixel_index = scene.GetCamera().PixelToUnit({x, y});
         Spectral smpl = algo.MakePrettyPixel(pixel_index);
         buffer.Insert(pixel_index, smpl);
