@@ -70,12 +70,14 @@ class NFFParser
   CurrentThing<Medium> mediums;
   Eigen::Transform<double,3,Eigen::Affine> currentTransform;
   std::string dirname;
+  RenderingParameters *render_params;
   friend class AssimpReader;
 public:
-  NFFParser(Scene* _scene) :
+  NFFParser(Scene* _scene, RenderingParameters *_render_params) :
     scene(_scene),
     shaders("Shader", "invisible", new InvisibleShader()),
-    mediums("Medium", "default", new VacuumMedium())
+    mediums("Medium", "default", new VacuumMedium()),
+    render_params(_render_params)
   {
     shaders.set_and_activate("default", new DiffuseShader(Double3(0.8, 0.8, 0.8)));
     currentTransform = decltype(currentTransform)::Identity();
@@ -198,6 +200,17 @@ void NFFParser::Parse(const char* fileName)
       fscanf(file,"angle %lg\n",&angle);
       fscanf(file,"hither %lg\n",&hither);
       fscanf(file,"resolution %d %d\n",&resX,&resY);
+      if (render_params)
+      {
+	if (render_params->height > 0)
+	  resY = render_params->height;
+	else
+	  render_params->height = resY;
+	if (render_params->width > 0)
+	  resX = render_params->width;
+	else
+	  render_params->width = resX;
+      }
       scene->SetCamera<PerspectiveCamera>(pos,at-pos,up,angle,resX,resY);
       
       continue;
@@ -606,10 +619,10 @@ void NFFParser::ParseMesh(const char* filename)
 }
 
 
-void Scene::ParseNFF(const char* fileName)
+void Scene::ParseNFF(const char* fileName, RenderingParameters *render_params)
 {
   // parse file, add all items to 'primitives'
-  NFFParser(this).Parse(fileName);
+  NFFParser(this, render_params).Parse(fileName);
 }
 
 

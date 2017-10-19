@@ -8,6 +8,19 @@
 
 #include <memory>
 
+
+struct RenderingParameters
+{
+  int pixel_x = {-1};
+  int pixel_y = {-1};
+  int width = {-1};
+  int height = {-1};
+  int num_threads = { -1 };
+  int max_ray_depth = 25;
+};
+
+
+
 class Scene
 {
   // parse an NFF file 'fileName', add all its primitives
@@ -34,7 +47,7 @@ public:
   {
   };
 
-  void ParseNFF(const char *fileName);
+  void ParseNFF(const char *fileName, RenderingParameters *render_params = nullptr);
   
   template<class CameraType, class... Args>
   void SetCamera(Args&&... args)
@@ -46,7 +59,7 @@ public:
   void AddLight(std::unique_ptr<Light> light) 
   {
     // TODO: Manage memory ...
-	  lights.push_back(light.release());
+    lights.push_back(light.release());
   }
   
   int GetNumLights() const

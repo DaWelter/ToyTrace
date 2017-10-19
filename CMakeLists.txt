@@ -13,6 +13,7 @@ find_package(Threads)
 find_library(ASSIMP_LIBRARY NAMES assimp)
 find_package(X11)
 find_package(GTest REQUIRED)
+find_package(Boost REQUIRED COMPONENTS program_options)
 
 include_directories(${PNG_INCLUDE_DIR} ${JPEG_INCLUDE_DIR})
 link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSIMP_LIBRARY} ${X11_LIBRARIES})
@@ -20,6 +21,8 @@ link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSI
 set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx bsptree.cxx)
 add_executable(naivetrace naivetrace.cxx ${SOURCES})
 add_executable(tests tests.cxx ${SOURCES})
+
+target_link_libraries(naivetrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE})
 
 target_include_directories(tests PUBLIC ${GTEST_INCLUDE_DIRS})
 target_link_libraries(tests ${GTEST_LIBRARIES} pthread)

@@ -565,7 +565,7 @@ TEST_F(SimpleRenderTests, OnePixelBackground)
   SetCameraSimple(0., 90., 1, 1);
   scene.bgColor = Double3{ 0.5, 0., 0. };
   scene.BuildAccelStructure();
-  Raytracing rt(scene);
+  Raytracing rt(scene, AlgorithmParameters());
   auto col = rt.MakePrettyPixel(0);
   ASSERT_FLOAT_EQ(col[0], 0.5);
   ASSERT_FLOAT_EQ(col[1], 0.);
@@ -645,7 +645,7 @@ TEST_F(SimpleRenderTests, MediaTransmission)
   scene.ParseNFF("scenes/test_dae3.nff");
   scene.BuildAccelStructure();
   scene.PrintInfo();
-  Raytracing rt(scene);
+  Raytracing rt(scene, AlgorithmParameters());
   MediumTracker medium_tracker(scene);
   medium_tracker.initializePosition({0.,0.,-10.});
   double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.

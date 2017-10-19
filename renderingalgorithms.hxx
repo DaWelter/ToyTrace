@@ -186,21 +186,25 @@ public:
 };
 
 
+using  AlgorithmParameters = RenderingParameters;
+
 
 class Raytracing : public BaseAlgo
 {
+  int max_ray_depth;
 public:
-  Raytracing(const Scene &_scene) : BaseAlgo(_scene) {}
+  Raytracing(const Scene &_scene, const AlgorithmParameters &algo_params) 
+  : BaseAlgo(_scene), max_ray_depth(algo_params.max_ray_depth) 
+  {}
   
   
   double RouletteSurvivalProb(const Spectral &s, int level)
   {
-    static constexpr int MAX_LEVEL = 25;
     static constexpr int MIN_LEVEL = 5;
-    static constexpr double LOW_CONTRIBUTION = 0.2;
-    return level>MAX_LEVEL ? 0. : (level<MIN_LEVEL ? 1. : std::min(0.9, s.maxCoeff() / LOW_CONTRIBUTION));
-    
-//    return level>MAX_LEVEL ? 0. : 1.;
+    static constexpr double LOW_CONTRIBUTION = 0.5;
+    return level>max_ray_depth ? 0. : (level<MIN_LEVEL ? 1. : std::min(0.9, s.maxCoeff() / LOW_CONTRIBUTION));
+
+    //    return level>MAX_LEVEL ? 0. : 1.;
   }
   
   

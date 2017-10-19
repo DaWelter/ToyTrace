@@ -5,13 +5,10 @@
 #include <atomic>
 #include <thread>
 #include <memory>
+#include <boost/program_options.hpp>
+
 
 static constexpr int SAMPLES_PER_PIXEL = 16;
-#ifndef NDEBUG
-static constexpr int NUM_THREADS = 0;
-#else
-static constexpr int NUM_THREADS = 4;
-#endif
 
 class Worker
 {
@@ -40,13 +37,13 @@ public:
     REQUEST_GO        = 2,
   };
   
-  Worker(std::atomic_int &_shared_pixel_index, SpectralImageBuffer &_buffer, const Scene &_scene) :
+  Worker(std::atomic_int &_shared_pixel_index, SpectralImageBuffer &_buffer, const Scene &_scene, RenderingParameters &render_params) :
     shared_request(REQUEST_NONE),
     shared_state(THREAD_WAITING),
     shared_pixel_index(_shared_pixel_index),
     buffer(_buffer),
     scene(_scene),
-    algo(_scene)
+    algo(_scene, render_params)
   {
     num_pixels = scene.GetCamera().xres * scene.GetCamera().yres;
     //std::cout << "thread ctor " << this << std::endl;
@@ -176,48 +173,47 @@ void WaitForWorkers(std::vector<std::unique_ptr<Worker>> &workers)
 }
 
 
+void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file, RenderingParameters &render_params);
+
+
 int main(int argc, char *argv[])
 {
-  if (argc != 2) {
-    std::cerr << "Usage: " << argv[0] << " <file.nff>" << std::endl;
-    exit(0);
-  }
+  RenderingParameters render_params;
+  std::string input_file;
+  
+  HandleCommandLineArguments(argc, argv, input_file, render_params);
   
   Scene scene;
   
-  std::cout << "parsing input file " << argv[1]<< std::endl;
-  scene.ParseNFF(argv[1]);
+  std::cout << "parsing input file " << input_file << std::endl;
+  scene.ParseNFF(input_file.c_str(), &render_params);
   
   std::cout << "building acceleration structure " << std::endl;
   scene.BuildAccelStructure();
   scene.PrintInfo();
+   
+  int num_pixels = render_params.width*render_params.height;
   
-  int xres = scene.GetCamera().xres;
-  int yres = scene.GetCamera().yres;
-  int num_pixels = xres*yres;
-  
-  Image bm(xres, yres);
+  Image bm(render_params.width, render_params.height);
   bm.SetColor(0, 0, 128);
-  bm.DrawRect(0, 0, xres-1, yres-1);
+  bm.DrawRect(0, 0, render_params.width-1, render_params.height-1);
   ImageDisplay display;
   display.show(bm);
   
   auto start_time = std::chrono::steady_clock::now();
   
-  SpectralImageBuffer buffer{xres, yres};
-  
-  const int num_threads = NUM_THREADS;
+  SpectralImageBuffer buffer{render_params.width, render_params.height};
 
-  if (num_threads > 0)
+  if (render_params.num_threads > 0)
   { 
     std::atomic_int shared_pixel_index(std::numeric_limits<int>::max());
     
     std::vector<std::unique_ptr<Worker>> workers;
     std::vector<std::thread> threads;
     
-    for (int i=0; i<num_threads; ++i)
-      workers.push_back(std::make_unique<Worker>(shared_pixel_index, buffer, scene));
-    for (int i=0; i<num_threads; ++i)
+    for (int i=0; i<render_params.num_threads; ++i)
+      workers.push_back(std::make_unique<Worker>(shared_pixel_index, buffer, scene, render_params));
+    for (int i=0; i<render_params.num_threads; ++i)
       threads.push_back(std::thread{Worker::Run, workers[i].get()});
       
     std::cout << std::endl;
@@ -238,8 +234,8 @@ int main(int argc, char *argv[])
         WaitForWorkers(workers);
         
         int pixel_index = shared_pixel_index.load();
-        int y = pixel_index/xres;
-        buffer.ToImage(bm, image_conversion_y_start, std::min(yres, y+1));
+        int y = pixel_index/render_params.width;
+        buffer.ToImage(bm, image_conversion_y_start, std::min(render_params.height, y+1));
 
         IssueRequest(workers, Worker::REQUEST_GO);
 
@@ -250,7 +246,7 @@ int main(int argc, char *argv[])
       IssueRequest(workers, Worker::REQUEST_HALT);
       WaitForWorkers(workers);
       
-      buffer.ToImage(bm, image_conversion_y_start, yres);
+      buffer.ToImage(bm, image_conversion_y_start, render_params.height);
       display.show(bm);
       bm.write("raytrace.tga");
     }
@@ -262,18 +258,29 @@ int main(int argc, char *argv[])
   }
   else
   {
-    Raytracing algo(scene);
-    for (int y = 0; y < yres; ++y)
+    //Raytracing algo(scene, render_params);
+    NormalVisualizer algo(scene);
+    if (render_params.pixel_x<0 && render_params.pixel_y<0)
     {
-      for (int x = 0; x < xres; ++x)
+      for (int y = 0; y < render_params.height; ++y)
       {
-        //if (x != 47 || y != (128-75))
-        //  continue;
-        int pixel_index = scene.GetCamera().PixelToUnit({x, y});
-        Spectral smpl = algo.MakePrettyPixel(pixel_index);
-        buffer.Insert(pixel_index, smpl);
+	for (int x = 0; x < render_params.width; ++x)
+	{
+	  int pixel_index = scene.GetCamera().PixelToUnit({x, y});
+	  Spectral smpl = algo.MakePrettyPixel(pixel_index);
+	  buffer.Insert(pixel_index, smpl);
+	}
+	buffer.ToImage(bm, y, y+1);
+	display.show(bm);
       }
-      buffer.ToImage(bm, y, y+1);
+    }
+    else
+    {
+      int pixel_index = scene.GetCamera().PixelToUnit(
+	{render_params.pixel_x, render_params.pixel_y});
+      Spectral smpl = algo.MakePrettyPixel(pixel_index);
+      buffer.Insert(pixel_index, smpl);
+      buffer.ToImage(bm, render_params.pixel_y, render_params.pixel_y+1);
       display.show(bm);
     }
     bm.write("raytrace.tga");
@@ -283,4 +290,104 @@ int main(int argc, char *argv[])
   std::cout << "Rendering time: " << std::chrono::duration<double>(end_time - start_time).count() << std::endl;
 
   return 0;
+}
+
+
+
+void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file, RenderingParameters &render_params)
+{
+  namespace po = boost::program_options;
+  try
+  {
+    po::options_description desc{"Options"};
+    desc.add_options()
+      ("help,h", "Help screen")
+      ("nt", po::value<int>(), "Number of Threads")
+      ("px", po::value<int>(), "X Pixel")
+      ("py", po::value<int>(), "Y Pixel")
+      ("w", po::value<int>(), "Width")
+      ("h", po::value<int>(), "Height")
+      ("rd", po::value<int>(), "Max ray depth")
+      ("input-file", po::value<std::string>(), "Input file");
+    po::positional_options_description pos_desc;
+    pos_desc.add("input-file", -1);
+    po::variables_map vm;
+    po::store(po::command_line_parser(argc, argv).
+	      options(desc).
+	      positional(pos_desc).run(), vm);
+    po::notify(vm);
+    
+    if (vm.count("help"))
+    {
+      std::cout << desc << std::endl;
+      exit(0);
+    }
+    
+    int n = 4;
+    if (vm.count("nt"))
+    {
+      n = vm["nt"].as<int>();
+      if (n < 0)
+	throw po::error("Numer of threads must be non-negative.");
+    }
+    render_params.num_threads = n;
+    
+    bool single_pixel_render = vm.count("px") && vm.count("py");
+    int px = -1, py = -1;
+    if (single_pixel_render)
+    {
+      px = vm["px"].as<int>();
+      py = vm["py"].as<int>();
+    }
+    
+    int w = -1;
+    if (vm.count("w"))
+    {
+      w = vm["w"].as<int>();
+      if (w <= 0)
+	throw po::error("Width must be positive");
+    }
+    
+    int h = -1;
+    if (vm.count("h"))
+    {
+      h = vm["h"].as<int>();
+      if (h <= 0)
+	throw po::error("Height must be positive");
+    }
+    
+    render_params.width = w;
+    render_params.height = h;
+    
+    int rd = 25;
+    if (vm.count("rd"))
+    {
+      rd = vm["rd"].as<int>();
+      if (rd <= 1)
+	throw po::error("Max ray depth must be greater one.");
+    }
+    render_params.max_ray_depth = rd;
+    
+    if (single_pixel_render)
+    {
+      if (px<0 || px>w)
+	throw po::error("Pixel X is out of image bounds.");
+      if (py<0 || py>h)
+	throw po::error("Pixel Y is out of image bounds.");
+    }
+    render_params.pixel_x = px;
+    render_params.pixel_y = py;
+    
+    if (single_pixel_render)
+      render_params.num_threads = 0;
+    
+    if (vm.count("input-file"))
+      input_file = vm["input-file"].as<std::string>();
+    else
+      throw po::error("Input file is required.");
+  }
+  catch(po::error &ex)
+  {
+    std::cerr << ex.what() << std::endl;
+  }
 }
