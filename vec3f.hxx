@@ -136,41 +136,47 @@ inline T Cross( const Vec<T,2>& u, const Vec<T,2> &v )
 }
 
 template<class Derived1, class Derived2>
-inline typename Eigen::internal::plain_matrix_type<Derived1>::type Cross( const Eigen::MatrixBase<Derived1>& u, const Eigen::MatrixBase<Derived2> &v )
+auto Cross( const Eigen::MatrixBase<Derived1>& u, const Eigen::MatrixBase<Derived2> &v ) -> decltype(u.cross(v))
 {
   return u.cross(v);
 }
 
 template<class Derived1, class Derived2>
-inline typename Eigen::internal::plain_matrix_type<Derived1>::type Product( const Eigen::MatrixBase<Derived1>& u, const Eigen::MatrixBase<Derived2> &v )
+auto Product( const Eigen::MatrixBase<Derived1>& u, const Eigen::MatrixBase<Derived2> &v ) -> decltype(u.cwiseProduct(v))
 {
   return u.cwiseProduct(v);
 }
 
 template<class Derived1, class Derived2>
-inline typename Eigen::internal::traits<Derived1>::Scalar Dot(const Eigen::MatrixBase<Derived1> &u, const Eigen::MatrixBase<Derived2> &v )
+auto Dot(const Eigen::MatrixBase<Derived1> &u, const Eigen::MatrixBase<Derived2> &v ) -> decltype(u.dot(v))
 {
   return u.dot(v);
 }
 
 template<class Derived>
-inline typename Eigen::internal::traits<Derived>::Scalar Length(const Eigen::MatrixBase<Derived> &a)
+auto Length(const Eigen::MatrixBase<Derived> &a) -> decltype(a.norm())
 {
   return a.norm();
 }
 
 template<class Derived>
-inline typename Eigen::internal::traits<Derived>::Scalar LengthSqr(const Eigen::MatrixBase<Derived> &a)
+auto LengthSqr(const Eigen::MatrixBase<Derived> &a) -> decltype(a.squaredNorm())
 {
   return a.squaredNorm();
 }
 
-
-template<class T>
-inline void Normalize(Vec<T,3>& u)
+template<class Derived>
+inline void Normalize(Eigen::MatrixBase<Derived>& u)
 {
   return u.normalize();
 }
+
+template<class Derived>
+auto Normalized(const Eigen::MatrixBase<Derived>& u) -> decltype(u.normalized())
+{
+  return u.normalized();
+}
+
 
 
 #ifndef NDEBUG
@@ -199,8 +205,6 @@ inline OrthogonalSystemZAligned(const Eigen::MatrixBase<Derived> &_Z)
   auto Y = m.col(1);
   Z = _Z;
   ASSERT_NORMALIZED(Z);
-  //Z.normalize();
-  
   // Listing 3 in Duff et al. (2017) "Building an Orthonormal Basis, Revisited".
   float sign = std::copysignf(1.0f, Z[2]);
   const float a = -1.0f / (sign + Z[2]);

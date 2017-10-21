@@ -95,7 +95,7 @@ TEST(TestMath, OrthogonalSystemZAligned)
   };
   for (auto dir : directions)
   {
-    Eigen::Matrix<double, 3, 3> m = OrthogonalSystemZAligned(dir);
+    Eigen::Matrix<double, 3, 3> m = OrthogonalSystemZAligned(Normalized(dir));
     std::cout << "dir = " << dir << std::endl;
     std::cout << "m{dir} = " << m << std::endl;
     EXPECT_TRUE(m.isUnitary(1.e-6));

@@ -63,7 +63,7 @@ public:
   bool CheckIsNearHit(const Ray &ray, double t, const Double3 &p, const HitId &to_ignore) const
   {
     // TODO: use error estimates of t and to_ignore.barry. Because this is really unreliable.
-    const double tol = 10. * Epsilon * radius;
+    const double tol = 100. * Epsilon * radius;
     double uu = LengthSqr(to_ignore.barry - p);
     return uu < tol*tol;
   }
