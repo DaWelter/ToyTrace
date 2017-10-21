@@ -314,12 +314,11 @@ public:
 
       hit = scene.Intersect(segment.ray, segment.length, hit);  
       auto medium_smpl = medium.SampleInteractionPoint(segment, sampler);
+      beta *= medium_smpl.weight;
       
       if (medium_smpl.t < segment.length)
       {
         ray.org = ray.PointAt(medium_smpl.t);
-        
-        beta *= medium_smpl.sigma_s * medium_smpl.transmission / medium_smpl.pdf;
         
         path_sample_value += beta * 
           LightConnection(ray.org, ray.dir, nullptr, medium_tracker);
@@ -334,15 +333,11 @@ public:
       }
       else
       {
-        // TODO: This part needs a proper transmission estimate because
-        // Theta(t > t_hit) is only an estimator for the transmission
-        // if t is picked according p(t) = sigma_t*T(t).
-        // So this cannot work for chromatic collision coefficients.
         if (hit)
         {
           RaySurfaceIntersection intersection{hit, segment};
           ray.org = ray.PointAt(segment.length);
-
+          
           if (!intersection.shader().IsReflectionSpecular())
           {
             auto lc = LightConnection(intersection.pos, ray.dir, &intersection, medium_tracker);

@@ -74,9 +74,7 @@ Medium::InteractionSample VacuumMedium::SampleInteractionPoint(const RaySegment&
 {
   return Medium::InteractionSample{
       LargeNumber,
-      Spectral{1.},
-      Spectral{0.}, Spectral{0.},
-      1.
+      Spectral{1.}
     };
 }
 
@@ -126,17 +124,30 @@ Medium::PhaseSample IsotropicHomogeneousMedium::SamplePhaseFunction(const Double
 Medium::InteractionSample IsotropicHomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler) const
 {
   Medium::InteractionSample smpl;
-  smpl.sigma_a = sigma_a;
-  smpl.sigma_s = sigma_s;
-  // TODO: Tower sampling based on sigma_ext
-  int component = sampler.UniformInt(0, 2);
+  // This is equivalent to using the balance heuristic for strategies
+  // which mean taking a sample implied by the transmittance of some selected channel.
+  // The balance heuristic would compute weights which would result in identical
+  // smpl.weight coefficients as computed here.
+  // Veach shows (p.g. 275) that in the case of a "one-sample" model which I
+  // have here this is the best MIS scheme one can use.
+  Spectral weights{1./static_size< Spectral >()};
+  double r = sampler.Uniform01();
+  int component = r<weights[0] ? 0 : (r<(weights[1]+weights[0]) ? 1 : 2);
   smpl.t = - std::log(1-sampler.Uniform01()) / sigma_ext[component];
-  smpl.t = smpl.t > LargeNumber ? LargeNumber : smpl.t;
-  Spectral weights{1./static_size<Spectral>()};
-  smpl.pdf = (weights * sigma_ext * (-sigma_ext * smpl.t).exp()).sum();
-  smpl.transmission = (smpl.t >= segment.length) ? 
-                      Spectral{0.} :
-                      (-sigma_ext * smpl.t).exp();
+  smpl.t = smpl.t < LargeNumber ? smpl.t : LargeNumber;
+  double t = std::min(smpl.t, segment.length);
+  Spectral transmittance = (-sigma_ext * t).exp();
+  if (smpl.t < segment.length)
+  {
+    
+    double pdf = (weights * sigma_ext * transmittance).sum();
+    smpl.weight = sigma_s * transmittance / pdf;
+  }
+  else
+  {
+    double p_surf = (weights * transmittance).sum();
+    smpl.weight = transmittance / p_surf;
+  }
   return smpl;
 }
 
@@ -145,6 +156,54 @@ Spectral IsotropicHomogeneousMedium::EvaluateTransmission(const RaySegment& segm
 {
   return (-sigma_ext * segment.length).exp();
 }
+
+
+
+
+
+MonochromaticIsotropicHomogeneousMedium::MonochromaticIsotropicHomogeneousMedium(double _sigma_s, double _sigma_a, int priority)
+  : Medium(priority), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{_sigma_s + _sigma_a}
+{
+}
+
+
+Spectral MonochromaticIsotropicHomogeneousMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
+{
+  if (pdf)
+    *pdf = 1./UnitSphereSurfaceArea;
+  return Spectral{1./UnitSphereSurfaceArea};
+}
+
+
+Medium::PhaseSample MonochromaticIsotropicHomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler) const
+{
+  return Medium::PhaseSample{
+    SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare()),
+    Spectral{1./UnitSphereSurfaceArea},
+    1./UnitSphereSurfaceArea
+  };
+}
+
+
+Medium::InteractionSample MonochromaticIsotropicHomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler) const
+{
+  Medium::InteractionSample smpl;
+  smpl.t = - std::log(1-sampler.Uniform01()) / sigma_ext;
+  smpl.t = smpl.t < LargeNumber ? smpl.t : LargeNumber;
+  smpl.weight = (smpl.t >= segment.length) ? 
+    1.0
+    :
+    (sigma_s / sigma_ext);
+  return smpl;
+}
+
+
+Spectral MonochromaticIsotropicHomogeneousMedium::EvaluateTransmission(const RaySegment& segment) const
+{
+  return Spectral{std::exp(-sigma_ext * segment.length)};
+}
+
+
 
 
 /*

@@ -66,9 +66,10 @@ public:
   struct InteractionSample
   {
     double t;
-    Spectral transmission;
-    Spectral sigma_a, sigma_s;
-    double pdf;
+    // Following PBRT pg 893, the returned weight is either
+    // beta_surf = T(t_intersect)/p_surf if the sampled t lies beyond the end of the ray, i.e. t > t_intersect, or
+    // beta_med = sigma_s(t) T(t) / p(t) 
+    Spectral weight;
   };
   struct PhaseSample
   {
@@ -103,6 +104,18 @@ class IsotropicHomogeneousMedium : public Medium
   Spectral sigma_s, sigma_a, sigma_ext;
 public:
   IsotropicHomogeneousMedium(const Spectral &_sigma_s, const Spectral &_sigma_a, int priority); 
+  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler) const override;
+  virtual Spectral EvaluateTransmission(const RaySegment &segment) const override;
+  virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler) const override;
+  virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const override;
+};
+
+
+class MonochromaticIsotropicHomogeneousMedium : public Medium
+{
+  double sigma_s, sigma_a, sigma_ext;
+public:
+  MonochromaticIsotropicHomogeneousMedium(double _sigma_s, double _sigma_a, int priority); 
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler) const override;
   virtual Spectral EvaluateTransmission(const RaySegment &segment) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler) const override;

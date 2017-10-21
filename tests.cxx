@@ -384,19 +384,13 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
   for (int i=0; i<N; ++i)
   {
     Medium::InteractionSample s = medium.SampleInteractionPoint(RaySegment{{{0.,0.,0.}, {0., 0., 1.,}}, cutoff_length}, sampler);
-    EXPECT_TRUE(s.t < cutoff_length || (s.transmission.abs().sum() < 1.e-6));
-    for (int k=0; k<static_size<Spectral>(); ++k)
-    {
-      EXPECT_NEAR(s.sigma_a[k], sigma_a[k], 1.e-6);
-      EXPECT_NEAR(s.sigma_s[k], sigma_s[k], 1.e-6);
-    }
-    if (s.transmission.abs().sum() < 1.e-6)
+    if (s.t  > cutoff_length)
       img.SetColor(255, 0, 0);
     else
-      img.SetColor(255 * s.transmission[0], 255 * s.transmission[1], 255 * s.transmission[2]);
+      img.SetColor(255, 255, 255);
     int imgx = std::min<int>(img.width()-1, s.t * img_dx);
     img.DrawLine(imgx, 0, imgx, img.height()-1);
-    integral += s.transmission / s.pdf;
+    integral += s.weight;
   }
   integral *= 1./N;
   Spectral exact_solution = length_scales * (1. - (-(sigma_a+sigma_s)*cutoff_length).exp());
