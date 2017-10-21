@@ -97,7 +97,7 @@ void MediumTracker::leaveVolume(const Medium* medium)
 class SpectralImageBuffer
 {
   std::vector<int> count;
-  std::vector<Spectral, AlignmentAllocator<Spectral, 128> >  accumulator;
+  std::vector<Spectral, boost::alignment::aligned_allocator<Spectral, 128> >  accumulator;
   int xres, yres;
 public:
   SpectralImageBuffer(int _xres, int _yres)

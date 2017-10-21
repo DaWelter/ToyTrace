@@ -28,7 +28,7 @@ TEST(BasicAssumptions, EigenTypes)
 
 TEST(BasicAssumptions, AlignmentAllocator)
 {
-  std::vector<double, AlignmentAllocator<double, 128>> v{1., 2., 3.};
+  std::vector<double, boost::alignment::aligned_allocator<double, 128>> v{1., 2., 3.};
   EXPECT_EQ(((std::size_t)&v[0]) % 128, 0);
 }
 
