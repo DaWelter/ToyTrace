@@ -14,7 +14,7 @@ class Worker
 {
   const Scene &scene;
   SpectralImageBuffer &buffer;
-  Raytracing algo;
+  PathTracing algo;
   //NormalVisualizer algo;
   const int pixel_stride = 64 / sizeof(Spectral);
   int num_pixels;
