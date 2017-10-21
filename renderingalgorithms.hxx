@@ -200,7 +200,7 @@ public:
   
   double RouletteSurvivalProb(const Spectral &s, int level)
   {
-    static constexpr int MIN_LEVEL = 5;
+    static constexpr int MIN_LEVEL = 3;
     static constexpr double LOW_CONTRIBUTION = 0.5;
     return level>max_ray_depth ? 0. : (level<MIN_LEVEL ? 1. : std::min(0.9, s.maxCoeff() / LOW_CONTRIBUTION));
 
@@ -324,6 +324,8 @@ public:
     {
       medium_tracker.goingThroughSurface(surface_sample.dir, intersection);
     }
+    
+    level = intersection.shader().IsPassthrough() ? level : level+1;
 
     Trace(parent_sample_value, {intersection.pos, surface_sample.dir}, level,  medium_tracker, intersection.hitid);
   }
@@ -380,7 +382,7 @@ public:
       {
         RaySurfaceIntersection intersection{hit, segment};
         Spectral tmp = parent_sample_value;
-        PropagationAtIntersection(parent_sample_value, ray.dir, intersection, level+1, medium_tracker_parent);
+        PropagationAtIntersection(parent_sample_value, ray.dir, intersection, level, medium_tracker_parent);
         if (!intersection.shader().IsReflectionSpecular())
         {
           auto lc = LightConnection(ray.dir, intersection, medium_tracker_parent);

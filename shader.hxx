@@ -23,6 +23,7 @@ struct BSDFSample
 enum ShaderFlags : int
 {
   REFLECTION_IS_SPECULAR = 1,
+  IS_PASSTHROUGH = 3
 };
 
 
@@ -35,6 +36,7 @@ public:
   virtual BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const = 0;
   virtual Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, double *pdf) const = 0;
   bool IsReflectionSpecular() const { return flags & REFLECTION_IS_SPECULAR; }
+  bool IsPassthrough() const { return flags & IS_PASSTHROUGH; }
 };
 
 
@@ -51,7 +53,7 @@ public:
 class InvisibleShader : public Shader
 {
 public:
-  InvisibleShader() : Shader(REFLECTION_IS_SPECULAR) {}
+  InvisibleShader() : Shader(IS_PASSTHROUGH) {}
   BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
   Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
 };
