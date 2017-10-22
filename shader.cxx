@@ -152,6 +152,66 @@ Medium::InteractionSample IsotropicHomogeneousMedium::SampleInteractionPoint(con
 }
 
 
+Medium::InteractionSample IsotropicHomogeneousMedium::SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const Spectral &beta) const
+{
+  /* Split the integral into one summand per wavelength.
+   * However, evaluate only one of the summands probabilistically
+   * and ommit the other ones, akin to russian roulette termination.
+   * Sample the volume marching integral based on the selected wavelength.
+   * Regardless, I transport the full spectrum with each term. 
+   * Thus I can form a weighted sum over the summands, with coefficients
+   * depending on the summand and lambda. For much different collision 
+   * coefficients (sigma_ext) the coefficients should be identical to the
+   * Kroneker Delta, so that one term transports exactly one wavelength.
+   * However if all sigma_ext_lamba are equal then the method should 
+   * transport the full spectrum with the sample currently taken. Thus,
+   * recovering the sampling method for monochromatic media.
+   * TODO: Generalize for more then 3 wavelengths.
+   */
+  Spectral lambda_selection_prob = beta.abs();
+  lambda_selection_prob /= lambda_selection_prob.sum();
+
+#if 0
+  // Strict single wavelength sampling!
+  Spectral combine_weights[] = {
+    Spectral{1, 0, 0},
+    Spectral{0, 1, 0},
+    Spectral{0, 0, 1}
+  };
+#else
+  Spectral lambda_filter_base = beta * sigma_ext;
+  double lambda_filter_min = lambda_filter_base.minCoeff();
+  double lambda_filter_max = lambda_filter_base.maxCoeff();
+  double f = (lambda_filter_max - lambda_filter_min)/(std::abs(lambda_filter_max) + std::abs(lambda_filter_min));
+  f = f<0.33 ? 0. : 1.;
+  double f_eq = (1.-f) / static_size< Spectral >();
+  Spectral combine_weights[] = {
+    Spectral{f + f_eq, f_eq, f_eq },
+    Spectral{f_eq, f + f_eq, f_eq },
+    Spectral{f_eq, f_eq, f + f_eq }
+  }; 
+#endif
+  
+  Medium::InteractionSample smpl;
+  double r = sampler.Uniform01();
+  int component = r<lambda_selection_prob[0] ? 0 : (r<(lambda_selection_prob[1]+lambda_selection_prob[0]) ? 1 : 2);
+  smpl.t = - std::log(1-sampler.Uniform01()) / sigma_ext[component];
+  smpl.t = smpl.t < LargeNumber ? smpl.t : LargeNumber;
+  double t = std::min(smpl.t, segment.length);
+  Spectral transmittance = (-sigma_ext * t).exp();
+  if (smpl.t < segment.length)
+  {
+    smpl.weight = combine_weights[component] * sigma_s * transmittance / (sigma_ext[component] * transmittance[component] * lambda_selection_prob[component]);
+  }
+  else
+  {
+    double p_surf = transmittance[component] * lambda_selection_prob[component];
+    smpl.weight = combine_weights[component] * transmittance / p_surf;
+  }
+  return smpl;
+}
+
+
 Spectral IsotropicHomogeneousMedium::EvaluateTransmission(const RaySegment& segment) const
 {
   return (-sigma_ext * segment.length).exp();

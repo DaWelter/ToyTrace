@@ -105,6 +105,7 @@ class IsotropicHomogeneousMedium : public Medium
 public:
   IsotropicHomogeneousMedium(const Spectral &_sigma_s, const Spectral &_sigma_a, int priority); 
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler) const override;
+  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const Spectral &beta) const;
   virtual Spectral EvaluateTransmission(const RaySegment &segment) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler) const override;
   virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const override;

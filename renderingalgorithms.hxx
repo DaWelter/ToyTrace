@@ -312,8 +312,16 @@ public:
       const Medium& medium = medium_tracker.getCurrentMedium();
       auto segment = RaySegment{ray, LargeNumber};
 
-      hit = scene.Intersect(segment.ray, segment.length, hit);  
-      auto medium_smpl = medium.SampleInteractionPoint(segment, sampler);
+      hit = scene.Intersect(segment.ray, segment.length, hit);
+      Medium::InteractionSample medium_smpl;
+      if (auto *chromatic = dynamic_cast<const IsotropicHomogeneousMedium*>(&medium))
+      {
+        medium_smpl = chromatic->SampleInteractionPoint(segment, sampler, beta);
+      }
+      else
+      {
+        medium_smpl = medium.SampleInteractionPoint(segment, sampler);
+      }
       beta *= medium_smpl.weight;
       
       if (medium_smpl.t < segment.length)

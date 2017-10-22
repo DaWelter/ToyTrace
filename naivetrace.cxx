@@ -248,7 +248,7 @@ int main(int argc, char *argv[])
       
       buffer.ToImage(bm, image_conversion_y_start, render_params.height);
       display.show(bm);
-      bm.write("raytrace.tga");
+      bm.write("raytrace.jpg");
     }
     
     for (auto &worker : workers)
@@ -264,26 +264,26 @@ int main(int argc, char *argv[])
     {
       for (int y = 0; y < render_params.height; ++y)
       {
-	for (int x = 0; x < render_params.width; ++x)
-	{
-	  int pixel_index = scene.GetCamera().PixelToUnit({x, y});
-	  Spectral smpl = algo.MakePrettyPixel(pixel_index);
-	  buffer.Insert(pixel_index, smpl);
-	}
-	buffer.ToImage(bm, y, y+1);
-	display.show(bm);
+        for (int x = 0; x < render_params.width; ++x)
+        {
+          int pixel_index = scene.GetCamera().PixelToUnit({x, y});
+          Spectral smpl = algo.MakePrettyPixel(pixel_index);
+          buffer.Insert(pixel_index, smpl);
+        }
+        buffer.ToImage(bm, y, y+1);
+        display.show(bm);
       }
     }
     else
     {
       int pixel_index = scene.GetCamera().PixelToUnit(
-	{render_params.pixel_x, render_params.pixel_y});
+        {render_params.pixel_x, render_params.pixel_y});
       Spectral smpl = algo.MakePrettyPixel(pixel_index);
       buffer.Insert(pixel_index, smpl);
       buffer.ToImage(bm, render_params.pixel_y, render_params.pixel_y+1);
       display.show(bm);
     }
-    bm.write("raytrace.tga");
+    bm.write("raytrace.png");
   }
   
   auto end_time = std::chrono::steady_clock::now();
@@ -313,8 +313,8 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
     pos_desc.add("input-file", -1);
     po::variables_map vm;
     po::store(po::command_line_parser(argc, argv).
-	      options(desc).
-	      positional(pos_desc).run(), vm);
+                options(desc).
+                positional(pos_desc).run(), vm);
     po::notify(vm);
     
     if (vm.count("help"))
@@ -328,7 +328,7 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
     {
       n = vm["nt"].as<int>();
       if (n < 0)
-	throw po::error("Numer of threads must be non-negative.");
+        throw po::error("Numer of threads must be non-negative.");
     }
     render_params.num_threads = n;
     
@@ -345,7 +345,7 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
     {
       w = vm["w"].as<int>();
       if (w <= 0)
-	throw po::error("Width must be positive");
+        throw po::error("Width must be positive");
     }
     
     int h = -1;
@@ -353,7 +353,7 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
     {
       h = vm["h"].as<int>();
       if (h <= 0)
-	throw po::error("Height must be positive");
+        throw po::error("Height must be positive");
     }
     
     render_params.width = w;
@@ -364,16 +364,16 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
     {
       rd = vm["rd"].as<int>();
       if (rd <= 1)
-	throw po::error("Max ray depth must be greater one.");
+        throw po::error("Max ray depth must be greater one.");
     }
     render_params.max_ray_depth = rd;
     
     if (single_pixel_render)
     {
       if (px<0 || px>w)
-	throw po::error("Pixel X is out of image bounds.");
+        throw po::error("Pixel X is out of image bounds.");
       if (py<0 || py>h)
-	throw po::error("Pixel Y is out of image bounds.");
+        throw po::error("Pixel Y is out of image bounds.");
     }
     render_params.pixel_x = px;
     render_params.pixel_y = py;
