@@ -202,14 +202,14 @@ void NFFParser::Parse(const char* fileName)
       fscanf(file,"resolution %d %d\n",&resX,&resY);
       if (render_params)
       {
-	if (render_params->height > 0)
-	  resY = render_params->height;
-	else
-	  render_params->height = resY;
-	if (render_params->width > 0)
-	  resX = render_params->width;
-	else
-	  render_params->width = resX;
+        if (render_params->height > 0)
+          resY = render_params->height;
+        else
+          render_params->height = resY;
+        if (render_params->width > 0)
+          resX = render_params->width;
+        else
+          render_params->width = resX;
       }
       scene->SetCamera<PerspectiveCamera>(pos,at-pos,up,angle,resX,resY);
       
@@ -375,9 +375,33 @@ void NFFParser::Parse(const char* fileName)
       }
       else if(num == 7)
       {
+        auto *medium = new HomogeneousMedium(sigma_s, sigma_a, mediums.size());
+        
+        double g;
+        str = std::fgets(line,LINESIZE,file);
+        num = std::sscanf(line,"pf %s %lg\n",name, &g);
+        if (num > 0)
+        {
+          if (!strcmp(name, "rayleigh"))
+          {
+            medium->phasefunction.reset(new PhaseFunctions::Rayleigh());
+          }
+          else if (!strcmp(name, "henleygreenstein") && num>1)
+          {
+            medium->phasefunction.reset(new PhaseFunctions::HenleyGreenstein(g));
+          }
+          else
+          {
+            std::cerr << "Error parsing phasefunction " << name << std::endl;
+            exit(-1);
+          }
+        }
+        else
+        {
+          medium->phasefunction.reset(new PhaseFunctions::Uniform());
+        }
         mediums.set_and_activate(
-          name,
-          new IsotropicHomogeneousMedium(sigma_s, sigma_a, mediums.size()));
+          name, medium);
       }
       else
       {

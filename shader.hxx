@@ -1,9 +1,11 @@
 #ifndef SHADER_HXX
 #define SHADER_HXX
 
+#include <memory>
+
 #include"vec3f.hxx"
 #include"texture.hxx"
-
+#include"phasefunctions.hxx"
 
 class Sampler;
 class Ray;
@@ -71,12 +73,8 @@ public:
     // beta_med = sigma_s(t) T(t) / p(t) 
     Spectral weight;
   };
-  struct PhaseSample
-  {
-    Double3 dir;
-    Spectral phase_function;
-    double pdf;
-  };
+  using PhaseSample = PhaseFunctions::Sample;
+  
   const int priority;
   Medium(int _priority) : priority(_priority) {}
   virtual ~Medium() {}
@@ -99,11 +97,13 @@ public:
 };
 
 
-class IsotropicHomogeneousMedium : public Medium
+class HomogeneousMedium : public Medium
 {
   Spectral sigma_s, sigma_a, sigma_ext;
 public:
-  IsotropicHomogeneousMedium(const Spectral &_sigma_s, const Spectral &_sigma_a, int priority); 
+  std::unique_ptr<PhaseFunctions::PhaseFunction> phasefunction; // filled by parser
+public:
+  HomogeneousMedium(const Spectral &_sigma_s, const Spectral &_sigma_a, int _priority); 
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler) const override;
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const Spectral &beta) const;
   virtual Spectral EvaluateTransmission(const RaySegment &segment) const override;
@@ -112,11 +112,13 @@ public:
 };
 
 
-class MonochromaticIsotropicHomogeneousMedium : public Medium
+class MonochromaticHomogeneousMedium : public Medium
 {
   double sigma_s, sigma_a, sigma_ext;
 public:
-  MonochromaticIsotropicHomogeneousMedium(double _sigma_s, double _sigma_a, int priority); 
+  std::unique_ptr<PhaseFunctions::PhaseFunction> phasefunction;
+public:
+  MonochromaticHomogeneousMedium(double _sigma_s, double _sigma_a, int _priority); 
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler) const override;
   virtual Spectral EvaluateTransmission(const RaySegment &segment) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler) const override;

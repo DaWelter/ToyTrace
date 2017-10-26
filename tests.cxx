@@ -376,9 +376,9 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
   Spectral length_scales{1., 5., 10.};
   double cutoff_length = 5.; // Integrate transmission T(x) up to this x.
   double img_dx = img.width() / cutoff_length / 2.;
-  img.DrawRect(0, 0, img_dx * cutoff_length, img.height());
-  Spectral sigma_s{0.}, sigma_a{1./length_scales};
-  IsotropicHomogeneousMedium medium{sigma_s, sigma_a, 0};
+  img.DrawRect(0, 0, img_dx * cutoff_length, img.height()-1);
+  Spectral sigma_s{1./length_scales}, sigma_a{1./length_scales};
+  HomogeneousMedium medium{sigma_s, sigma_a, 0};
   int N = 1000;
   Spectral integral{0.};
   for (int i=0; i<N; ++i)
@@ -387,13 +387,18 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
     if (s.t  > cutoff_length)
       img.SetColor(255, 0, 0);
     else
+    {
       img.SetColor(255, 255, 255);
+      // Estimate transmission by integrating sigma_e*T(x).
+      // Divide out sigma_s which is baked into the weight.
+      // Multiply by sigma_e.
+      integral += s.weight * (sigma_a + sigma_s) / sigma_s;
+    }
     int imgx = std::min<int>(img.width()-1, s.t * img_dx);
     img.DrawLine(imgx, 0, imgx, img.height()-1);
-    integral += s.weight;
   }
   integral *= 1./N;
-  Spectral exact_solution = length_scales * (1. - (-(sigma_a+sigma_s)*cutoff_length).exp());
+  Spectral exact_solution = 1. - (-(sigma_a+sigma_s)*cutoff_length).exp();
   for (int k=0; k<static_size<Spectral>(); ++k)
     EXPECT_NEAR(integral[k], exact_solution[k], 0.1 * integral[k]);
   display.show(img);

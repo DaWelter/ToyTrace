@@ -314,7 +314,7 @@ public:
 
       hit = scene.Intersect(segment.ray, segment.length, hit);
       Medium::InteractionSample medium_smpl;
-      if (auto *chromatic = dynamic_cast<const IsotropicHomogeneousMedium*>(&medium))
+      if (auto *chromatic = dynamic_cast<const HomogeneousMedium*>(&medium))
       {
         medium_smpl = chromatic->SampleInteractionPoint(segment, sampler, beta);
       }
@@ -332,7 +332,7 @@ public:
           LightConnection(ray.org, ray.dir, nullptr, medium_tracker);
 
         auto scatter_smpl = medium.SamplePhaseFunction(-ray.dir, ray.org, sampler);
-        beta *= scatter_smpl.phase_function / scatter_smpl.pdf;
+        beta *= scatter_smpl.value / scatter_smpl.pdf;
         
         ray.dir = scatter_smpl.dir;
         hit = HitId{};

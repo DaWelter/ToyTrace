@@ -62,6 +62,7 @@ BSDFSample InvisibleShader::SampleBSDF(const Double3 &incident_dir, const RaySur
 
 
 
+
 Spectral VacuumMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
 {
   if (pdf)
@@ -79,9 +80,9 @@ Medium::InteractionSample VacuumMedium::SampleInteractionPoint(const RaySegment&
 }
 
 
-Medium::PhaseSample VacuumMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler) const
+PhaseFunctions::Sample VacuumMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler) const
 {
-  return Medium::PhaseSample{
+  return PhaseFunctions::Sample{
     -incident_dir,
     Spectral{1.},
     1.
@@ -97,31 +98,25 @@ Spectral VacuumMedium::EvaluateTransmission(const RaySegment& segment) const
 
 
 
-IsotropicHomogeneousMedium::IsotropicHomogeneousMedium(const Spectral& _sigma_s, const Spectral& _sigma_a, int priority)
+HomogeneousMedium::HomogeneousMedium(const Spectral& _sigma_s, const Spectral& _sigma_a, int priority)
   : Medium(priority), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{_sigma_s + _sigma_a}
 {
 }
 
 
-Spectral IsotropicHomogeneousMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
+Spectral HomogeneousMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
 {
-  if (pdf)
-    *pdf = 1./UnitSphereSurfaceArea;
-  return Spectral{1./UnitSphereSurfaceArea};
+  return phasefunction->Evaluate(indcident_dir, pos, out_direction, pdf);
 }
 
 
-Medium::PhaseSample IsotropicHomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler) const
+PhaseFunctions::Sample HomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler) const
 {
-  return Medium::PhaseSample{
-    SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare()),
-    Spectral{1./UnitSphereSurfaceArea},
-    1./UnitSphereSurfaceArea
-  };
+  return phasefunction->SampleDirection(incident_dir, pos, sampler);
 }
 
 
-Medium::InteractionSample IsotropicHomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler) const
+Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler) const
 {
   Medium::InteractionSample smpl;
   // This is equivalent to using the balance heuristic for strategies
@@ -152,7 +147,7 @@ Medium::InteractionSample IsotropicHomogeneousMedium::SampleInteractionPoint(con
 }
 
 
-Medium::InteractionSample IsotropicHomogeneousMedium::SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const Spectral &beta) const
+Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const Spectral &beta) const
 {
   /* Split the integral into one summand per wavelength.
    * However, evaluate only one of the summands probabilistically
@@ -212,7 +207,7 @@ Medium::InteractionSample IsotropicHomogeneousMedium::SampleInteractionPoint(con
 }
 
 
-Spectral IsotropicHomogeneousMedium::EvaluateTransmission(const RaySegment& segment) const
+Spectral HomogeneousMedium::EvaluateTransmission(const RaySegment& segment) const
 {
   return (-sigma_ext * segment.length).exp();
 }
@@ -221,31 +216,25 @@ Spectral IsotropicHomogeneousMedium::EvaluateTransmission(const RaySegment& segm
 
 
 
-MonochromaticIsotropicHomogeneousMedium::MonochromaticIsotropicHomogeneousMedium(double _sigma_s, double _sigma_a, int priority)
+MonochromaticHomogeneousMedium::MonochromaticHomogeneousMedium(double _sigma_s, double _sigma_a, int priority)
   : Medium(priority), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{_sigma_s + _sigma_a}
 {
 }
 
 
-Spectral MonochromaticIsotropicHomogeneousMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
+Spectral MonochromaticHomogeneousMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
 {
-  if (pdf)
-    *pdf = 1./UnitSphereSurfaceArea;
-  return Spectral{1./UnitSphereSurfaceArea};
+  return phasefunction->Evaluate(indcident_dir, pos, out_direction, pdf);
 }
 
 
-Medium::PhaseSample MonochromaticIsotropicHomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler) const
+Medium::PhaseSample MonochromaticHomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler) const
 {
-  return Medium::PhaseSample{
-    SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare()),
-    Spectral{1./UnitSphereSurfaceArea},
-    1./UnitSphereSurfaceArea
-  };
+  return phasefunction->SampleDirection(incident_dir, pos, sampler);
 }
 
 
-Medium::InteractionSample MonochromaticIsotropicHomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler) const
+Medium::InteractionSample MonochromaticHomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler) const
 {
   Medium::InteractionSample smpl;
   smpl.t = - std::log(1-sampler.Uniform01()) / sigma_ext;
@@ -258,7 +247,7 @@ Medium::InteractionSample MonochromaticIsotropicHomogeneousMedium::SampleInterac
 }
 
 
-Spectral MonochromaticIsotropicHomogeneousMedium::EvaluateTransmission(const RaySegment& segment) const
+Spectral MonochromaticHomogeneousMedium::EvaluateTransmission(const RaySegment& segment) const
 {
   return Spectral{std::exp(-sigma_ext * segment.length)};
 }
