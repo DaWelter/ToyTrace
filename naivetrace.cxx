@@ -8,21 +8,20 @@
 #include <boost/program_options.hpp>
 
 
-static constexpr int SAMPLES_PER_PIXEL = 16;
-
 class Worker
 {
   const Scene &scene;
   SpectralImageBuffer &buffer;
   PathTracing algo;
   //NormalVisualizer algo;
-  const int pixel_stride = 64 / sizeof(Spectral);
+  const int pixel_stride = 64 / sizeof(Spectral); // Because false sharing.
   int num_pixels;
   std::atomic_int &shared_pixel_index;
   std::atomic_int shared_request, shared_state;
 public:
   Worker(const Worker &) = delete;
   Worker(Worker &&) = delete;
+  int samples_per_pixel; // Only set when thread is stopped.
   
   enum State : int {
     THREAD_WAITING = 0,
@@ -43,7 +42,8 @@ public:
     shared_pixel_index(_shared_pixel_index),
     buffer(_buffer),
     scene(_scene),
-    algo(_scene, render_params)
+    algo(_scene, render_params),
+    samples_per_pixel(16)
   {
     num_pixels = scene.GetCamera().xres * scene.GetCamera().yres;
     //std::cout << "thread ctor " << this << std::endl;
@@ -139,7 +139,7 @@ private:
     int current_end_index = std::min(pixel_index + pixel_stride, num_pixels);
     for (; pixel_index < current_end_index; ++pixel_index)
     {
-      const int nsmpl = SAMPLES_PER_PIXEL;
+      const int nsmpl = samples_per_pixel;
       for(int i=0;i<nsmpl;i++)
       {
         Spectral smpl = algo.MakePrettyPixel(pixel_index);
@@ -150,7 +150,9 @@ private:
 };
 
 
-void IssueRequest(std::vector<std::unique_ptr<Worker>> &workers, Worker::Request request)
+using WorkerSet = std::vector<std::unique_ptr<Worker>>;
+
+void IssueRequest(WorkerSet &workers, Worker::Request request)
 {
   //std::cout << "Request " << request << std::endl;
   for (auto &worker : workers)
@@ -158,7 +160,7 @@ void IssueRequest(std::vector<std::unique_ptr<Worker>> &workers, Worker::Request
 }
 
 
-void WaitForWorkers(std::vector<std::unique_ptr<Worker>> &workers)
+void WaitForWorkers(WorkerSet &workers)
 {
   //std::cout << "Waiting ..." << std::endl;
   for (auto &worker : workers)
@@ -170,6 +172,30 @@ void WaitForWorkers(std::vector<std::unique_ptr<Worker>> &workers)
     }
   }
   //std::cout << " Threads are waiting now." << std::endl;
+}
+
+
+void DetermineSamplesPerPixelForNextPass(int &spp, int total_spp, const RenderingParameters &render_params)
+{
+  if (spp < 256)
+  {
+    spp *= 2;
+  }
+  const int max_spp = render_params.max_samples_per_pixel;
+  if (max_spp > 0 && 
+      total_spp + spp > max_spp)
+  {
+    spp = max_spp - total_spp;
+  }
+}
+
+
+void AssignSamplesPerPixel(WorkerSet &workers, int spp)
+{
+  for (auto &worker : workers)
+  {
+    worker->samples_per_pixel = spp;
+  }
 }
 
 
@@ -215,11 +241,16 @@ int main(int argc, char *argv[])
       workers.push_back(std::make_unique<Worker>(shared_pixel_index, buffer, scene, render_params));
     for (int i=0; i<render_params.num_threads; ++i)
       threads.push_back(std::thread{Worker::Run, workers[i].get()});
-      
+    
+    int total_samples_per_pixel = 0;
+    int samples_per_pixel_per_iteration = 1;
+    AssignSamplesPerPixel(workers, samples_per_pixel_per_iteration);
+    
     std::cout << std::endl;
     std::cout << "Rendering ..." << std::endl;
     
-    while (display.is_open())
+    
+    while (display.is_open() && samples_per_pixel_per_iteration>0)
     {
       shared_pixel_index.store(0);
       IssueRequest(workers, Worker::REQUEST_GO);
@@ -249,6 +280,11 @@ int main(int argc, char *argv[])
       buffer.ToImage(bm, image_conversion_y_start, render_params.height);
       display.show(bm);
       bm.write("raytrace.jpg");
+      
+      total_samples_per_pixel += samples_per_pixel_per_iteration;
+      std::cout << "Iteration finished, spp = " << samples_per_pixel_per_iteration << ", total " << total_samples_per_pixel << std::endl;
+      DetermineSamplesPerPixelForNextPass(samples_per_pixel_per_iteration, total_samples_per_pixel, render_params);
+      AssignSamplesPerPixel(workers, samples_per_pixel_per_iteration);
     }
     
     for (auto &worker : workers)
@@ -287,7 +323,7 @@ int main(int argc, char *argv[])
   }
   
   auto end_time = std::chrono::steady_clock::now();
-  std::cout << "Rendering time: " << std::chrono::duration<double>(end_time - start_time).count() << std::endl;
+  std::cout << "Rendering time: " << std::chrono::duration<double>(end_time - start_time).count() << " sec." << std::endl;
 
   return 0;
 }
@@ -308,6 +344,7 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
       ("w", po::value<int>(), "Width")
       ("h", po::value<int>(), "Height")
       ("rd", po::value<int>(), "Max ray depth")
+      ("max-spp", po::value<int>(), "Max samples per pixel")
       ("input-file", po::value<std::string>(), "Input file");
     po::positional_options_description pos_desc;
     pos_desc.add("input-file", -1);
@@ -380,6 +417,15 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
     
     if (single_pixel_render)
       render_params.num_threads = 0;
+    
+    int max_spp = -1;
+    if (vm.count("max-spp"))
+    {
+      max_spp = vm["max-spp"].as<int>();
+      if (max_spp <= 0)
+        throw po::error("Max samples per pixel must be greater zero");
+    }
+    render_params.max_samples_per_pixel = max_spp;
     
     if (vm.count("input-file"))
       input_file = vm["input-file"].as<std::string>();

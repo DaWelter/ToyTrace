@@ -17,6 +17,7 @@ struct RenderingParameters
   int height = {-1};
   int num_threads = { -1 };
   int max_ray_depth = 25;
+  int max_samples_per_pixel = {-1};
 };
 
 
