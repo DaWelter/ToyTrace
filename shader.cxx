@@ -71,7 +71,7 @@ Spectral VacuumMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const
 }
 
 
-Medium::InteractionSample VacuumMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler) const
+Medium::InteractionSample VacuumMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler, const PathContext &context) const
 {
   return Medium::InteractionSample{
       LargeNumber,
@@ -117,15 +117,20 @@ PhaseFunctions::Sample HomogeneousMedium::SamplePhaseFunction(const Double3& inc
 }
 
 
-Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler) const
+Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler, const PathContext &context) const
 {
+#if 0
   Medium::InteractionSample smpl;
-  // This is equivalent to using the balance heuristic for strategies
-  // which mean taking a sample implied by the transmittance of some selected channel.
-  // The balance heuristic would compute weights which would result in identical
-  // smpl.weight coefficients as computed here.
-  // Veach shows (p.g. 275) that in the case of a "one-sample" model which I
-  // have here this is the best MIS scheme one can use.
+  /* Collision coefficients that vary with wavelength are handled by a probability
+   * density for t that is a sum, i.e. p(t) = 1/n sum_i=1..n sigma_t,i exp(-sigma_t,i t).
+   * See PBRT pg 893.
+   * This is equivalent to using the balance heuristic for strategies
+   * which mean taking a sample implied by the transmittance of some selected channel.
+   * The balance heuristic would compute weights which would result in identical
+   * smpl.weight coefficients as computed here.
+   * Veach shows (p.g. 275) that in the case of a "one-sample" model which I
+   * have here this is the best MIS scheme one can use.
+  */
   Spectral weights{1./static_size< Spectral >()};
   double r = sampler.Uniform01();
   int component = r<weights[0] ? 0 : (r<(weights[1]+weights[0]) ? 1 : 2);
@@ -145,26 +150,22 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
     smpl.weight = transmittance / p_surf;
   }
   return smpl;
-}
-
-
-Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const Spectral &beta) const
-{
+#else
   /* Split the integral into one summand per wavelength.
    * However, evaluate only one of the summands probabilistically
    * and ommit the other ones, akin to russian roulette termination.
    * Sample the volume marching integral based on the selected wavelength.
-   * Regardless, I transport the full spectrum with each term. 
+   * Regardless, I transport the full spectrum with each term.
    * Thus I can form a weighted sum over the summands, with coefficients
-   * depending on the summand and lambda. For much different collision 
+   * depending on the summand and lambda. For much different collision
    * coefficients (sigma_ext) the coefficients should be identical to the
    * Kroneker Delta, so that one term transports exactly one wavelength.
-   * However if all sigma_ext_lamba are equal then the method should 
+   * However if all sigma_ext_lamba are equal then the method should
    * transport the full spectrum with the sample currently taken. Thus,
    * recovering the sampling method for monochromatic media.
    * TODO: Generalize for more then 3 wavelengths.
    */
-  Spectral lambda_selection_prob = beta.abs();
+  Spectral lambda_selection_prob = context.beta.abs();
   lambda_selection_prob /= lambda_selection_prob.sum();
 
 #if 0
@@ -175,7 +176,7 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
     Spectral{0, 0, 1}
   };
 #else
-  Spectral lambda_filter_base = beta * sigma_ext;
+  Spectral lambda_filter_base = context.beta * sigma_ext;
   double lambda_filter_min = lambda_filter_base.minCoeff();
   double lambda_filter_max = lambda_filter_base.maxCoeff();
   double f = (lambda_filter_max - lambda_filter_min)/(std::abs(lambda_filter_max) + std::abs(lambda_filter_min));
@@ -185,9 +186,9 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
     Spectral{f + f_eq, f_eq, f_eq },
     Spectral{f_eq, f + f_eq, f_eq },
     Spectral{f_eq, f_eq, f + f_eq }
-  }; 
+  };
 #endif
-  
+
   Medium::InteractionSample smpl;
   double r = sampler.Uniform01();
   int component = r<lambda_selection_prob[0] ? 0 : (r<(lambda_selection_prob[1]+lambda_selection_prob[0]) ? 1 : 2);
@@ -205,6 +206,7 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
     smpl.weight = combine_weights[component] * transmittance / p_surf;
   }
   return smpl;
+#endif
 }
 
 
@@ -236,7 +238,7 @@ Medium::PhaseSample MonochromaticHomogeneousMedium::SamplePhaseFunction(const Do
 }
 
 
-Medium::InteractionSample MonochromaticHomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler) const
+Medium::InteractionSample MonochromaticHomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler, const PathContext &context) const
 {
   Medium::InteractionSample smpl;
   smpl.t = - std::log(1-sampler.Uniform01()) / sigma_ext;

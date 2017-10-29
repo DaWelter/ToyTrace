@@ -14,6 +14,15 @@ class Scene;
 class RaySurfaceIntersection;
 
 
+struct PathContext
+{
+  PathContext() :
+    beta{1.}
+  {}
+  Spectral beta;
+};
+
+
 struct BSDFSample
 {
   Double3 dir;
@@ -78,7 +87,7 @@ public:
   const int priority;
   Medium(int _priority) : priority(_priority) {}
   virtual ~Medium() {}
-  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler) const = 0;
+  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const = 0;
   virtual Spectral EvaluateTransmission(const RaySegment &segment) const = 0;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler) const = 0;
   virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const = 0;
@@ -90,7 +99,7 @@ class VacuumMedium : public Medium
 {
 public:
   VacuumMedium() : Medium(-1) {}
-  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler) const override;
+  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
   virtual Spectral EvaluateTransmission(const RaySegment &segment) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler) const override;
   virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const override;
@@ -104,8 +113,7 @@ public:
   std::unique_ptr<PhaseFunctions::PhaseFunction> phasefunction; // filled by parser
 public:
   HomogeneousMedium(const Spectral &_sigma_s, const Spectral &_sigma_a, int _priority); 
-  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler) const override;
-  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const Spectral &beta) const;
+  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const;
   virtual Spectral EvaluateTransmission(const RaySegment &segment) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler) const override;
   virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const override;
@@ -119,7 +127,7 @@ public:
   std::unique_ptr<PhaseFunctions::PhaseFunction> phasefunction;
 public:
   MonochromaticHomogeneousMedium(double _sigma_s, double _sigma_a, int _priority); 
-  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler) const override;
+  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
   virtual Spectral EvaluateTransmission(const RaySegment &segment) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler) const override;
   virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const override;

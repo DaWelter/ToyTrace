@@ -383,7 +383,8 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
   Spectral integral{0.};
   for (int i=0; i<N; ++i)
   {
-    Medium::InteractionSample s = medium.SampleInteractionPoint(RaySegment{{{0.,0.,0.}, {0., 0., 1.,}}, cutoff_length}, sampler);
+    PathContext context;
+    Medium::InteractionSample s = medium.SampleInteractionPoint(RaySegment{{{0.,0.,0.}, {0., 0., 1.,}}, cutoff_length}, sampler, context);
     if (s.t  > cutoff_length)
       img.SetColor(255, 0, 0);
     else

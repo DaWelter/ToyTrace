@@ -295,12 +295,13 @@ public:
   
   Spectral MakePrettyPixel(int pixel_index) override
   {
+    PathContext context;
     auto cam_sample = TakeRaySample(scene.GetCamera(), pixel_index, sampler);
-    
+
     MediumTracker medium_tracker = this->medium_tracker_root;
     medium_tracker.initializePosition(cam_sample.ray_out.org);
     
-    Spectral beta = cam_sample.measurement_contribution / cam_sample.pdf;
+    context.beta *= cam_sample.measurement_contribution / cam_sample.pdf;
     Spectral path_sample_value{0.};
     Ray ray = cam_sample.ray_out;
     int level = 1;
@@ -314,30 +315,24 @@ public:
 
       hit = scene.Intersect(segment.ray, segment.length, hit);
       Medium::InteractionSample medium_smpl;
-      if (auto *chromatic = dynamic_cast<const HomogeneousMedium*>(&medium))
-      {
-        medium_smpl = chromatic->SampleInteractionPoint(segment, sampler, beta);
-      }
-      else
-      {
-        medium_smpl = medium.SampleInteractionPoint(segment, sampler);
-      }
-      beta *= medium_smpl.weight;
+      medium_smpl = medium.SampleInteractionPoint(segment, sampler, context);
+
+      context.beta *= medium_smpl.weight;
       
       if (medium_smpl.t < segment.length)
       {
         ray.org = ray.PointAt(medium_smpl.t);
         
-        path_sample_value += beta * 
+        path_sample_value += context.beta *
           LightConnection(ray.org, ray.dir, nullptr, medium_tracker);
 
         auto scatter_smpl = medium.SamplePhaseFunction(-ray.dir, ray.org, sampler);
-        beta *= scatter_smpl.value / scatter_smpl.pdf;
+        context.beta *= scatter_smpl.value / scatter_smpl.pdf;
         
         ray.dir = scatter_smpl.dir;
         hit = HitId{};
         ++level;
-        gogogo = RouletteSurvival(beta, level);
+        gogogo = RouletteSurvival(context.beta, level);
       }
       else
       {
@@ -349,7 +344,7 @@ public:
           if (!intersection.shader().IsReflectionSpecular())
           {
             auto lc = LightConnection(intersection.pos, ray.dir, &intersection, medium_tracker);
-            path_sample_value += beta * lc;
+            path_sample_value += context.beta * lc;
           }
 
           auto surface_sample  = intersection.shader().SampleBSDF(-ray.dir, intersection, sampler);
@@ -357,7 +352,7 @@ public:
           auto out_dir_dot_normal = Dot(surface_sample.dir, intersection.normal);
           double d_factor = out_dir_dot_normal >= 0. ? out_dir_dot_normal : 1.;
 
-          beta *= d_factor / surface_sample.pdf * surface_sample.scatter_function;
+          context.beta *= d_factor / surface_sample.pdf * surface_sample.scatter_function;
           
           // By definition, intersection.normal points to where the intersection ray is comming from.
           // Thus we can determine if the sampled direction goes through the surface by looking
@@ -369,7 +364,7 @@ public:
           
           ray.dir = surface_sample.dir;
           level = intersection.shader().IsPassthrough() ? level : level+1;
-          gogogo = RouletteSurvival(beta, level);
+          gogogo = RouletteSurvival(context.beta, level);
         }
         else
         {
