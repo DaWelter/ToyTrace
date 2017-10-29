@@ -376,10 +376,23 @@ void NFFParser::Parse(const char* fileName)
       else if(num == 7)
       {
         auto *medium = new HomogeneousMedium(sigma_s, sigma_a, mediums.size());
-        
+        mediums.set_and_activate(
+          name, medium);
+      }
+      else
+      {
+        std::cout << "error in " << fileName << " : " << line << std::endl;
+      }
+      continue;
+    }
+  
+    if (!strcmp(token, "pf"))
+    {
+      if (auto* medium = dynamic_cast<HomogeneousMedium*>(mediums()))
+      {
         double g;
-        str = std::fgets(line,LINESIZE,file);
-        num = std::sscanf(line,"pf %s %lg\n",name, &g);
+        char name[LINESIZE];
+        int num = std::sscanf(line,"pf %s %lg\n",name, &g);
         if (num > 0)
         {
           if (!strcmp(name, "rayleigh"))
@@ -400,16 +413,13 @@ void NFFParser::Parse(const char* fileName)
         {
           medium->phasefunction.reset(new PhaseFunctions::Uniform());
         }
-        mediums.set_and_activate(
-          name, medium);
       }
       else
       {
-        std::cout << "error in " << fileName << " : " << line << std::endl;
+        std::cout << "Warning: Phasefunction definition only admissible following a HomogeneousMedium definition." << std::endl;
       }
       continue;
     }
-  
   
     if (!strcmp(token, "lddirection"))
     {

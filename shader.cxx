@@ -99,7 +99,8 @@ Spectral VacuumMedium::EvaluateTransmission(const RaySegment& segment) const
 
 
 HomogeneousMedium::HomogeneousMedium(const Spectral& _sigma_s, const Spectral& _sigma_a, int priority)
-  : Medium(priority), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{_sigma_s + _sigma_a}
+  : Medium(priority), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{_sigma_s + _sigma_a},
+    phasefunction{new PhaseFunctions::Uniform()}
 {
 }
 
@@ -217,7 +218,8 @@ Spectral HomogeneousMedium::EvaluateTransmission(const RaySegment& segment) cons
 
 
 MonochromaticHomogeneousMedium::MonochromaticHomogeneousMedium(double _sigma_s, double _sigma_a, int priority)
-  : Medium(priority), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{_sigma_s + _sigma_a}
+  : Medium(priority), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{_sigma_s + _sigma_a},
+    phasefunction{new PhaseFunctions::Uniform()}
 {
 }
 
