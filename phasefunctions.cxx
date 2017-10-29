@@ -106,7 +106,8 @@ double sample_mu(double r, double g)
 double value(double mu, double g)
 {
   double g2 = g*g;
-  return 1.0/(4.*Pi)*(1.0 - g2)/std::pow(1.0 + g2 - 2.0*g * mu, 1.5);
+  double term = 1.0 + g2 - 2.0*g * mu;
+  return 1.0/(4.*Pi)*(1.0 - g2)/(std::sqrt(term)*term);
 }
 
 }
