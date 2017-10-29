@@ -20,6 +20,10 @@ install_manifest.txt
 __pycache__/
 *.py[cod]
 
+# Output of debug renders
+/*.jpg
+/*.png
+/*.tga
 
 # Sphinx documentation
 docs/_build/

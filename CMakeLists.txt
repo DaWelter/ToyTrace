@@ -22,6 +22,10 @@ set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx bsptree.cxx 
 add_executable(naivetrace naivetrace.cxx ${SOURCES})
 add_executable(tests tests.cxx ${SOURCES})
 
+# For qtcreator to display all header files. (https://stackoverflow.com/questions/28384935/qtcreator-cmake-project-how-to-show-all-project-files)
+FILE(GLOB THE_HEADERS "*.hxx")
+add_custom_target(headers SOURCES ${THE_HEADERS})
+
 target_link_libraries(naivetrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE})
 
 target_include_directories(tests PUBLIC ${GTEST_INCLUDE_DIRS})
