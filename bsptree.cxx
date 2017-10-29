@@ -10,14 +10,14 @@ void TreeNode::Split(int level, std::vector<Primitive *> list,const Box &nodebox
   if(level>=MAX_LEVEL || list.size()<=MIN_PRIMITIVES) 
   {
     int n = list.size();
-    std::cout<<"leaf " << this << " l:"<<level<<" s:"<<n<<std::endl;
-    std::cout<<"  "<<nodebox.min<<std::endl;
-    std::cout<<"  "<<nodebox.max<<std::endl;
+//     std::cout<<"leaf " << this << " l:"<<level<<" s:"<<n<<std::endl;
+//     std::cout<<"  "<<nodebox.min<<std::endl;
+//     std::cout<<"  "<<nodebox.max<<std::endl;
     primitive.swap(list);
     return;
   }
   
-  std::cout<<".";
+//   std::cout<<".";
 
   double axislen = nodebox.max[0]-nodebox.min[0];
   splitaxis = 0;
