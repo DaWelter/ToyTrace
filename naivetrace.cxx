@@ -294,8 +294,8 @@ int main(int argc, char *argv[])
   }
   else
   {
-    //Raytracing algo(scene, render_params);
-    NormalVisualizer algo(scene);
+    PathTracing algo(scene, render_params);
+    //NormalVisualizer algo(scene);
     if (render_params.pixel_x<0 && render_params.pixel_y<0)
     {
       for (int y = 0; y < render_params.height; ++y)
@@ -319,7 +319,7 @@ int main(int argc, char *argv[])
       buffer.ToImage(bm, render_params.pixel_y, render_params.pixel_y+1);
       display.show(bm);
     }
-    bm.write("raytrace.png");
+    bm.write("raytrace.jpg");
   }
   
   auto end_time = std::chrono::steady_clock::now();
