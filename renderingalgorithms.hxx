@@ -1,6 +1,40 @@
 #include "scene.hxx"
 #include "util.hxx"
 
+#include <fstream>
+
+#ifndef NDEBUG
+// WARNING: THIS IS NOT THREAD SAFE. DON'T WRITE TO THE SAME FILE FROM MULTIPLE THREADS!
+class PathLogger
+{
+  std::ofstream file;
+public:
+  enum SegmentType : int {
+    EYE_SEGMENT = 'e',
+    LIGHT_PATH = 'l',
+    EYE_LIGHT_CONNECTION = 'c',
+  };
+  PathLogger();
+  void AddSegment(const Double3 &x1, const Double3 &x2, SegmentType type);
+};
+
+
+PathLogger::PathLogger()
+  : file("paths.log")
+{
+  file.precision(std::numeric_limits<double>::digits10);
+}
+
+
+void PathLogger::AddSegment(const Double3 &x1, const Double3 &x2, SegmentType type)
+{
+  file << x1[0] << ", " << x1[1] << ", " << x1[2] << ", "
+       << x2[0] << ", " << x2[1] << ", " << x2[2] << ", "
+       << static_cast<char>(type)  << "\n";
+}
+#endif
+
+
 /* This thing tracks overlapping media volumes. Since it is a bit complicated
  * to physically correctly handle mixtures of media that would occur
  * in overlapping volumes, I take a simpler approach. This hands over the
@@ -142,6 +176,7 @@ protected:
   const Scene &scene;
   Sampler sampler;
   MediumTracker medium_tracker_root;
+  PathLogger path_logger;
   
 public:
   BaseAlgo(const Scene &_scene)
@@ -192,10 +227,13 @@ using  AlgorithmParameters = RenderingParameters;
 class PathTracing : public BaseAlgo
 {
   int max_ray_depth;
+  double sufficiently_long_distance_to_go_outside_the_scene_bounds;
 public:
   PathTracing(const Scene &_scene, const AlgorithmParameters &algo_params) 
   : BaseAlgo(_scene), max_ray_depth(algo_params.max_ray_depth) 
   {
+    Box bb = _scene.GetBoundingBox();
+    sufficiently_long_distance_to_go_outside_the_scene_bounds = 10.*(bb.max - bb.min).maxCoeff();
   }
   
   
@@ -221,12 +259,17 @@ public:
       return RaySegment::FromTo(pos_to_be_lit, light_sample.pos);
     else
     {
-      return RaySegment{{pos_to_be_lit, -light_sample.pos}, LargeNumber};
+      // TODO: Make the distance calculation work for the case where the entire space is filled with a scattering medium.
+      // In this case an interaction point could be generated far outside the bounds of the scene geometry.
+      // I have to derive an appropriate distance. Or just set the distance to infinite because I cannot know
+      // the density distribution of the medium.
+      return RaySegment{{pos_to_be_lit, -light_sample.pos},
+        sufficiently_long_distance_to_go_outside_the_scene_bounds};
     }
   }
   
   
-  Spectral TransmittanceEstimate(RaySegment seg, HitId last_hit, MediumTracker medium_tracker)
+  Spectral TransmittanceEstimate(RaySegment seg, HitId last_hit, MediumTracker medium_tracker, const PathContext &context)
   {
     // TODO: Russian roulette.
     Spectral result{1.};
@@ -240,7 +283,7 @@ public:
       {
         RaySurfaceIntersection intersection{last_hit, seg};
         Spectral bsdf = intersection.shader().EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, nullptr);
-        result *= bsdf * medium_tracker.getCurrentMedium().EvaluateTransmission(seg);
+        result *= bsdf * medium_tracker.getCurrentMedium().EvaluateTransmission(seg, sampler, context);
         medium_tracker.goingThroughSurface(seg.ray.dir, intersection);
         length_to_go -= seg.length;
         seg.ray.org += seg.length * seg.ray.dir;
@@ -249,14 +292,14 @@ public:
       else
       {
         length_to_go = 0.;
-        result *= medium_tracker.getCurrentMedium().EvaluateTransmission(seg);
+        result *= medium_tracker.getCurrentMedium().EvaluateTransmission(seg, sampler, context);
       }
     }
     return result;
   }
   
   
-  Spectral LightConnection(const Double3 &pos, const Double3 &incident_dir, const RaySurfaceIntersection *intersection, const MediumTracker &medium_tracker_parent)
+  Spectral LightConnection(const Double3 &pos, const Double3 &incident_dir, const RaySurfaceIntersection *intersection, const MediumTracker &medium_tracker_parent, const PathContext &context)
   {
     if (scene.GetNumLights() <= 0)
       return Spectral{0.};
@@ -284,11 +327,13 @@ public:
     if (d_factor <= 0.)
       return Spectral{0.};
 
-    auto transmittance = TransmittanceEstimate(segment_to_light, (intersection ? intersection->hitid : HitId()), medium_tracker_parent);
+    auto transmittance = TransmittanceEstimate(segment_to_light, (intersection ? intersection->hitid : HitId()), medium_tracker_parent, context);
     
     auto sample_value = (transmittance * light_sample.measurement_contribution * scatter_factor)
                         * d_factor / (light_sample.pdf * (light_sample.is_direction ? 1. : Sqr(segment_to_light.length)) * pmf_of_light);
     
+    path_logger.AddSegment(pos, segment_to_light.EndPoint(), PathLogger::EYE_LIGHT_CONNECTION);
+
     return sample_value;
   }
 
@@ -322,9 +367,10 @@ public:
       if (medium_smpl.t < segment.length)
       {
         ray.org = ray.PointAt(medium_smpl.t);
+        path_logger.AddSegment(segment.ray.org, ray.org, PathLogger::EYE_SEGMENT);
         
         path_sample_value += context.beta *
-          LightConnection(ray.org, ray.dir, nullptr, medium_tracker);
+          LightConnection(ray.org, ray.dir, nullptr, medium_tracker, context);
 
         auto scatter_smpl = medium.SamplePhaseFunction(-ray.dir, ray.org, sampler);
         context.beta *= scatter_smpl.value / scatter_smpl.pdf;
@@ -340,10 +386,11 @@ public:
         {
           RaySurfaceIntersection intersection{hit, segment};
           ray.org = ray.PointAt(segment.length);
+          path_logger.AddSegment(segment.ray.org, ray.org, PathLogger::EYE_SEGMENT);
           
           if (!intersection.shader().IsReflectionSpecular())
           {
-            auto lc = LightConnection(intersection.pos, ray.dir, &intersection, medium_tracker);
+            auto lc = LightConnection(intersection.pos, ray.dir, &intersection, medium_tracker, context);
             path_sample_value += context.beta * lc;
           }
 
@@ -374,7 +421,7 @@ public:
     }
     
     return path_sample_value;
-  };
+  }
 };
 
 

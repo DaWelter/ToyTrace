@@ -13,6 +13,7 @@
 #include "renderingalgorithms.hxx"
 #include "sphere.hxx"
 #include "triangle.hxx"
+#include "atmosphere.hxx"
 
 
 TEST(BasicAssumptions, EigenTypes)
@@ -108,6 +109,31 @@ TEST(TestMath, OrthogonalSystemZAligned)
   }
 }
 
+
+TEST(TestMath, TowerSampling)
+{
+  Sampler sampler;
+  double probs[] = { 0, 1, 5, 1, 0 };
+  constexpr int n = sizeof(probs)/sizeof(double);
+  double norm = 0.;
+  for (auto p : probs)
+    norm += p;
+  for (auto &p : probs)
+    p /= norm;
+  int bins[n] = {};
+  constexpr int Nsamples = 1000;
+  for (int i = 0; i < Nsamples; ++i)
+  {
+    int bin = TowerSampling<n>(probs, sampler.Uniform01());
+    EXPECT_GE(bin, 0);
+    EXPECT_LE(bin, n-1);
+    bins[bin]++;
+  }
+  for (int i=0; i<n; ++i)
+  {
+    CheckNumberOfSamplesInBin(strconcat("Bin[",i,"]").c_str(), bins[i], Nsamples, probs[i]);
+  }
+}
 
 
 class TestIntersection : public testing::Test
@@ -645,12 +671,13 @@ TEST_F(SimpleRenderTests, MediaTransmission)
   scene.ParseNFF("scenes/test_dae3.nff");
   scene.BuildAccelStructure();
   scene.PrintInfo();
+  PathContext context{};
   PathTracing rt(scene, AlgorithmParameters());
   MediumTracker medium_tracker(scene);
   medium_tracker.initializePosition({0.,0.,-10.});
   double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
   RaySegment seg{{{ray_offset,0.,-10.}, {0.,0.,1.}}, LargeNumber};
-  auto res = rt.TransmittanceEstimate(seg, HitId(), medium_tracker);
+  auto res = rt.TransmittanceEstimate(seg, HitId(), medium_tracker, context);
   
   auto sigma_e = Spectral{3.};
   Spectral expected = (-2.*sigma_e).exp();
@@ -663,4 +690,65 @@ TEST_F(SimpleRenderTests, MediaTransmission)
 int main(int argc, char **argv) {
     testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
+}
+
+namespace Atmosphere
+{
+
+TEST(SimpleAtmosphereTest, Altitude)
+{
+  Atmosphere::SphereGeometry geom{{0.,0.,1.}, 100.};
+  Double3 pos{0., 110., 1.};
+  double altitude = geom.ComputeAltitude(pos);
+  EXPECT_NEAR(altitude, 10., 1.e-6);
+}
+
+
+TEST(SimpleAtmosphereTest, CollisionCoefficients)
+{
+  Atmosphere::SimpleConstituents constituents{};
+  double altitude = 10.;
+  int lambda = 0;
+  double sigma_s, sigma_a;
+  constituents.ComputeCollisionCoefficients(altitude, lambda, sigma_s, sigma_a);
+  double expected_sigma_s =
+      std::exp(-altitude/8.)*5.8e-3 +
+      std::exp(-altitude/1.2)*20.e-3;
+  double expected_sigma_a =
+      std::exp(-altitude/8.)*0.e-3 +
+      std::exp(-altitude/1.2)*2.22e-3;
+  EXPECT_NEAR(sigma_s, expected_sigma_s, 1.e-12);
+  EXPECT_NEAR(sigma_a, expected_sigma_a, 1.e-12);
+}
+
+
+TEST(SimpleAtmosphereTest, LowestPoint)
+{
+  Atmosphere::SphereGeometry geom{{0.,0.,1.}, 100.};
+  { // Looking down through the atmospheric layer.
+    RaySegment seg{{{-1000., 0., 101.}, {1., 0., 0.}}, 2000.};
+    Double3 p = geom.ComputeLowestPointAlong(seg);
+    EXPECT_NEAR(p[0], 0., 1.e-8);
+    EXPECT_NEAR(p[1], 0., 1.e-8);
+    EXPECT_NEAR(p[2], 101., 1.e-8);
+  }
+
+  { // Same as above but limit the distance.
+    RaySegment seg{{{-1000., 0., 101.}, {1., 0., 0.}}, 20.};
+    Double3 p = geom.ComputeLowestPointAlong(seg);
+    EXPECT_NEAR(p[0], -1000+20., 1.e-8);
+    EXPECT_NEAR(p[1], 0., 1.e-8);
+    EXPECT_NEAR(p[2], 101., 1.e-8);
+  }
+
+  { // Look up
+    RaySegment seg{{{0., 0., 101.}, Normalized(Double3{1., 0., 10.})}, 5.};
+    Double3 p = geom.ComputeLowestPointAlong(seg);
+    EXPECT_NEAR(p[0], 0., 1.e-8);
+    EXPECT_NEAR(p[1], 0., 1.e-8);
+    EXPECT_NEAR(p[2], 101., 1.e-8);
+  }
+}
+
+
 }

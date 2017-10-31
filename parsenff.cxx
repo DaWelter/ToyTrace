@@ -5,6 +5,7 @@
 #include "triangle.hxx"
 #include "shader.hxx"
 #include "util.hxx"
+#include "atmosphere.hxx"
 
 #define LINESIZE 1000
 
@@ -321,22 +322,6 @@ void NFFParser::Parse(const char* fileName)
 		continue;
     }
     
-    /* include new NFF file */
-    
-    if (!strcmp(token,"include")) 
-    {
-      if (!fgets(line,LINESIZE,file)) 
-      {
-        char buffer[1024];
-        std::snprintf(buffer, 1024, "error in include, cannot read filename to include");
-        throw std::runtime_error(buffer);
-      }
-      line[strlen(line)-1] = 0; // remove trailing eol indicator '\n'
-      std::cout << "including file " << line << std::endl;
-      Parse(line);
-      continue;
-    }
-    
     /* shader parameters */
     
     if (!strcmp(token,"shader"))
@@ -420,6 +405,31 @@ void NFFParser::Parse(const char* fileName)
       }
       continue;
     }
+
+
+    if (!strcmp(token, "simpleatmosphere"))
+    {
+      Double3 planet_center;
+      double radius;
+      char name[LINESIZE];
+      int num = std::sscanf(line, "simpleatmosphere %s %lg %lg %lg %lg\n", name, &planet_center[0], &planet_center[1], &planet_center[2], &radius);
+      if (num==1)
+      {
+        mediums.activate(name);
+      }
+      else if(num == 5)
+      {
+        auto *medium = new Atmosphere::Simple(planet_center, radius, mediums.size());
+        mediums.set_and_activate(
+          name, medium);
+      }
+      else
+      {
+        std::cout << "error in " << fileName << " : " << line << std::endl;
+      }
+      continue;
+    }
+
   
     if (!strcmp(token, "lddirection"))
     {
@@ -499,6 +509,25 @@ void NFFParser::Parse(const char* fileName)
 // 		continue;
 // 	}
 	
+
+  /* include new NFF file */
+  if (!strcmp(token,"include"))
+  {
+    char name[LINESIZE];
+    int num = std::sscanf(line,"include %s\n", name);
+    if (num != 1)
+    {
+      throw std::runtime_error("Unable to parse include line");
+    }
+    else
+    {
+      std::string fullpath = dirname + (dirname.empty() ? "" : "/") + std::string(name);
+      std::cout << "including file " << fullpath << std::endl;
+      Parse(fullpath.c_str());
+    }
+    continue;
+  }
+
 	
 	if (!strcmp(token, "m"))
   {

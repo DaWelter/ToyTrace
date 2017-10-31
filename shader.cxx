@@ -90,7 +90,7 @@ PhaseFunctions::Sample VacuumMedium::SamplePhaseFunction(const Double3& incident
 }
 
 
-Spectral VacuumMedium::EvaluateTransmission(const RaySegment& segment) const
+Spectral VacuumMedium::EvaluateTransmission(const RaySegment& segment, Sampler &sampler, const PathContext &context) const
 {
   return Spectral{1.};
 }
@@ -105,9 +105,9 @@ HomogeneousMedium::HomogeneousMedium(const Spectral& _sigma_s, const Spectral& _
 }
 
 
-Spectral HomogeneousMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
+Spectral HomogeneousMedium::EvaluatePhaseFunction(const Double3& incident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
 {
-  return phasefunction->Evaluate(indcident_dir, pos, out_direction, pdf);
+  return phasefunction->Evaluate(incident_dir, pos, out_direction, pdf);
 }
 
 
@@ -190,9 +190,10 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
 #endif
 
   Medium::InteractionSample smpl;
-  double r = sampler.Uniform01();
-  int component = r<lambda_selection_prob[0] ? 0 : (r<(lambda_selection_prob[1]+lambda_selection_prob[0]) ? 1 : 2);
-  smpl.t = - std::log(1-sampler.Uniform01()) / sigma_ext[component];
+  int component = TowerSampling<static_size<Spectral>()>(
+        lambda_selection_prob.data(),
+        sampler.Uniform01());
+  smpl.t = - std::log(sampler.Uniform01()) / sigma_ext[component];
   smpl.t = smpl.t < LargeNumber ? smpl.t : LargeNumber;
   double t = std::min(smpl.t, segment.length);
   Spectral transmittance = (-sigma_ext * t).exp();
@@ -210,7 +211,7 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
 }
 
 
-Spectral HomogeneousMedium::EvaluateTransmission(const RaySegment& segment) const
+Spectral HomogeneousMedium::EvaluateTransmission(const RaySegment& segment, Sampler &sampler, const PathContext &context) const
 {
   return (-sigma_ext * segment.length).exp();
 }
@@ -251,7 +252,7 @@ Medium::InteractionSample MonochromaticHomogeneousMedium::SampleInteractionPoint
 }
 
 
-Spectral MonochromaticHomogeneousMedium::EvaluateTransmission(const RaySegment& segment) const
+Spectral MonochromaticHomogeneousMedium::EvaluateTransmission(const RaySegment& segment, Sampler &sampler, const PathContext &context) const
 {
   return Spectral{std::exp(-sigma_ext * segment.length)};
 }

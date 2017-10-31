@@ -18,15 +18,20 @@ find_package(Boost REQUIRED COMPONENTS program_options)
 include_directories(${PNG_INCLUDE_DIR} ${JPEG_INCLUDE_DIR})
 link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSIMP_LIBRARY} ${X11_LIBRARIES})
 
-set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx bsptree.cxx phasefunctions.cxx)
+set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx bsptree.cxx phasefunctions.cxx atmosphere.cxx)
 add_executable(naivetrace naivetrace.cxx ${SOURCES})
 add_executable(tests tests.cxx ${SOURCES})
-
-# For qtcreator to display all header files. (https://stackoverflow.com/questions/28384935/qtcreator-cmake-project-how-to-show-all-project-files)
-FILE(GLOB THE_HEADERS "*.hxx")
-add_custom_target(headers SOURCES ${THE_HEADERS})
 
 target_link_libraries(naivetrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE})
 
 target_include_directories(tests PUBLIC ${GTEST_INCLUDE_DIRS})
 target_link_libraries(tests ${GTEST_LIBRARIES} pthread)
+
+
+# For qtcreator to display all header files. (https://stackoverflow.com/questions/28384935/qtcreator-cmake-project-how-to-show-all-project-files)
+FILE(GLOB THE_HEADERS "*.hxx")
+add_custom_target(headers SOURCES ${THE_HEADERS})
+
+# The same for scenes because I want to open them in the IDE for convenience.
+FILE(GLOB THE_SCENES "scenes/*.nff")
+add_custom_target(scenes SOURCES ${THE_SCENES})

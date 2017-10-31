@@ -215,6 +215,22 @@ inline OrthogonalSystemZAligned(const Eigen::MatrixBase<Derived> &_Z)
 }
 
 
+template<int n>
+inline int TowerSampling(const double *probs, double r)
+{
+  if (r < probs[n-1])
+    return n-1;
+  r -= probs[n-1];
+  return TowerSampling<n-1>(probs, r);
+}
+
+template<>
+inline int TowerSampling<0>(const double *probs, double r)
+{
+  return 0;
+}
+
+
 constexpr auto Epsilon = std::numeric_limits<double>::epsilon();
 constexpr auto Pi      = double(3.14159265358979323846264338327950288419716939937510);
 constexpr auto Infinity= std::numeric_limits<double>::infinity();
