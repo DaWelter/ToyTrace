@@ -17,18 +17,12 @@ DiffuseShader::DiffuseShader(const Spectral &_reflectance)
 }
 
 
-inline double CosWeightedHemispherePdf(const RaySurfaceIntersection &surface_hit, const Double3& out_direction)
-{
-  double theta = Dot(surface_hit.normal, out_direction);
-  return theta/Pi;
-}
-
-
 Spectral DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
 {
+  double n_dot_out = Dot(surface_hit.normal, out_direction);
   if (pdf)
-    *pdf = CosWeightedHemispherePdf(surface_hit, out_direction);
-  return kr_d;
+    *pdf = n_dot_out>0. ? n_dot_out/Pi : 0.;
+  return n_dot_out > 0. ? kr_d : Spectral{0.};
 }
 
 
@@ -36,8 +30,8 @@ BSDFSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfa
 {
   auto m = OrthogonalSystemZAligned(surface_hit.normal);
   Double3 v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
+  double pdf = v[2]/Pi;
   v = m * v;
-  double pdf = CosWeightedHemispherePdf(surface_hit, v);
   return BSDFSample{v, kr_d, pdf};
 }
 
@@ -165,6 +159,7 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
    * recovering the sampling method for monochromatic media.
    * TODO: Generalize for more then 3 wavelengths.
    */
+  assert(!context.beta.isZero());
   Spectral lambda_selection_prob = context.beta.abs();
   lambda_selection_prob /= lambda_selection_prob.sum();
 
