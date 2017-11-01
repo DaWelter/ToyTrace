@@ -7,7 +7,6 @@
 #include <memory>
 #include <boost/program_options.hpp>
 
-
 class Worker
 {
   const Scene &scene;
@@ -298,16 +297,28 @@ int main(int argc, char *argv[])
     //NormalVisualizer algo(scene);
     if (render_params.pixel_x<0 && render_params.pixel_y<0)
     {
-      for (int y = 0; y < render_params.height; ++y)
+      int total_samples_per_pixel = 0;
+      int samples_per_pixel_per_iteration = 1;
+
+      while (display.is_open() && samples_per_pixel_per_iteration>0)
       {
-        for (int x = 0; x < render_params.width; ++x)
+        for (int y = 0; y < render_params.height; ++y)
         {
-          int pixel_index = scene.GetCamera().PixelToUnit({x, y});
-          Spectral smpl = algo.MakePrettyPixel(pixel_index);
-          buffer.Insert(pixel_index, smpl);
+          for (int x = 0; x < render_params.width; ++x)
+          {
+            int pixel_index = scene.GetCamera().PixelToUnit({x, y});
+            for (int s = 0; s < samples_per_pixel_per_iteration; ++s)
+            {
+              Spectral smpl = algo.MakePrettyPixel(pixel_index);
+              buffer.Insert(pixel_index, smpl);
+            }
+          }
+          buffer.ToImage(bm, y, y+1);
+          display.show(bm);
         }
-        buffer.ToImage(bm, y, y+1);
-        display.show(bm);
+        total_samples_per_pixel += samples_per_pixel_per_iteration;
+        std::cout << "Iteration finished, spp = " << samples_per_pixel_per_iteration << ", total " << total_samples_per_pixel << std::endl;
+        DetermineSamplesPerPixelForNextPass(samples_per_pixel_per_iteration, total_samples_per_pixel, render_params);
       }
     }
     else
@@ -411,6 +422,7 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
         throw po::error("Pixel X is out of image bounds.");
       if (py<0 || py>h)
         throw po::error("Pixel Y is out of image bounds.");
+      py = h - py; // Because for some reason my representation of images is flipped.
     }
     render_params.pixel_x = px;
     render_params.pixel_y = py;
