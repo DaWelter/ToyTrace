@@ -191,18 +191,21 @@ public:
     : xres(_xres), yres(_yres)
   {
     int sz = _xres * _yres;
+    assert(sz > 0);
     count.resize(sz, 0);
     accumulator.resize(sz, Spectral{0.});
   }
   
   void Insert(int pixel_index, const Spectral &value)
   {
+    assert (pixel_index >= 0 && pixel_index < count.size() && pixel_index < accumulator.size());
     ++count[pixel_index];
     accumulator[pixel_index] += value; 
   }
   
   void ToImage(Image &dest, int ystart, int yend) const
   {
+    assert (ystart >= 0 && yend>= ystart && yend <= dest.height());
     for (int y=ystart; y<yend; ++y)
     for (int x=0; x<xres; ++x)
     {

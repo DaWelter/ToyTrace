@@ -43,10 +43,10 @@ public:
 
   Scene()
     : bgColor{0,0,0},
-      camera(new PerspectiveCamera(Double3(0,0,0),Double3(0,0,-1), Double3(0,1,0),60,640,480)),
+      camera(nullptr),
       empty_space_medium{new VacuumMedium()}
   {
-  };
+  }
 
   void ParseNFF(const char *fileName, RenderingParameters *render_params = nullptr);
   
@@ -81,6 +81,11 @@ public:
   Camera& GetCamera()
   {
     return *camera;
+  }
+
+  bool HasCamera() const
+  {
+    return camera!=nullptr;
   }
   
   const Medium& GetEmptySpaceMedium() const
@@ -155,7 +160,7 @@ public:
     scenebox.min -= Double3(Epsilon,Epsilon,Epsilon);
     scenebox.max += Double3(Epsilon,Epsilon,Epsilon);
     return scenebox;
-  };
+  }
 };
 
 

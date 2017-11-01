@@ -213,6 +213,12 @@ int main(int argc, char *argv[])
   std::cout << "parsing input file " << input_file << std::endl;
   scene.ParseNFF(input_file.c_str(), &render_params);
   
+  if (!scene.HasCamera())
+  {
+    std::cout << "There is no camera. Aborting." << std::endl;
+    return -1;
+  }
+
   std::cout << "building acceleration structure " << std::endl;
   scene.BuildAccelStructure();
   scene.PrintInfo();
@@ -302,7 +308,7 @@ int main(int argc, char *argv[])
 
       while (display.is_open() && samples_per_pixel_per_iteration>0)
       {
-        for (int y = 0; y < render_params.height; ++y)
+        for (int y = 0; y < render_params.height && display.is_open(); ++y)
         {
           for (int x = 0; x < render_params.width; ++x)
           {
