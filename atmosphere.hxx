@@ -25,6 +25,7 @@ struct SimpleConstituents
   static constexpr int NUM_CONSTITUENTS = 2;
   SealevelQuantities at_sealevel[NUM_CONSTITUENTS];
   double inv_scale_height[NUM_CONSTITUENTS];
+  double lower_altitude_cutoff;
 
   PhaseFunctions::HenleyGreenstein phasefunction_hg;
   PhaseFunctions::Rayleigh phasefunction_rayleigh;
@@ -59,7 +60,8 @@ public:
 
 inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, int lambda_idx, double &sigma_s, double &sigma_a) const
 {
-  altitude = (altitude>-inv_scale_height[0]) ? altitude : -inv_scale_height[0];
+  assert (altitude > lower_altitude_cutoff);
+  altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
   sigma_a = 0.;
   sigma_s = 0.;
   for (int i=0; i<NUM_CONSTITUENTS; ++i)
