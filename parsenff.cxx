@@ -89,6 +89,7 @@ private:
   Double3 ApplyTransform(const Double3 &p) const;
   Double3 ApplyTransformNormal(const Double3 &v) const;
   void ParseMesh(const char *filename);
+  std::string GenerateFilePath(const std::string &filename) const;
 };
 
 
@@ -109,6 +110,14 @@ void NFFParser::AssignCurrentMaterialParams(Primitive& primitive)
   primitive.shader = shaders();
   primitive.medium = mediums();
   assert(primitive.shader && primitive.medium);
+}
+
+
+std::string NFFParser::GenerateFilePath(const std::string &filename) const
+{
+  // Assuming we get a relative path as input.
+  std::string fullpath = dirname + (dirname.empty() ? "" : "/") + filename;
+  return fullpath;
 }
 
 
@@ -213,7 +222,6 @@ void NFFParser::Parse(const char* fileName)
           render_params->width = resX;
       }
       scene->SetCamera<PerspectiveCamera>(pos,at-pos,up,angle,resX,resY);
-      
       continue;
     }
     
@@ -286,12 +294,12 @@ void NFFParser::Parse(const char* fileName)
             vertex[0],
             vertex[i-1],
             vertex[i],
+            normal[0],
             normal[i-1],
             normal[i],
-            normal[0],
+            uv[0],
             uv[i-1],
-            uv[i],
-            uv[0]));
+            uv[i]));
 		}
 		delete[] vertex;
 		delete[] normal;
@@ -327,22 +335,27 @@ void NFFParser::Parse(const char* fileName)
     if (!strcmp(token,"shader"))
     {
       double r,g,b,kd,ks,shine,t,ior;
-      char texture[LINESIZE];
+      char texture_filename[LINESIZE];
       char name[LINESIZE];
       
-      int num = std::sscanf(line,"shader %s %lg %lg %lg %lg %lg %lg %lg %lg %s\n",name, &r,&g,&b,&kd,&ks,&shine,&t,&ior,texture);
+      int num = std::sscanf(line,"shader %s %lg %lg %lg %lg %lg %lg %lg %lg %s\n",name, &r,&g,&b,&kd,&ks,&shine,&t,&ior,texture_filename);
       Double3 color(r,g,b);
       if(num==1)
       {
         shaders.activate(name);
       }
-      else if(num >= 5) 
+      else if(num < 10)
       {
-        //currentShader = new PhongShader(color,color,Double3(1.),0.1,kd,ks,shine,ks);
         shaders.set_and_activate(name, 
-                         new DiffuseShader(kd * color)
-                        );
-      } 
+          new DiffuseShader(kd * color));
+      }
+      else if(num >= 10)
+      {
+        auto fullpath = GenerateFilePath(texture_filename);
+        auto texture = std::make_unique<Texture>(fullpath);
+        shaders.set_and_activate(name,
+          new TexturedDiffuseShader(kd * color, std::move(texture)));
+      }
       else {
         std::cout << "error in " << fileName << " : " << line << std::endl;
       }
@@ -521,7 +534,7 @@ void NFFParser::Parse(const char* fileName)
     }
     else
     {
-      std::string fullpath = dirname + (dirname.empty() ? "" : "/") + std::string(name);
+      auto fullpath = GenerateFilePath(name);
       std::cout << "including file " << fullpath << std::endl;
       Parse(fullpath.c_str());
     }
@@ -535,7 +548,7 @@ void NFFParser::Parse(const char* fileName)
     int num = sscanf(line, "m %s", meshfile);
     if (num == 1)
     {
-      std::string fullpath = dirname + (dirname.empty() ? "" : "/") + std::string(meshfile);
+      auto fullpath = GenerateFilePath(meshfile);
       ParseMesh(fullpath.c_str());
     }
     else
@@ -628,22 +641,55 @@ private:
   void ReadMesh(const aiMesh* mesh, const NodeRef &ndref)
   {
     auto m = ndref.local_to_world;
+    bool generateTexturedTriangles =
+        mesh->GetNumUVChannels()>0 &&
+        mesh->HasNormals();
     for (unsigned int face_idx = 0; face_idx < mesh->mNumFaces; ++face_idx)
     {
       const aiFace* face = &mesh->mFaces[face_idx];
-      auto vertex0 = parser->ApplyTransform(
-        aiVector3_to_myvector(m * mesh->mVertices[face->mIndices[0]]));
+      auto fetchVertex = [this,mesh,face,&m](int corner) -> Double3 {
+        return parser->ApplyTransform(
+                aiVector3_to_myvector(m * mesh->mVertices[face->mIndices[corner]]));
+      };
+      auto fetchNormal = [this,mesh,face,&m](int corner) -> Double3 {
+        return parser->ApplyTransformNormal(
+          aiVector3_to_myvector(m * mesh->mNormals[face->mIndices[corner]]));
+      };
+      auto fetchUV = [this,mesh,face,&m](int corner) -> Double3 {
+        return aiVector3_to_myvector(mesh->mTextureCoords[0][face->mIndices[corner]]);
+      };
+      Double3 vertex0 = fetchVertex(0);
+      Double3 normal0, uv0;
+      if (generateTexturedTriangles)
+      {
+        normal0 = fetchNormal(0);
+        uv0 = fetchUV(0);
+      }
       for (int i=2; i<face->mNumIndices; i++)
       {
-        auto vertex1 = parser->ApplyTransform(
-          aiVector3_to_myvector(m * mesh->mVertices[face->mIndices[i-1]]));
-        auto vertex2 = parser->ApplyTransform(
-          aiVector3_to_myvector(m * mesh->mVertices[face->mIndices[i  ]]));
-        parser->AssignCurrentMaterialParams(
-          scene->AddPrimitive<Triangle>(
-              vertex0,
-              vertex1,
-              vertex2));
+        auto vertex1 = fetchVertex(i-1);
+        auto vertex2 = fetchVertex(i);
+        if (generateTexturedTriangles)
+        {
+          auto normal1 = fetchNormal(i-1);
+          auto normal2 = fetchNormal(i);
+          auto uv1 = fetchUV(i-1);
+          auto uv2 = fetchUV(i);
+          parser->AssignCurrentMaterialParams(
+            scene->AddPrimitive<TexturedSmoothTriangle>(
+              vertex0, vertex1, vertex2,
+              normal0, normal1, normal2,
+              uv0, uv1, uv2
+           ));
+        }
+        else
+        {
+          parser->AssignCurrentMaterialParams(
+            scene->AddPrimitive<Triangle>(
+                vertex0,
+                vertex1,
+                vertex2));
+        }
       }
     }
   }

@@ -8,7 +8,7 @@ class Texture
 {
 	Image bm;
 public:
-	Texture(const char *filename)
+  Texture(const std::string &filename)
 	{
 		bm.Read(filename);
 /*

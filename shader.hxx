@@ -61,6 +61,18 @@ public:
 };
 
 
+class TexturedDiffuseShader : public Shader
+{
+  Spectral kr_d; // between zero and 1/Pi.
+  std::unique_ptr<Texture> texture; // TODO: Share textures among shaders?
+public:
+  TexturedDiffuseShader(const Spectral &_reflectance, std::unique_ptr<Texture> _texture);
+  BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
+  Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
+};
+
+
+
 class InvisibleShader : public Shader
 {
 public:

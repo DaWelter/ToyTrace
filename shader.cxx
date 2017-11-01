@@ -37,6 +37,41 @@ BSDFSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfa
 
 
 
+
+TexturedDiffuseShader::TexturedDiffuseShader(const Spectral &_reflectance, std::unique_ptr<Texture> _texture)
+  : Shader(0),
+    kr_d(_reflectance),
+    texture(std::move(_texture))
+{
+  // See Diffuse Shader
+  kr_d *= 1./Pi;
+}
+
+
+Spectral TexturedDiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
+{
+  double n_dot_out = Dot(surface_hit.normal, out_direction);
+  if (pdf)
+    *pdf = n_dot_out>0. ? n_dot_out/Pi : 0.;
+  Double3 uv = surface_hit.primitive().GetUV(surface_hit.hitid);
+  Spectral texture_color = texture->GetTexel(uv[0], uv[1]).array();
+  Spectral out_color = texture_color * kr_d;
+  return n_dot_out > 0. ? out_color : Spectral{0.};
+}
+
+
+BSDFSample TexturedDiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const
+{
+  auto m = OrthogonalSystemZAligned(surface_hit.normal);
+  Double3 v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
+  double pdf = v[2]/Pi;
+  v = m * v;
+  return BSDFSample{v, kr_d, pdf};
+}
+
+
+
+
 Spectral InvisibleShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
 {
   constexpr double tol = Epsilon;
