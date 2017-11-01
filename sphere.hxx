@@ -10,7 +10,7 @@ class Sphere : public Primitive
 public:
 	Sphere(Double3 _center,double _radius)
 	: center(_center),radius(_radius),Primitive()
-	{};
+  {}
 
   inline bool PotentialDistances(const Ray &ray, double ray_length, double &t1, double &t2) const
   {
@@ -54,11 +54,13 @@ public:
     if(!PotentialDistances(ray, ray_length, t1, t2))
       return false;
     double t = t2>0. ? t2 : t1;
+    if (t < 0. || t > ray_length)
+      return false;
     hit.primitive = this;
     ray_length = t;
     hit.barry = ray.org + t * ray.dir;
     return true;
-  };
+  }
 
   bool CheckIsNearHit(const Ray &ray, double t, const Double3 &p, const HitId &to_ignore) const
   {
@@ -80,7 +82,7 @@ public:
     return true;
   }
   
-  virtual bool Intersect(const Ray &ray, double &ray_length, HitId &hit, const HitId &to_ignore1, const HitId &to_ignore2) const
+  virtual bool Intersect(const Ray &ray, double &ray_length, HitId &hit, const HitId &to_ignore1, const HitId &to_ignore2) const override
   {
     double t, t1, t2;
     if (!PotentialDistances(ray, ray_length, t1, t2))
