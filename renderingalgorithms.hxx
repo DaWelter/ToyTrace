@@ -3,35 +3,88 @@
 
 #include <fstream>
 
-#ifndef NDEBUG
 // WARNING: THIS IS NOT THREAD SAFE. DON'T WRITE TO THE SAME FILE FROM MULTIPLE THREADS!
 class PathLogger
 {
   std::ofstream file;
+  int max_num_paths;
+  int num_paths_written;
+  int total_path_index;
+  void PreventLogFromGrowingTooMuch();
 public:
   enum SegmentType : int {
     EYE_SEGMENT = 'e',
     LIGHT_PATH = 'l',
     EYE_LIGHT_CONNECTION = 'c',
   };
+  enum ScatterType : int {
+    SCATTER_VOLUME = 'v',
+    SCATTER_SURFACE = 's'
+  };
   PathLogger();
-  void AddSegment(const Double3 &x1, const Double3 &x2, SegmentType type);
+  void AddSegment(const Double3 &x1, const Double3 &x2, const Spectral &beta_at_end_before_scatter, SegmentType type);
+  void AddScatterEvent(const Double3 &pos, const Double3 &out_dir, const Spectral &beta_after, ScatterType type);
+  void NewTrace(const Spectral &beta_init);
 };
 
 
 PathLogger::PathLogger()
-  : file("paths.log")
+  : file{"paths.log"},// {"paths2.log"}},
+    max_num_paths{100},
+    num_paths_written{0},
+    total_path_index{0}
 {
   file.precision(std::numeric_limits<double>::digits10);
 }
 
 
-void PathLogger::AddSegment(const Double3 &x1, const Double3 &x2, SegmentType type)
+void PathLogger::PreventLogFromGrowingTooMuch()
 {
-  file << x1[0] << ", " << x1[1] << ", " << x1[2] << ", "
-       << x2[0] << ", " << x2[1] << ", " << x2[2] << ", "
-       << static_cast<char>(type)  << "\n";
+  if (num_paths_written > max_num_paths)
+  {
+    //files[0].swap(files[1]);
+    file.seekp(std::ios_base::beg);
+    num_paths_written = 0;
+  }
 }
+
+
+void PathLogger::AddSegment(const Double3 &x1, const Double3 &x2, const Spectral &beta_at_end_before_scatter, SegmentType type)
+{
+  const auto &b = beta_at_end_before_scatter;
+  file << static_cast<char>(type) << ", "
+       << x1[0] << ", " << x1[1] << ", " << x1[2] << ", "
+       << x2[0] << ", " << x2[1] << ", " << x2[2] << ", "
+       <<  b[0] << ", " <<  b[1] << ", " <<  b[2] << "\n";
+  file.flush();
+}
+
+void PathLogger::AddScatterEvent(const Double3 &pos, const Double3 &out_dir, const Spectral &beta_after, ScatterType type)
+{
+  const auto &b = beta_after;
+  file << static_cast<char>(type) << ", "
+       <<     pos[0] << ", " <<     pos[1] << ", " <<     pos[2] << ", "
+       << out_dir[0] << ", " << out_dir[1] << ", " << out_dir[2] << ", "
+       <<       b[0] << ", " <<       b[1] << ", " <<       b[2] << "\n";
+  file.flush();
+}
+
+
+void PathLogger::NewTrace(const Spectral &beta_init)
+{
+  ++total_path_index;
+  ++num_paths_written;
+  PreventLogFromGrowingTooMuch();
+  const auto &b = beta_init;
+  file << "n, " << total_path_index << ", " << b[0] << ", " <<  b[1] << ", " <<  b[2] << "\n";
+  file.flush();
+}
+
+
+#ifndef NDEBUG
+#  define PATH_LOGGING(x) x
+#else
+#  define PATH_LOGGING(x)
 #endif
 
 
@@ -176,7 +229,8 @@ protected:
   const Scene &scene;
   Sampler sampler;
   MediumTracker medium_tracker_root;
-  PathLogger path_logger;
+  PATH_LOGGING(
+      PathLogger path_logger;)
   
 public:
   BaseAlgo(const Scene &_scene)
@@ -241,7 +295,7 @@ public:
   {
     static constexpr int MIN_LEVEL = 3;
     static constexpr double LOW_CONTRIBUTION = 0.5;
-    if (level > max_ray_depth)
+    if (level > max_ray_depth || beta.isZero())
       return false;
     if (level < MIN_LEVEL)
       return true;
@@ -274,7 +328,7 @@ public:
     // TODO: Russian roulette.
     Spectral result{1.};
     double length_to_go = seg.length;
-    while (length_to_go > Epsilon && result.abs().sum()>1.e-6)
+    while (length_to_go > Epsilon && !result.isZero())
     {
       
       // The last_hit given by the argument is ignored.
@@ -316,14 +370,13 @@ public:
       d_factor = std::max(0., Dot(intersection->normal, segment_to_light.ray.dir));
       const auto &shader = intersection->shader();
       scatter_factor = shader.EvaluateBSDF(-incident_dir, *intersection, segment_to_light.ray.dir, nullptr);
-      
     }
     else
     {
       const auto &medium = medium_tracker_parent.getCurrentMedium();
       scatter_factor = medium.EvaluatePhaseFunction(-incident_dir, pos, segment_to_light.ray.dir, nullptr);
     }
-    
+
     if (d_factor <= 0.)
       return Spectral{0.};
 
@@ -331,8 +384,11 @@ public:
     
     auto sample_value = (transmittance * light_sample.measurement_contribution * scatter_factor)
                         * d_factor / (light_sample.pdf * (light_sample.is_direction ? 1. : Sqr(segment_to_light.length)) * pmf_of_light);
-    
-    path_logger.AddSegment(pos, segment_to_light.EndPoint(), PathLogger::EYE_LIGHT_CONNECTION);
+
+    PATH_LOGGING(
+    if (!sample_value.isZero())
+      path_logger.AddSegment(pos, segment_to_light.EndPoint(), sample_value, PathLogger::EYE_LIGHT_CONNECTION);
+    )
 
     return sample_value;
   }
@@ -347,12 +403,15 @@ public:
     medium_tracker.initializePosition(cam_sample.ray_out.org);
     
     context.beta *= cam_sample.measurement_contribution / cam_sample.pdf;
+    PATH_LOGGING(
+      path_logger.NewTrace(context.beta);)
+
     Spectral path_sample_value{0.};
     Ray ray = cam_sample.ray_out;
     int level = 1;
     HitId hit{};
+
     bool gogogo = true;
-    
     while (gogogo)
     {
       const Medium& medium = medium_tracker.getCurrentMedium();
@@ -361,63 +420,63 @@ public:
       hit = scene.Intersect(segment.ray, segment.length, hit);
       Medium::InteractionSample medium_smpl;
       medium_smpl = medium.SampleInteractionPoint(segment, sampler, context);
-
       context.beta *= medium_smpl.weight;
-      
+
       if (medium_smpl.t < segment.length)
       {
         ray.org = ray.PointAt(medium_smpl.t);
-        path_logger.AddSegment(segment.ray.org, ray.org, PathLogger::EYE_SEGMENT);
-        
+        PATH_LOGGING(path_logger.AddSegment(segment.ray.org, ray.org, context.beta, PathLogger::EYE_SEGMENT);)
+
         path_sample_value += context.beta *
           LightConnection(ray.org, ray.dir, nullptr, medium_tracker, context);
 
         auto scatter_smpl = medium.SamplePhaseFunction(-ray.dir, ray.org, sampler);
         context.beta *= scatter_smpl.value / scatter_smpl.pdf;
-        
+
+        PATH_LOGGING(path_logger.AddScatterEvent(ray.org, scatter_smpl.dir, context.beta, PathLogger::SCATTER_VOLUME);)
+
         ray.dir = scatter_smpl.dir;
         hit = HitId{};
         ++level;
         gogogo = RouletteSurvival(context.beta, level);
       }
+      else if (hit)
+      {
+        RaySurfaceIntersection intersection{hit, segment};
+        ray.org = ray.PointAt(segment.length);
+        PATH_LOGGING(path_logger.AddSegment(segment.ray.org, ray.org, context.beta, PathLogger::EYE_SEGMENT);)
+
+        if (!intersection.shader().IsReflectionSpecular())
+        {
+          auto lc = LightConnection(intersection.pos, ray.dir, &intersection, medium_tracker, context);
+          path_sample_value += context.beta * lc;
+        }
+
+        auto surface_sample  = intersection.shader().SampleBSDF(-ray.dir, intersection, sampler);
+
+        auto out_dir_dot_normal = Dot(surface_sample.dir, intersection.normal);
+        double d_factor = out_dir_dot_normal >= 0. ? out_dir_dot_normal : 1.;
+        context.beta *= d_factor / surface_sample.pdf * surface_sample.scatter_function;
+
+        PATH_LOGGING(path_logger.AddScatterEvent(ray.org, surface_sample.dir, context.beta, PathLogger::SCATTER_SURFACE);)
+
+        // By definition, intersection.normal points to where the intersection ray is comming from.
+        // Thus we can determine if the sampled direction goes through the surface by looking
+        // if the direction goes in the opposite direction of the normal.
+        if (out_dir_dot_normal < 0.)
+        {
+          medium_tracker.goingThroughSurface(surface_sample.dir, intersection);
+        }
+
+        ray.dir = surface_sample.dir;
+        level = intersection.shader().IsPassthrough() ? level : level+1;
+        gogogo = RouletteSurvival(context.beta, level);
+      }
       else
       {
-        if (hit)
-        {
-          RaySurfaceIntersection intersection{hit, segment};
-          ray.org = ray.PointAt(segment.length);
-          path_logger.AddSegment(segment.ray.org, ray.org, PathLogger::EYE_SEGMENT);
-          
-          if (!intersection.shader().IsReflectionSpecular())
-          {
-            auto lc = LightConnection(intersection.pos, ray.dir, &intersection, medium_tracker, context);
-            path_sample_value += context.beta * lc;
-          }
-
-          auto surface_sample  = intersection.shader().SampleBSDF(-ray.dir, intersection, sampler);
-          
-          auto out_dir_dot_normal = Dot(surface_sample.dir, intersection.normal);
-          double d_factor = out_dir_dot_normal >= 0. ? out_dir_dot_normal : 1.;
-
-          context.beta *= d_factor / surface_sample.pdf * surface_sample.scatter_function;
-          
-          // By definition, intersection.normal points to where the intersection ray is comming from.
-          // Thus we can determine if the sampled direction goes through the surface by looking
-          // if the direction goes in the opposite direction of the normal.    
-          if (out_dir_dot_normal < 0.)
-          {
-            medium_tracker.goingThroughSurface(surface_sample.dir, intersection);
-          }
-          
-          ray.dir = surface_sample.dir;
-          level = intersection.shader().IsPassthrough() ? level : level+1;
-          gogogo = RouletteSurvival(context.beta, level);
-        }
-        else
-        {
-          gogogo = false;
-        }
+        gogogo = false;
       }
+      assert(context.beta.allFinite());
     }
     
     return path_sample_value;
