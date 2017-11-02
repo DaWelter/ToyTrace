@@ -92,6 +92,33 @@ public:
     return false;
   }
   
+  virtual Double3 GetUV(const HitId &hit) const override
+  {
+    // From kartesian to spherical coordinates.
+    double z = hit.barry[2];
+    double y = hit.barry[1];
+    double x = hit.barry[0];
+    double r = Length(hit.barry);
+    double theta = std::acos(y/r);
+    double phi;
+    double ax = std::abs(x);
+    double az = std::abs(z);
+    if (ax > az)
+    {
+      phi = std::atan2(z,ax);
+      phi = (x > 0.) ? phi : Pi - phi;
+    }
+    else
+    {
+      phi = std::atan2(x,az);
+      phi = (z > 0.) ? Pi/2.-phi : 3./2.*Pi + phi;
+    }
+    // To UV
+    theta /= Pi;
+    phi   /= 2.*Pi;
+    return Double3{phi, theta, 0.};
+  }
+
 	virtual Double3 GetNormal(const HitId &hit) const
 	{
 	  Double3 n(hit.barry-center);
