@@ -236,39 +236,6 @@ void NFFParser::Parse(const char* fileName)
       continue;
     }
 
-    /* polygon (with normals) */
-    
-    if (!strcmp(token,"pp")) {
-      int vertices;
-      sscanf(str,"pp %d",&vertices);
-      Double3 *vertex = new Double3[vertices];
-      Double3 *normal = new Double3[vertices];
-
-      for (i=0;i<vertices;i++) 
-      {
-        fscanf(file,"%lg %lg %lg %lg %lg %lg\n",
-          &vertex[i][0],&vertex[i][1],&vertex[i][2],
-          &normal[i][0],&normal[i][1],&normal[i][2]);
-        vertex[i] = ApplyTransform(vertex[i]);
-        normal[i] = ApplyTransformNormal(normal[i]);
-      }
-
-      for (i=2;i<vertices;i++) 
-      {
-        AssignCurrentMaterialParams(
-          scene->AddPrimitive<SmoothTriangle>(
-          vertex[0],
-          vertex[i-1],
-          vertex[i],
-          normal[i-1],
-          normal[i],
-          normal[0]));
-      }
-      delete[] vertex;
-      delete[] normal;
-      continue;
-    }
-
 /* polygon (with normals and uv) */
     if (!strcmp(token,"tpp")) 
 	{
@@ -675,6 +642,10 @@ private:
           auto normal2 = fetchNormal(i);
           auto uv1 = fetchUV(i-1);
           auto uv2 = fetchUV(i);
+//          std::cout << "---" << std::endl;
+//          std::cout << "0: p:" << vertex0 << ", n:"  << normal0 << "uv: " << uv0 << std::endl;
+//          std::cout << "1: p:" << vertex1 << ", n:"  << normal1 << "uv: " << uv1 << std::endl;
+//          std::cout << "2: p:" << vertex2 << ", n:"  << normal2 << "uv: " << uv2 << std::endl;
           parser->AssignCurrentMaterialParams(
             scene->AddPrimitive<TexturedSmoothTriangle>(
               vertex0, vertex1, vertex2,
