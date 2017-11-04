@@ -9,6 +9,9 @@
 *.log
 .fuse_*
 
+#pycharm project files
+.idea
+
 #CMake stuff
 CMakeCache.txt
 CMakeFiles

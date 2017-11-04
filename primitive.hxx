@@ -48,11 +48,6 @@ public:
     Box boundingbox = CalcBounds();
     return boundingbox.Intersect(box);
   }
-  
-  virtual void ListPrimitives(std::vector<Primitive *> &list)
-  { 
-    list.push_back(this); 
-  }
 };
 
 #endif
