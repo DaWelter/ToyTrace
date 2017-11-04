@@ -31,6 +31,7 @@ struct SimpleConstituents
   PhaseFunctions::Rayleigh phasefunction_rayleigh;
 
   inline void ComputeCollisionCoefficients(double altitude, int lambda_idx, double &sigma_s, double &sigma_a) const;
+  inline void ComputeSigmaS(double altitude, Spectral* sigma_s_of_constituent) const;
 };
 
 
@@ -48,7 +49,7 @@ class Simple : public Medium
 {
   SimpleConstituents constituents;
   SphereGeometry geometry;
-
+  void ComputeProbabilities(const Double3 &pos, Spectral &prob_lambda, Spectral *prob_constituent_given_lambda) const;
 public:
   Simple(const Double3 &_planet_center, double _planet_radius, int _priority);
   InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
@@ -60,7 +61,7 @@ public:
 
 inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, int lambda_idx, double &sigma_s, double &sigma_a) const
 {
-  assert (altitude > lower_altitude_cutoff);
+  //assert (altitude > lower_altitude_cutoff);
   altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
   sigma_a = 0.;
   sigma_s = 0.;
@@ -69,6 +70,18 @@ inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, in
     double rho_relative = std::exp(-inv_scale_height[i] * altitude);
     sigma_a += at_sealevel[i].sigma_a[lambda_idx] * rho_relative;
     sigma_s += at_sealevel[i].sigma_s[lambda_idx] * rho_relative;
+  }
+}
+
+
+void SimpleConstituents::ComputeSigmaS(double altitude, Spectral* sigma_s_of_constituent) const
+{
+  //assert (altitude > lower_altitude_cutoff);
+  altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
+  for (int i=0; i<NUM_CONSTITUENTS; ++i)
+  {
+    double rho_relative = std::exp(-inv_scale_height[i] * altitude);
+    sigma_s_of_constituent[i]= at_sealevel[i].sigma_s * rho_relative;
   }
 }
 
