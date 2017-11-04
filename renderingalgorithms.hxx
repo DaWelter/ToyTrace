@@ -103,6 +103,9 @@ class MediumTracker
   const Scene &scene;
   void enterVolume(const Medium *medium);
   void leaveVolume(const Medium *medium);
+  const Medium* findMediumOfHighestPriority() const;
+  bool remove(const Medium *medium);
+  bool insert(const Medium *medium);
 public:
   explicit MediumTracker(const Scene &_scene);
   MediumTracker(const MediumTracker &_other) = default;
@@ -113,10 +116,9 @@ public:
 
 
 MediumTracker::MediumTracker(const Scene& _scene)
-  : scene{_scene}, current{nullptr}, media{}
-  // Note: Ctor zero-initializes the media array.
+  : scene{_scene}, current{nullptr},
+    media{} // Note: Ctor zero-initializes the media array.
 {
-  
 }
 
 
@@ -129,9 +131,30 @@ const Medium& MediumTracker::getCurrentMedium() const
 
 void MediumTracker::initializePosition(const Double3& pos)
 {
-  // TODO: Find the actual stack of media the position is contained within.
-  current = &scene.GetEmptySpaceMedium();
   std::fill(media.begin(), media.end(), nullptr);
+  current = &scene.GetEmptySpaceMedium();
+  {
+    const Box bb = scene.GetBoundingBox();
+    // The InBox check is important. Otherwise I would not know how long to make the ray.
+    if (bb.InBox(pos))
+    {
+      double distance_to_go = 2. * (bb.max-bb.min).maxCoeff(); // Times to due to the diagonal.
+      HitId hit;
+      Double3 start = pos;
+      start[0] += distance_to_go;
+      RaySegment seg{{start, {-1., 0., 0.}}, distance_to_go};
+      while (distance_to_go > 0.)
+      {
+        hit = scene.Intersect(seg.ray, seg.length, hit);
+        if (!hit) break;
+        RaySurfaceIntersection intersection(hit, seg);
+        goingThroughSurface(seg.ray.dir, intersection);
+        seg.ray.org = seg.EndPoint();
+        distance_to_go -= seg.length;
+        seg.length = distance_to_go;
+      }
+    }
+  }
 }
 
 
@@ -144,17 +167,48 @@ void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const RayS
 }
 
 
+const Medium* MediumTracker::findMediumOfHighestPriority() const
+{
+  const Medium* medium_max_prio = &scene.GetEmptySpaceMedium();
+  for (int i = 0; i < media.size(); ++i)
+  {
+    medium_max_prio = (media[i] &&  medium_max_prio->priority < media[i]->priority) ?
+                        media[i] : medium_max_prio;
+  }
+  return medium_max_prio;
+}
+
+
+bool MediumTracker::remove(const Medium *medium)
+{
+  bool is_found = false;
+  for (int i = 0; (i < media.size()) && !is_found; ++i)
+  {
+    is_found = media[i] == medium;
+    media[i] = is_found ? nullptr : media[i];
+  }
+  return is_found;
+}
+
+
+bool MediumTracker::insert(const Medium *medium)
+{
+  bool is_place_empty = false;
+  for (int i = 0; (i < media.size()) && !is_place_empty; ++i)
+  {
+    is_place_empty = media[i]==nullptr;
+    media[i] = is_place_empty ? medium : media[i];
+  }
+  return is_place_empty;
+}
+
+
 void MediumTracker::enterVolume(const Medium* medium)
 {
   // Set one of the array entries that is currently nullptr to the new medium pointer.
   // But only if there is room left. Otherwise the new medium is ignored.
-  bool is_null = false;
-  for (int i = 0; (i < media.size()) && !is_null; ++i)
-  {
-    is_null = media[i]==nullptr;
-    media[i] = is_null ? medium : media[i];
-  }
-  current = (is_null && medium->priority > current->priority) ? medium : current;
+  bool was_inserted = insert(medium);
+  current = (was_inserted && medium->priority > current->priority) ? medium : current;
 }
 
 
@@ -162,21 +216,10 @@ void MediumTracker::leaveVolume(const Medium* medium)
 {
   // If the medium is in the media stack, remove it.
   // And also make the medium of highest prio the current one.
-  bool is_eq = false;
-  for (int i = 0; (i < media.size()) && !is_eq; ++i)
-  {
-    is_eq = media[i] == medium;
-    media[i] = is_eq ? nullptr : media[i];
-  }
+  remove(medium);
   if (medium == current)
   {
-    const Medium* medium_max_prio = &scene.GetEmptySpaceMedium();
-    for (int i = 0; i < media.size(); ++i)
-    {
-      medium_max_prio = (media[i] &&  medium_max_prio->priority < media[i]->priority) ?
-                          media[i] : medium_max_prio;
-    }
-    current = medium_max_prio;
+    current = findMediumOfHighestPriority();
   }
 }
 

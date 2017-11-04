@@ -39,6 +39,12 @@ public:
 
   }
 
+  bool InBox(const Double3 &p) const
+  {
+    return (p.array() > min.array() &&
+            p.array() < max.array()).all();
+  }
+
   bool Intersect(const Box &box) const
   {
     // If we don't find a separating axis ...
