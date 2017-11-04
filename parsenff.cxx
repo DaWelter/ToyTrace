@@ -101,7 +101,7 @@ Double3 NFFParser::ApplyTransform(const Double3 &p) const
 
 Double3 NFFParser::ApplyTransformNormal(const Double3 &v) const
 {
-  return currentTransform.linear() * v;
+  return Normalized(currentTransform.linear() * v);
 }
 
 
@@ -172,23 +172,27 @@ void NFFParser::Parse(const char* fileName)
     
     if (!strcmp(token, "transform"))
     {
-      Double3 t, r;
-      int n = std::sscanf(str,"transform %lg %lg %lg %lg %lg %lg\n",&t[0], &t[1], &t[2], &r[0], &r[1], &r[2]);
-      if (n == 6)
+      Double3 t, r, s;
+      int n = std::sscanf(str,"transform %lg %lg %lg %lg %lg %lg %lg %lg %lg\n",&t[0], &t[1], &t[2], &r[0], &r[1], &r[2], &s[0], &s[1], &s[2]);
+      if (n != 3 && n != 6 && n != 9)
+        throw std::runtime_error(strconcat("error in ", fileName, " : ", line));
+      decltype(currentTransform) trafo;
+      trafo = Eigen::Translation3d(t);
+      if (n >= 6)
       {
         // The heading, pitch, bank convention assuming Y is up and Z is forward!
-        Eigen::Matrix3d m{
+        trafo = trafo *
           Eigen::AngleAxisd(r[0], Eigen::Vector3d::UnitY()) *
-          Eigen::AngleAxisd(r[1], Eigen::Vector3d::UnitX()) * 
-          Eigen::AngleAxisd(r[2], Eigen::Vector3d::UnitZ()) };
-        currentTransform = Eigen::Translation3d(t) * m;
-        std::cout << "Transform: t=\n" << currentTransform.translation() << "\nr=\n" << currentTransform.linear() << std::endl;
-        continue;
+          Eigen::AngleAxisd(r[1], Eigen::Vector3d::UnitX()) *
+          Eigen::AngleAxisd(r[2], Eigen::Vector3d::UnitZ());
+        if (n >= 9)
+        {
+          trafo = trafo * Eigen::Scaling(s);
+        }
       }
-      else
-      {
-        throw std::runtime_error(strconcat("error in ", fileName, " : ", line));
-      }
+      currentTransform = trafo;
+      std::cout << "Transform: t=\n" << currentTransform.translation() << "\nr=\n" << currentTransform.linear() << std::endl;
+      continue;
     }
     /* camera */
 
