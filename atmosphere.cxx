@@ -158,7 +158,7 @@ Spectral Simple::EvaluateTransmission(const RaySegment &segment, Sampler &sample
 }
 
 
-void Simple::ComputeProbabilities(const Double3 &pos, Spectral &prob_lambda, Spectral *prob_constituent_given_lambda) const
+void Simple::ComputeProbabilities(const Double3 &pos, const PathContext &context, Spectral &prob_lambda, Spectral *prob_constituent_given_lambda) const
 {
   constexpr int NL = static_size<Spectral>();
   constexpr int NC = SimpleConstituents::NUM_CONSTITUENTS;
@@ -169,18 +169,25 @@ void Simple::ComputeProbabilities(const Double3 &pos, Spectral &prob_lambda, Spe
   constituents.ComputeSigmaS(altitude, prob_constituent_given_lambda);
   for (int lambda = 0; lambda<NL; ++lambda)
   {
+    // For a given lambda, the normalization sum goes over the constituents.
     double normalization = 0.;
     for (int c=0; c<NC; ++c)
     {
+      // The probability weight to select a constituent for sampling is
+      // just the coefficient in front of the respective scattering function.
       normalization += prob_constituent_given_lambda[c][lambda];
     }
-    prob_lambda[lambda] = normalization;
     assert(normalization > 0.);
-    prob_lambda_normalization += normalization;
     for (int c=0; c<NC; ++c)
     {
       prob_constituent_given_lambda[c][lambda] /= normalization;
     }
+    // The weights of the current path should be reflected in the probability
+    // to select some lambda. That is to prevent sampling a lambda which already
+    // has a very low weight, or zero as in single wavelength sampling mode.
+    // Add epsilon to protect against all zero beta.
+    prob_lambda[lambda] = normalization * (context.beta[lambda] + Epsilon);
+    prob_lambda_normalization += prob_lambda[lambda];
   }
   assert(prob_lambda_normalization > 0.);
   for (int lambda = 0; lambda<NL; ++lambda)
@@ -190,14 +197,14 @@ void Simple::ComputeProbabilities(const Double3 &pos, Spectral &prob_lambda, Spe
 }
 
 
-Medium::PhaseSample Simple::SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler) const
+Medium::PhaseSample Simple::SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const
 {
   constexpr int NL = static_size<Spectral>();
   constexpr int NC = SimpleConstituents::NUM_CONSTITUENTS;
 
   Spectral prob_lambda;
   Spectral prob_constituent_given_lambda[NC];
-  ComputeProbabilities(pos, prob_lambda, prob_constituent_given_lambda);
+  ComputeProbabilities(pos, context, prob_lambda, prob_constituent_given_lambda);
 
   int lambda = TowerSampling<NL>(prob_lambda.data(), sampler.Uniform01());
   double contiguous_probs[NC] = {
@@ -228,14 +235,14 @@ Medium::PhaseSample Simple::SamplePhaseFunction(const Double3 &incident_dir, con
 }
 
 
-Spectral Simple::EvaluatePhaseFunction(const Double3 &incident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const
+Spectral Simple::EvaluatePhaseFunction(const Double3 &incident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const
 {
   constexpr int NL = static_size<Spectral>();
   constexpr int NC = SimpleConstituents::NUM_CONSTITUENTS;
 
   Spectral prob_lambda;
   Spectral prob_constituent_given_lambda[NC];
-  ComputeProbabilities(pos, prob_lambda, prob_constituent_given_lambda);
+  ComputeProbabilities(pos, context, prob_lambda, prob_constituent_given_lambda);
 
   if (pdf)
     *pdf = 0.;

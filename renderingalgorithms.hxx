@@ -420,7 +420,7 @@ public:
     else
     {
       const auto &medium = medium_tracker_parent.getCurrentMedium();
-      scatter_factor = medium.EvaluatePhaseFunction(-incident_dir, pos, segment_to_light.ray.dir, nullptr);
+      scatter_factor = medium.EvaluatePhaseFunction(-incident_dir, pos, segment_to_light.ray.dir, context, nullptr);
     }
 
     if (d_factor <= 0.)
@@ -476,7 +476,7 @@ public:
         path_sample_value += context.beta *
           LightConnection(ray.org, ray.dir, nullptr, medium_tracker, context);
 
-        auto scatter_smpl = medium.SamplePhaseFunction(-ray.dir, ray.org, sampler);
+        auto scatter_smpl = medium.SamplePhaseFunction(-ray.dir, ray.org, sampler, context);
         context.beta *= scatter_smpl.value / scatter_smpl.pdf;
 
         PATH_LOGGING(path_logger.AddScatterEvent(ray.org, scatter_smpl.dir, context.beta, PathLogger::SCATTER_VOLUME);)

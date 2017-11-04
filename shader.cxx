@@ -92,7 +92,7 @@ BSDFSample InvisibleShader::SampleBSDF(const Double3 &incident_dir, const RaySur
 
 
 
-Spectral VacuumMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
+Spectral VacuumMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, const PathContext &context, double* pdf) const
 {
   if (pdf)
     *pdf = 1.;
@@ -109,7 +109,7 @@ Medium::InteractionSample VacuumMedium::SampleInteractionPoint(const RaySegment&
 }
 
 
-PhaseFunctions::Sample VacuumMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler) const
+PhaseFunctions::Sample VacuumMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
 {
   return PhaseFunctions::Sample{
     -incident_dir,
@@ -134,13 +134,13 @@ HomogeneousMedium::HomogeneousMedium(const Spectral& _sigma_s, const Spectral& _
 }
 
 
-Spectral HomogeneousMedium::EvaluatePhaseFunction(const Double3& incident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
+Spectral HomogeneousMedium::EvaluatePhaseFunction(const Double3& incident_dir, const Double3& pos, const Double3& out_direction, const PathContext &context, double* pdf) const
 {
   return phasefunction->Evaluate(incident_dir, pos, out_direction, pdf);
 }
 
 
-PhaseFunctions::Sample HomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler) const
+PhaseFunctions::Sample HomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
 {
   return phasefunction->SampleDirection(incident_dir, pos, sampler);
 }
@@ -257,13 +257,13 @@ MonochromaticHomogeneousMedium::MonochromaticHomogeneousMedium(double _sigma_s, 
 }
 
 
-Spectral MonochromaticHomogeneousMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
+Spectral MonochromaticHomogeneousMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, const PathContext &context, double* pdf) const
 {
   return phasefunction->Evaluate(indcident_dir, pos, out_direction, pdf);
 }
 
 
-Medium::PhaseSample MonochromaticHomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler) const
+Medium::PhaseSample MonochromaticHomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
 {
   return phasefunction->SampleDirection(incident_dir, pos, sampler);
 }
