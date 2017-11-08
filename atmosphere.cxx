@@ -266,7 +266,7 @@ Spectral Simple::EvaluatePhaseFunction(const Double3 &incident_dir, const Double
 
 SimpleConstituents::SimpleConstituents()
   : phasefunction_hg(0.76),
-    lower_altitude_cutoff(0.)
+    lower_altitude_cutoff(-std::numeric_limits<double>::max())
 {
   inv_scale_height[MOLECULES] = 1./8.; // km
   inv_scale_height[AEROSOLES] = 1./1.2;  // km

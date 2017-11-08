@@ -61,7 +61,7 @@ public:
 
 inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, int lambda_idx, double &sigma_s, double &sigma_a) const
 {
-  //assert (altitude > lower_altitude_cutoff);
+  assert (altitude > lower_altitude_cutoff);
   altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
   sigma_a = 0.;
   sigma_s = 0.;
@@ -76,7 +76,7 @@ inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, in
 
 void SimpleConstituents::ComputeSigmaS(double altitude, Spectral* sigma_s_of_constituent) const
 {
-  //assert (altitude > lower_altitude_cutoff);
+  assert (altitude > lower_altitude_cutoff);
   altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
   for (int i=0; i<NUM_CONSTITUENTS; ++i)
   {
