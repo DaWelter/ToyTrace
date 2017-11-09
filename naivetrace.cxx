@@ -417,8 +417,8 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
     if (vm.count("rd"))
     {
       rd = vm["rd"].as<int>();
-      if (rd <= 1)
-        throw po::error("Max ray depth must be greater one.");
+      if (rd <= 0)
+        throw po::error("Max ray depth must be greater zero.");
     }
     render_params.max_ray_depth = rd;
     
@@ -428,7 +428,7 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
         throw po::error("Pixel X is out of image bounds.");
       if (py<0 || py>h)
         throw po::error("Pixel Y is out of image bounds.");
-      py = h - py; // Because for some reason my representation of images is flipped.
+      py = h -1 - py; // Because for some reason my representation of images is flipped.
     }
     render_params.pixel_x = px;
     render_params.pixel_y = py;

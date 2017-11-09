@@ -100,6 +100,7 @@ void Image::DrawRectOutline( int x1, int y1, int x2, int y2 )
 
 void Image::DrawPixel( int x, int y )
 {
+  assert (x >= 0 && x < width() && y >= 0 && y < height());
   TOCIMG(priv)->draw_point( x,y, col,opacity );
 }
 

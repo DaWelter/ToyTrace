@@ -262,7 +262,7 @@ public:
       {
         for (int i=0; i<3; ++i)
           rgb[i] = average[i]*255.999;
-        dest.set_pixel(x, dest.height() - y, rgb[0], rgb[1], rgb[2]);
+        dest.set_pixel(x, dest.height() - 1 - y, rgb[0], rgb[1], rgb[2]);
       }
     }
   }
