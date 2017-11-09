@@ -14,58 +14,56 @@ public:
 
   inline bool PotentialDistances(const Ray &ray, double ray_length, double &t1, double &t2) const
   {
-    ASSERT_NORMALIZED(ray.dir);
-    Double3 q = center-ray.org;
-    double t = Dot(q,ray.dir);
-    if(t>ray_length+Epsilon+radius || t<-radius+Epsilon) return false;
-    Double3 p = ray.org + t*ray.dir;
-    double dd = LengthSqr(p-center);
-    if(dd>=radius*radius) return false;
-    double dt = std::sqrt(radius*radius-dd);
+    Double3 q = ray.org-center;
+    double C = Dot(q,q) - radius * radius;
+    double A = Dot(ray.dir,ray.dir);
+    double B = 2.*Dot(ray.dir,q);
+    double t = -B*0.5/A;
+    double under_the_sqrt = B*B - 4.*A*C;
+    if (under_the_sqrt < 0.)
+      return false;
+    double dt = std::sqrt(under_the_sqrt)*0.5/A;
     t1=t+dt;
     t2=t-dt;
     if (t1<0. || t2>ray_length) return false;
     return true;
   }
   
-
-  /* To fix precision issues I tried to move the intersection point closer
-   * to the sphere surface by refining t via Newton iterations.
-   * That worked. However since the introduction of Duff's
-   * orthonormal basis code the precision problems are gone either way. 
-     To use like this:
-   t1 = Refine(t1, Dot(q,q), -Dot(q, ray.dir), Dot(ray.dir, ray.dir));
-   t2 = Refine(t2, Dot(q,q), -Dot(q, ray.dir), Dot(ray.dir, ray.dir));
-
-  inline double Refine(double t, double qq, double qv, double vv) const
-  {
-    // Newton iterations.
-    for (int n = 0; n < 5; ++n)
-    {
-      t = (t*t*vv - qq + radius*radius) / (2.*qv + 2.*t*vv);
-    }
-    return t;
-  }
-  */  
-  
   bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const override
   {
     double t1, t2;
     if(!PotentialDistances(ray, ray_length, t1, t2))
       return false;
-    double t = t2>0. ? t2 : t1;
-    if (t < 0. || t > ray_length)
-      return false;
-    hit.primitive = this;
+    double t = t2;
+    if (t <= 0.)
+    {
+      t = t1;
+      if (t > ray_length)
+        return false;
+    }
+    hit = HitId{ this, ray.PointAt(t) };
+    RefineHitPoint(hit.barry);
     ray_length = t;
-    hit.barry = ray.org + t * ray.dir;
     return true;
+  }
+
+  inline void RefineHitPoint(Double3 &pos) const
+  {
+    // The error estimate is probably fine. However it neglects the
+    // error due to computing org + t * dir. Thus it can only be
+    // used as a measure of the offset from the true sphere surface.
+    // It does not account for the error of the distance from the true hit point.
+    Double3 q = pos - center;
+    q *= (radius / Length(q));
+    //error = Gamma(5)*q.array().abs().maxCoeff();
+    pos = q + center;
+    //error += Gamma(1)*(pos.array().abs().maxCoeff() + error); // PBRT pg 219. (Error of addition).
   }
 
   bool CheckIsNearHit(const Ray &ray, double t, const Double3 &p, const HitId &to_ignore) const
   {
     // TODO: use error estimates of t and to_ignore.barry. Because this is really unreliable.
-    const double tol = 100. * Epsilon * radius;
+    const double tol = 1.e-8 * radius;
     double uu = LengthSqr(to_ignore.barry - p);
     return uu < tol*tol;
   }
@@ -73,12 +71,12 @@ public:
   bool IntersectIfNotIgnored(const Ray &ray, double t, double &ray_length, HitId &hit, const HitId &to_ignore1, const HitId &to_ignore2) const
   {
     if (t < 0. || t>ray_length) return false;
-    Double3 p = ray.PointAt(t);
-    if (to_ignore1.primitive == this && CheckIsNearHit(ray, t, p, to_ignore1)) return false;
-    if (to_ignore2.primitive == this && CheckIsNearHit(ray, t, p, to_ignore2)) return false;
-    hit.primitive = this;
+    HitId potential_hit{ this, ray.PointAt(t) };
+    RefineHitPoint(potential_hit.barry);
+    if (to_ignore1.primitive == this && CheckIsNearHit(ray, t, potential_hit.barry, to_ignore1)) return false;
+    if (to_ignore2.primitive == this && CheckIsNearHit(ray, t, potential_hit.barry, to_ignore2)) return false;
+    hit = potential_hit;
     ray_length = t;
-    hit.barry = p;
     return true;
   }
   
@@ -119,12 +117,15 @@ public:
     return Double3{phi, theta, 0.};
   }
 
-	virtual Double3 GetNormal(const HitId &hit) const
-	{
-	  Double3 n(hit.barry-center);
-	  Normalize(n);
-	  return n;
-	}
+  virtual void GetLocalGeometry(
+      const HitId &hit,
+      Double3 &hit_point,
+      Double3 &normal,
+      Double3 &shading_normal) const override
+  {
+    hit_point = hit.barry;
+    shading_normal = normal = Normalized(hit.barry-center);
+  }
 
 	virtual Box CalcBounds() const
 	{

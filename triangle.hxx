@@ -45,14 +45,20 @@ public:
     hit.primitive = this;
     return true;
   }
-
-	virtual Double3 GetNormal(const HitId &hit) const override
-	{
-		Double3 n = Cross(p[1]-p[0],p[2]-p[0]);
-		Normalize(n);
-		return n;
-	}
 	
+  virtual void GetLocalGeometry(
+      const HitId &hit,
+      Double3 &hit_point,
+      Double3 &normal,
+      Double3 &shading_normal) const override
+  {
+    hit_point = hit.barry[0] * p[0] +
+                hit.barry[1] * p[1] +
+                hit.barry[2] * p[2];
+    shading_normal = normal =
+        Normalized(Cross(p[1]-p[0],p[2]-p[0]));
+  }
+
 	virtual Box CalcBounds() const override
 	{
 		Box box;
@@ -88,13 +94,20 @@ public:
 		return res;
 	}
 
-  Double3 GetNormal(const HitId &hit) const override
+  virtual void GetLocalGeometry(
+      const HitId &hit,
+      Double3 &hit_point,
+      Double3 &normal,
+      Double3 &shading_normal) const override
   {
-    Double3 normal = n[0]*hit.barry[0]+
-             n[1]*hit.barry[1] +
-               n[2]*hit.barry[2];
-    Normalize(normal);
-    return normal;
+    hit_point = hit.barry[0] * p[0] +
+                hit.barry[1] * p[1] +
+                hit.barry[2] * p[2];
+    normal = Normalized(Cross(p[1]-p[0],p[2]-p[0]));
+    shading_normal = Normalized(
+                     n[0]*hit.barry[0]+
+                     n[1]*hit.barry[1]+
+                     n[2]*hit.barry[2]);
   }
 };
 

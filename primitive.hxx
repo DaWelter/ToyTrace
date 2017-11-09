@@ -28,7 +28,11 @@ public:
     return false;
   }
   
-  virtual Double3 GetNormal(const HitId &hit) const = 0;
+  virtual void GetLocalGeometry(
+      const HitId &hit,
+      Double3 &hit_point,
+      Double3 &normal,
+      Double3 &shading_normal) const = 0;
   
   virtual Box   CalcBounds() const = 0;
   

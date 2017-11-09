@@ -1,20 +1,18 @@
 #include "ray.hxx"
 #include "primitive.hxx"
-
+#include "sphere.hxx"
 
 RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySegment& _inbound)
-  : hitid(_hitid),
-    //primitive(hitid.primitive),
-    
-    //barry(hitid.barry),
-    //shader(hitid.primitive ? hitid.primitive->shader : nullptr),
-    //dir_out(-inbound.ray.dir),
-    pos(_inbound.EndPoint())
+  : hitid(_hitid)
 {
-  Double3 n = hitid.primitive ? hitid.primitive->GetNormal(hitid) : Double3();
-  double sign = Dot(-_inbound.ray.dir, n);
-  this->normal = sign > 0 ? n : (-n).eval();
-  this->volume_normal = n;
+  assert(hitid.primitive);
+  hitid.primitive->GetLocalGeometry(hitid, this->pos, this->normal, this->shading_normal);
+  double sign = Dot(-_inbound.ray.dir, normal) > 0. ? 1. : -1;
+  volume_normal = normal;
+  normal *= sign;
+  shading_normal *= sign;
+  assert(LengthSqr(volume_normal)>0.9);
+  assert(LengthSqr(shading_normal)>0.9);
 }
 
 

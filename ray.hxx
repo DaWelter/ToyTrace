@@ -7,8 +7,6 @@
 class Primitive;
 class Shader;
 
-static constexpr int MAX_RAY_DEPTH = 10;
-
 struct Ray
 {
   Ray() {}
@@ -65,12 +63,10 @@ struct HitId
 struct RaySurfaceIntersection
 {
   HitId hitid;
-  Double3 normal;
-  Double3 volume_normal;
-  //Double3 barry;
+  Double3 normal;        // Used for shading and tracing. Oriented toward the incomming ray.
+  Double3 shading_normal;
+  Double3 volume_normal; // Used to determine if entering or leaving a medium.
   Double3 pos;
-  //const Shader* shader = { nullptr };
-  //const Primitive* primitive = { nullptr };
   
   const Primitive& primitive() const;
   const Shader& shader() const;
