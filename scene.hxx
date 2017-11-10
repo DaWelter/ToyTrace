@@ -39,11 +39,8 @@ class Scene
   Box boundingBox;
   
 public:
-  Spectral bgColor;
-
   Scene()
-    : bgColor{0,0,0},
-      camera(nullptr),
+    : camera(nullptr),
       empty_space_medium{new VacuumMedium()}
   {
   }

@@ -528,15 +528,7 @@ void NFFParser::Parse(const char* fileName)
     }
     continue;
   }
-  
-    /* background color */
 
-    if (!strcmp(token,"b")) {
-      sscanf(line,"b %lg %lg %lg",&scene->bgColor[0],&scene->bgColor[1],&scene->bgColor[2]);
-      scene->bgColor /= 255;
-      continue;
-    }
-  
     char buffer[1024];
     std::snprintf(buffer, 1024, "Unkown directive in %s : %s", fileName, line);
     throw std::runtime_error(buffer);

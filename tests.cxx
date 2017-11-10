@@ -586,19 +586,6 @@ protected:
 };
 
 
-TEST_F(SimpleRenderTests, OnePixelBackground)
-{
-  SetCameraSimple(0., 90., 1, 1);
-  scene.bgColor = Double3{ 0.5, 0., 0. };
-  scene.BuildAccelStructure();
-  PathTracing rt(scene, AlgorithmParameters());
-  auto col = rt.MakePrettyPixel(0);
-  ASSERT_FLOAT_EQ(col[0], 0.5);
-  ASSERT_FLOAT_EQ(col[1], 0.);
-  ASSERT_FLOAT_EQ(col[2], 0.);
-}
-
-
 TEST_F(SimpleRenderTests, MediaTracker)
 {
   scene.ParseNFF("scenes/test_media.nff");
