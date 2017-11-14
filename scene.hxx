@@ -45,7 +45,7 @@ public:
   {
   }
 
-  void ParseNFF(const char *fileName, RenderingParameters *render_params = nullptr);
+  void ParseNFF(const std::string &filename, RenderingParameters *render_params = nullptr);
   
   template<class CameraType, class... Args>
   void SetCamera(Args&&... args)
