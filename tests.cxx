@@ -588,7 +588,26 @@ protected:
 
 TEST_F(SimpleRenderTests, MediaTracker)
 {
-  scene.ParseNFF("scenes/test_media.nff");
+  scene.ParseNFFString(R"""(
+shader invisible
+medium med1 1 1 1 2 2 2
+medium med2 1 1 1 2 2 2
+
+medium med1
+s 0 0 -1 1
+
+medium med2
+s 0 0 2 1
+
+medium med1
+s 0 0 3 1
+
+medium med1
+s 0 0 6 1
+
+medium med2
+s 0 0 6 0.5
+)""");
   scene.BuildAccelStructure();
   const Medium *vac = &scene.GetEmptySpaceMedium();
   const Medium *m1 = scene.GetPrimitive(0).medium;
@@ -623,7 +642,11 @@ TEST_F(SimpleRenderTests, MediaTracker)
 
 TEST_F(SimpleRenderTests, ImportDAE)
 {
-  scene.ParseNFF("scenes/test_dae.nff");
+  const char* scenestr = R"""(
+shader DefaultMaterial 1 1 1 0.5 0 0 0 0
+m scenes/unitcube.dae
+)""";
+  scene.ParseNFFString(scenestr);
   constexpr double tol = 1.e-2;
   Box outside; 
   outside.Extend({-0.5-tol, -0.5-tol, -0.5-tol}); 
@@ -645,7 +668,27 @@ TEST_F(SimpleRenderTests, ImportDAE)
 
 TEST_F(SimpleRenderTests, ImportDAE2)
 {
-  scene.ParseNFF("scenes/test_dae2.nff");
+  const char* scenestr = R"""(
+v
+from 0 1.2 -1.3
+at 0 0.6 0
+up 0 1 0
+angle 50
+hither 0
+resolution 128 128
+
+l   0 0.75 0  255 255 255
+
+shader white  1 1 1 0.5 0 0 0 0
+shader red    1 0 0 0.5 0 0 0 0
+shader green  0 1 0 0.5 0 0 0 0
+shader blue   0 0 1 0.5 0 0 0 0
+shader boxmat 1 1 0 0.8 0 0 0 0
+shader spheremat 0 1 1 0.8 0 0 0 0
+
+m scenes/cornelbox2.dae
+)""";
+  scene.ParseNFFString(scenestr);
   Box b = scene.CalcBounds();
   double size = Length(b.max - b.min);
   ASSERT_GE(size, 1.);
@@ -655,13 +698,23 @@ TEST_F(SimpleRenderTests, ImportDAE2)
 
 TEST_F(SimpleRenderTests, MediaTransmission)
 {
-  scene.ParseNFF("scenes/test_dae3.nff");
+  const char* scenestr = R"""(
+shader invisible
+medium med1 1 1 1 2 2 2
+
+m scenes/unitcube.dae
+
+transform 0 0 2 0 0 0
+m scenes/unitcube.dae
+)""";
+  scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
   scene.PrintInfo();
   PathContext context{};
   PathTracing rt(scene, AlgorithmParameters());
   MediumTracker medium_tracker(scene);
   medium_tracker.initializePosition({0.,0.,-10.});
+  ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
   double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
   RaySegment seg{{{ray_offset,0.,-10.}, {0.,0.,1.}}, LargeNumber};
   auto res = rt.TransmittanceEstimate(seg, HitId(), medium_tracker, context);

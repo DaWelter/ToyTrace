@@ -751,3 +751,10 @@ void Scene::ParseNFF(const std::string &filename, RenderingParameters *render_pa
   }
   NFFParser(this, render_params, is, filename).Parse();
 }
+
+
+void Scene::ParseNFFString(const std::string &scenestr, RenderingParameters *render_params)
+{
+  std::istringstream is(scenestr);
+  NFFParser(this, render_params, is, std::string()).Parse();
+}
