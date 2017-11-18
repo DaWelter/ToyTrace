@@ -110,18 +110,23 @@ public:
     return primitives.size();
   }
   
-  bool Occluded(const Ray &ray, double ray_length, const HitId &to_ignore1 = HitId(), const HitId &to_ignore2 = HitId()) const
-  { 
-    HitId hit;
-    return bsptree.Intersect(ray, ray_length, hit, to_ignore1, to_ignore2);
-  }
-
-  HitId Intersect(const Ray &ray, double &ray_length, const HitId &to_ignore1 = HitId(), const HitId &to_ignore2 = HitId()) const
+  HitId Intersect(const Ray &ray, double &ray_length) const
   {
     HitId hit;
-    bsptree.Intersect(ray, ray_length, hit, to_ignore1, to_ignore2);
+    bsptree.Intersect(ray, ray_length, hit);
     return hit;
   }
+
+  void IntersectAll(const Ray &ray, double ray_length, HitVector &all_hits) const
+  {
+    bsptree.IntersectAll(ray, ray_length, all_hits);
+  }
+
+//   bool Occluded(const Ray &ray, double ray_length, HitVector &all_hits) const
+//   { 
+//     bsptree.IntersectAll(ray, ray_length, all_hits);
+//     
+//   }
   
   void BuildAccelStructure()
   {   

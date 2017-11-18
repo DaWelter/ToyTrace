@@ -25,8 +25,28 @@ public:
     double dt = std::sqrt(under_the_sqrt)*0.5/A;
     t1=t+dt;
     t2=t-dt;
-    if (t1<0. || t2>ray_length) return false;
+    // The cases where 1) hit point lies behind the start point, 2) hit point lies beyond the end of the ray.
+    if (t1-RAY_EPSILON<0. || t2+RAY_EPSILON>ray_length) return false;
     return true;
+  }
+
+  void Intersect(const Ray &ray, double ray_length, HitVector &hits) const override
+  {
+    double t1, t2;
+    if(!PotentialDistances(ray, ray_length, t1, t2))
+      return;
+    if (t2-RAY_EPSILON > 0.) // Hit in front of sphere.
+    {
+      HitRecord r{{this, ray.PointAt(t2)}, t2};
+      ReProjectHitPoint(r.barry);
+      hits.push_back(r);
+    }
+    if (t1+RAY_EPSILON < ray_length)
+    {
+      HitRecord r{{this, ray.PointAt(t1)}, t1};
+      ReProjectHitPoint(r.barry);
+      hits.push_back(r);
+    }
   }
   
   bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const override
@@ -35,19 +55,19 @@ public:
     if(!PotentialDistances(ray, ray_length, t1, t2))
       return false;
     double t = t2;
-    if (t <= 0.)
+    if (t-RAY_EPSILON <= 0.)
     {
       t = t1;
-      if (t > ray_length)
+      if (t + RAY_EPSILON > ray_length)
         return false;
     }
     hit = HitId{ this, ray.PointAt(t) };
-    RefineHitPoint(hit.barry);
+    ReProjectHitPoint(hit.barry);
     ray_length = t;
     return true;
   }
-
-  inline void RefineHitPoint(Double3 &pos) const
+  
+  inline void ReProjectHitPoint(Double3 &pos) const
   {
     // The error estimate is probably fine. However it neglects the
     // error due to computing org + t * dir. Thus it can only be
@@ -59,37 +79,12 @@ public:
     pos = q + center;
     //error += Gamma(1)*(pos.array().abs().maxCoeff() + error); // PBRT pg 219. (Error of addition).
   }
+  
+  virtual bool CompareEqual(const HitId &hit_this, const HitId &hit_other) const
+  {
+    return LengthSqr(hit_this.barry - hit_other.barry) < RAY_EPSILON*RAY_EPSILON;
+  }
 
-  bool CheckIsNearHit(const Ray &ray, double t, const Double3 &p, const HitId &to_ignore) const
-  {
-    // TODO: use error estimates of t and to_ignore.barry. Because this is really unreliable.
-    const double tol = 1.e-8 * radius;
-    double uu = LengthSqr(to_ignore.barry - p);
-    return uu < tol*tol;
-  }
-  
-  bool IntersectIfNotIgnored(const Ray &ray, double t, double &ray_length, HitId &hit, const HitId &to_ignore1, const HitId &to_ignore2) const
-  {
-    if (t < 0. || t>ray_length) return false;
-    HitId potential_hit{ this, ray.PointAt(t) };
-    RefineHitPoint(potential_hit.barry);
-    if (to_ignore1.primitive == this && CheckIsNearHit(ray, t, potential_hit.barry, to_ignore1)) return false;
-    if (to_ignore2.primitive == this && CheckIsNearHit(ray, t, potential_hit.barry, to_ignore2)) return false;
-    hit = potential_hit;
-    ray_length = t;
-    return true;
-  }
-  
-  virtual bool Intersect(const Ray &ray, double &ray_length, HitId &hit, const HitId &to_ignore1, const HitId &to_ignore2) const override
-  {
-    double t, t1, t2;
-    if (!PotentialDistances(ray, ray_length, t1, t2))
-      return false;
-    if (IntersectIfNotIgnored(ray, t2, ray_length, hit, to_ignore1, to_ignore2)) return true;
-    if (IntersectIfNotIgnored(ray, t1, ray_length, hit, to_ignore1, to_ignore2)) return true;
-    return false;
-  }
-  
   virtual Double3 GetUV(const HitId &hit) const override
   {
     // From kartesian to spherical coordinates.

@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <cassert>
+#include <limits>
 #include <boost/align/aligned_allocator.hpp>
 
 template<class T>
@@ -10,6 +11,15 @@ inline T Sqr(const T &x)
   return x*x;
 }
 
+
+// Straight from PBRT
+static constexpr double MachineEpsilon =
+  std::numeric_limits<double>::epsilon() * 0.5;
+
+// Also from PBRT. Used to compute error bounds for floating point arithmetic. See pg. 216.
+inline constexpr double Gamma(int n) {
+    return (n * MachineEpsilon) / (1 - n * MachineEpsilon);
+}
 
 namespace strconcat_internal
 {

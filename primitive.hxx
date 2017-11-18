@@ -22,10 +22,11 @@ public:
   
   virtual bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const = 0;
   
-  virtual bool Intersect(const Ray &ray, double &ray_length, HitId &hit, const HitId &to_ignore1, const HitId &to_ignore2) const
+  virtual void Intersect(const Ray &ray, double ray_length, HitVector &hits) const
   {
-    assert(to_ignore1.primitive == this || to_ignore2.primitive == this);
-    return false;
+    HitId hit;
+    if (Intersect(ray, ray_length, hit))
+      hits.push_back(HitRecord{hit, ray_length});
   }
   
   virtual void GetLocalGeometry(

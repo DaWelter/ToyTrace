@@ -1,6 +1,6 @@
 #include "ray.hxx"
 #include "primitive.hxx"
-#include "sphere.hxx"
+
 
 RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySegment& _inbound)
   : hitid(_hitid)

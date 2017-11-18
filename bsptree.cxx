@@ -52,7 +52,7 @@ void TreeNode::Split(int level, std::vector<Primitive *> list,const Box &nodebox
   }
 }
 
-
+template<class IntersectionChecker>
 bool TreeNode::Intersect(const Ray &ray, double min, double max, IntersectionChecker &intersectionChecker) const
 {
   if(!child[0] && !child[1]) 
@@ -70,7 +70,7 @@ bool TreeNode::Intersect(const Ray &ray, double min, double max, IntersectionChe
   
   //std::cout << "N:" << this << " a=" << splitaxis << " d=" << splitpos << std::endl;
   
-  char first,last;
+  int first,last;
   if((ray.org[splitaxis]<splitpos) || 
      (ray.org[splitaxis]==splitpos && ray.dir[splitaxis] > 0))
   {
@@ -102,11 +102,18 @@ bool TreeNode::Intersect(const Ray &ray, double min, double max, IntersectionChe
     else 
       bhit = false;
     // Because primitives overlapping both nodes, we have to check if the hit location is actually in the first node.
-    char hitside = ((ray.org+intersectionChecker.rayLength()*ray.dir)[splitaxis]<splitpos) ? 0 : 1;
+    char hitside = ((ray.org+intersectionChecker.ray_length*ray.dir)[splitaxis]<splitpos) ? 0 : 1;
     if ((!bhit || hitside!=first) && child[last]) 
     {
         bhit |= child[last]->Intersect(ray, dist, max, intersectionChecker);
-    } 
+    }
     return bhit;
   }
 }
+
+
+template
+bool TreeNode::Intersect<IntersectionRecorder>(const Ray &ray, double min, double max, IntersectionRecorder &intersectionChecker) const;
+
+template
+bool TreeNode::Intersect<FirstIntersection>(const Ray &ray, double min, double max, FirstIntersection &intersectionChecker) const;

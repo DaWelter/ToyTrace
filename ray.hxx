@@ -2,10 +2,13 @@
 #define RAY_HXX
 
 #include <limits>
+#include <vector>
 #include "vec3f.hxx"
 
 class Primitive;
 class Shader;
+
+static constexpr double RAY_EPSILON = 1.e-6; //1.e-10;
 
 struct Ray
 {
@@ -67,12 +70,28 @@ struct RaySurfaceIntersection
   Double3 shading_normal;
   Double3 volume_normal; // Used to determine if entering or leaving a medium.
   Double3 pos;
-  
+
   const Primitive& primitive() const;
   const Shader& shader() const;
   RaySurfaceIntersection(const HitId &hitid, const RaySegment &inbound);
   RaySurfaceIntersection() = default;
 };
+
+
+inline Double3 AntiSelfIntersectionOffset(const RaySurfaceIntersection &intersection, double eps, const Double3 &ray_dir)
+{
+  return eps * (Dot(ray_dir, intersection.normal) > 0. ? 1. : -1.) * intersection.normal;
+}
+
+
+struct HitRecord : public HitId
+{
+  HitRecord(const HitId &hit, double _t) :
+    HitId(hit), t(_t) {}
+  HitRecord() : t(LargeNumber) {}
+  double t;
+};
+using HitVector = std::vector<HitRecord>;
 
 
 #endif

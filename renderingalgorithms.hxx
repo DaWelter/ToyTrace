@@ -82,7 +82,7 @@ void PathLogger::NewTrace(const Spectral &beta_init)
 
 
 #ifndef NDEBUG
-#  define PATH_LOGGING(x) x
+#  define PATH_LOGGING(x)
 #else
 #  define PATH_LOGGING(x)
 #endif
@@ -109,7 +109,7 @@ class MediumTracker
 public:
   explicit MediumTracker(const Scene &_scene);
   MediumTracker(const MediumTracker &_other) = default;
-  void initializePosition(const Double3 &pos);
+  void initializePosition(const Double3 &pos, HitVector &hits);
   void goingThroughSurface(const Double3 &dir_of_travel, const RaySurfaceIntersection &intersection);
   const Medium& getCurrentMedium() const;
 };
@@ -129,7 +129,7 @@ const Medium& MediumTracker::getCurrentMedium() const
 }
 
 
-void MediumTracker::initializePosition(const Double3& pos)
+void MediumTracker::initializePosition(const Double3& pos, HitVector &hits)
 {
   std::fill(media.begin(), media.end(), nullptr);
   current = &scene.GetEmptySpaceMedium();
@@ -139,19 +139,15 @@ void MediumTracker::initializePosition(const Double3& pos)
     if (bb.InBox(pos))
     {
       double distance_to_go = 2. * (bb.max-bb.min).maxCoeff(); // Times to due to the diagonal.
-      HitId hit;
       Double3 start = pos;
       start[0] += distance_to_go;
       RaySegment seg{{start, {-1., 0., 0.}}, distance_to_go};
-      while (distance_to_go > 0.)
+      hits.clear();
+      scene.IntersectAll(seg.ray, seg.length, hits);
+      for (const auto &hit : hits)
       {
-        hit = scene.Intersect(seg.ray, seg.length, hit);
-        if (!hit) break;
         RaySurfaceIntersection intersection(hit, seg);
-        goingThroughSurface(seg.ray.dir, intersection);
-        seg.ray.org = seg.EndPoint();
-        distance_to_go -= seg.length;
-        seg.length = distance_to_go;
+        goingThroughSurface(seg.ray.dir, intersection);        
       }
     }
   }
@@ -275,9 +271,9 @@ protected:
   const Scene &scene;
   Sampler sampler;
   MediumTracker medium_tracker_root;
+  HitVector hits;
   PATH_LOGGING(
       PathLogger path_logger;)
-  
 public:
   BaseAlgo(const Scene &_scene)
     : scene{_scene},
@@ -341,7 +337,7 @@ public:
   {
     static constexpr int MIN_LEVEL = 3;
     static constexpr double LOW_CONTRIBUTION = 0.5;
-    if (level > max_ray_depth || beta.isZero())
+    if (level >= max_ray_depth || beta.isZero())
       return false;
     if (level < MIN_LEVEL)
       return true;
@@ -353,19 +349,25 @@ public:
   }
   
   
-  RaySegment MakeSegmentToLight(const Double3 &pos_to_be_lit, const RadianceOrImportance::Sample &light_sample)
+  RaySegment MakeSegmentToLight(const Double3 &pos_to_be_lit, const RadianceOrImportance::Sample &light_sample, const RaySurfaceIntersection *intersection)
   {
+    RaySegment seg;
     if (!light_sample.is_direction)
-      return RaySegment::FromTo(pos_to_be_lit, light_sample.pos);
+    {
+      seg = RaySegment::FromTo(pos_to_be_lit, light_sample.pos);
+    }
     else
     {
       // TODO: Make the distance calculation work for the case where the entire space is filled with a scattering medium.
       // In this case an interaction point could be generated far outside the bounds of the scene geometry.
       // I have to derive an appropriate distance. Or just set the distance to infinite because I cannot know
       // the density distribution of the medium.
-      return RaySegment{{pos_to_be_lit, -light_sample.pos},
+      seg = RaySegment{{pos_to_be_lit, -light_sample.pos},
         sufficiently_long_distance_to_go_outside_the_scene_bounds};
     }
+    if (intersection) seg.ray.org += AntiSelfIntersectionOffset(*intersection, RAY_EPSILON, seg.ray.dir);
+    seg.length -= 2.*RAY_EPSILON;
+    return seg;
   }
   
   
@@ -373,28 +375,26 @@ public:
   {
     // TODO: Russian roulette.
     Spectral result{1.};
-    double length_to_go = seg.length;
-    while (length_to_go > Epsilon && !result.isZero())
+    auto SegmentContribution = [&seg, &medium_tracker, &context, this](double t1, double t2) -> Spectral
     {
-      
-      // The last_hit given by the argument is ignored.
-      last_hit = scene.Intersect(seg.ray, seg.length, last_hit);
-      if (last_hit)
-      {
-        RaySurfaceIntersection intersection{last_hit, seg};
-        Spectral bsdf = intersection.shader().EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, nullptr);
-        result *= bsdf * medium_tracker.getCurrentMedium().EvaluateTransmission(seg, sampler, context);
-        medium_tracker.goingThroughSurface(seg.ray.dir, intersection);
-        length_to_go -= seg.length;
-        seg.ray.org += seg.length * seg.ray.dir;
-        seg.length = length_to_go;
-      }
-      else
-      {
-        length_to_go = 0.;
-        result *= medium_tracker.getCurrentMedium().EvaluateTransmission(seg, sampler, context);
-      }
+      RaySegment subseg{{seg.ray.PointAt(t1), seg.ray.dir}, t2-t1};
+      return medium_tracker.getCurrentMedium().EvaluateTransmission(subseg, sampler, context);
+    };
+
+    hits.clear();
+    scene.IntersectAll(seg.ray, seg.length, hits);
+    double t = 0;
+    for (const auto &hit : hits)
+    {
+      RaySurfaceIntersection intersection{hit, seg};
+      result *= intersection.shader().EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, nullptr);
+      if (result.isZero())
+        return result;
+      result *= SegmentContribution(t, hit.t);
+      medium_tracker.goingThroughSurface(seg.ray.dir, intersection);
+      t = hit.t;
     }
+    result *= SegmentContribution(t, seg.length);
     return result;
   }
   
@@ -407,7 +407,7 @@ public:
     const Light* light; double pmf_of_light; std::tie(light, pmf_of_light) = PickLightUniform();
 
     RadianceOrImportance::Sample light_sample = light->TakePositionSample(sampler);
-    RaySegment segment_to_light = MakeSegmentToLight(pos, light_sample);
+    RaySegment segment_to_light = MakeSegmentToLight(pos, light_sample, intersection);
 
     double d_factor = 1.;
     Spectral scatter_factor;
@@ -438,7 +438,6 @@ public:
 
     return sample_value;
   }
-
   
   Spectral MakePrettyPixel(int pixel_index) override
   {
@@ -446,77 +445,83 @@ public:
     auto cam_sample = TakeRaySample(scene.GetCamera(), pixel_index, sampler);
 
     MediumTracker medium_tracker = this->medium_tracker_root;
-    medium_tracker.initializePosition(cam_sample.ray_out.org);
+    medium_tracker.initializePosition(cam_sample.ray_out.org, hits);
     
     context.beta *= cam_sample.measurement_contribution / cam_sample.pdf;
     PATH_LOGGING(
       path_logger.NewTrace(context.beta);)
 
     Spectral path_sample_value{0.};
-    Ray ray = cam_sample.ray_out;
+    RaySegment segment{cam_sample.ray_out, LargeNumber};
     int level = 1;
-    HitId hit{};
 
     bool gogogo = true;
     while (gogogo)
     {
-      const Medium& medium = medium_tracker.getCurrentMedium();
-      auto segment = RaySegment{ray, LargeNumber};
+      auto hit = scene.Intersect(segment.ray, segment.length);
 
-      hit = scene.Intersect(segment.ray, segment.length, hit);
-      Medium::InteractionSample medium_smpl;
-      medium_smpl = medium.SampleInteractionPoint(segment, sampler, context);
+      const Medium& medium = medium_tracker.getCurrentMedium();
+      auto medium_smpl = medium.SampleInteractionPoint(segment, sampler, context);
+
       context.beta *= medium_smpl.weight;
 
       if (medium_smpl.t < segment.length)
       {
-        ray.org = ray.PointAt(medium_smpl.t);
-        PATH_LOGGING(path_logger.AddSegment(segment.ray.org, ray.org, context.beta, PathLogger::EYE_SEGMENT);)
+        Double3 interaction_location = segment.ray.PointAt(medium_smpl.t);
+        PATH_LOGGING(path_logger.AddSegment(segment.ray.org, interaction_location, context.beta, PathLogger::EYE_SEGMENT);)
 
         path_sample_value += context.beta *
-          LightConnection(ray.org, ray.dir, nullptr, medium_tracker, context);
+          LightConnection(interaction_location, segment.ray.dir, nullptr, medium_tracker, context);
 
-        auto scatter_smpl = medium.SamplePhaseFunction(-ray.dir, ray.org, sampler, context);
-        context.beta *= scatter_smpl.value / scatter_smpl.pdf;
-
-        PATH_LOGGING(path_logger.AddScatterEvent(ray.org, scatter_smpl.dir, context.beta, PathLogger::SCATTER_VOLUME);)
-
-        ray.dir = scatter_smpl.dir;
-        hit = HitId{};
-        ++level;
         gogogo = RouletteSurvival(context.beta, level);
+        if (gogogo)
+        {
+          auto scatter_smpl = medium.SamplePhaseFunction(-segment.ray.dir, interaction_location, sampler, context);
+          context.beta *= scatter_smpl.value / scatter_smpl.pdf;
+
+          PATH_LOGGING(path_logger.AddScatterEvent(segment.ray.org, scatter_smpl.dir, context.beta, PathLogger::SCATTER_VOLUME);)
+
+          segment.ray.org = interaction_location;
+          segment.ray.dir = scatter_smpl.dir;
+          segment.length  = LargeNumber;
+          ++level;
+        }
       }
       else if (hit)
       {
         RaySurfaceIntersection intersection{hit, segment};
-        ray.org = ray.PointAt(segment.length);
-        PATH_LOGGING(path_logger.AddSegment(segment.ray.org, ray.org, context.beta, PathLogger::EYE_SEGMENT);)
+        PATH_LOGGING(path_logger.AddSegment(segment.ray.org, intersection.pos, context.beta, PathLogger::EYE_SEGMENT);)
 
         if (!intersection.shader().IsReflectionSpecular())
         {
-          auto lc = LightConnection(intersection.pos, ray.dir, &intersection, medium_tracker, context);
+          auto lc = LightConnection(intersection.pos, segment.ray.dir, &intersection, medium_tracker, context);
           path_sample_value += context.beta * lc;
         }
 
-        auto surface_sample  = intersection.shader().SampleBSDF(-ray.dir, intersection, sampler);
-
-        auto out_dir_dot_normal = Dot(surface_sample.dir, intersection.normal);
-        double d_factor = out_dir_dot_normal >= 0. ? out_dir_dot_normal : 1.;
-        context.beta *= d_factor / surface_sample.pdf * surface_sample.scatter_function;
-
-        PATH_LOGGING(path_logger.AddScatterEvent(ray.org, surface_sample.dir, context.beta, PathLogger::SCATTER_SURFACE);)
-
-        // By definition, intersection.normal points to where the intersection ray is comming from.
-        // Thus we can determine if the sampled direction goes through the surface by looking
-        // if the direction goes in the opposite direction of the normal.
-        if (out_dir_dot_normal < 0.)
-        {
-          medium_tracker.goingThroughSurface(surface_sample.dir, intersection);
-        }
-
-        ray.dir = surface_sample.dir;
-        level = intersection.shader().IsPassthrough() ? level : level+1;
         gogogo = RouletteSurvival(context.beta, level);
+        if (gogogo)
+        {
+          auto surface_sample  = intersection.shader().SampleBSDF(-segment.ray.dir, intersection, sampler);
+
+          auto out_dir_dot_normal = Dot(surface_sample.dir, intersection.normal);
+          double d_factor = out_dir_dot_normal >= 0. ? out_dir_dot_normal : 1.;
+          context.beta *= d_factor / surface_sample.pdf * surface_sample.scatter_function;
+
+          PATH_LOGGING(path_logger.AddScatterEvent(intersection.pos, surface_sample.dir, context.beta, PathLogger::SCATTER_SURFACE);)
+
+          // By definition, intersection.normal points to where the intersection ray is comming from.
+          // Thus we can determine if the sampled direction goes through the surface by looking
+          // if the direction goes in the opposite direction of the normal.
+          if (out_dir_dot_normal < 0.)
+          {
+            medium_tracker.goingThroughSurface(surface_sample.dir, intersection);
+          }
+
+          segment.ray.org = intersection.pos+AntiSelfIntersectionOffset(intersection, RAY_EPSILON, surface_sample.dir);
+          segment.ray.dir = surface_sample.dir;
+          segment.length  = LargeNumber;
+          level = intersection.shader().IsPassthrough() ? level : level+1;
+        }
       }
       else
       {
