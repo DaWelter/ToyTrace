@@ -8,10 +8,10 @@
 #include"phasefunctions.hxx"
 
 class Sampler;
-class Ray;
-class RaySegment;
+struct Ray;
+struct RaySegment;
 class Scene;
-class RaySurfaceIntersection;
+struct RaySurfaceIntersection;
 
 
 struct PathContext
