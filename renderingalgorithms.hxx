@@ -413,7 +413,7 @@ public:
     Spectral scatter_factor;
     if (intersection)
     {
-      d_factor = std::max(0., Dot(intersection->normal, segment_to_light.ray.dir));
+      d_factor = std::max(0., Dot(intersection->shading_normal, segment_to_light.ray.dir));
       const auto &shader = intersection->shader();
       scatter_factor = shader.EvaluateBSDF(-incident_dir, *intersection, segment_to_light.ray.dir, nullptr);
     }
@@ -502,25 +502,29 @@ public:
         if (gogogo)
         {
           auto surface_sample  = intersection.shader().SampleBSDF(-segment.ray.dir, intersection, sampler);
-
-          auto out_dir_dot_normal = Dot(surface_sample.dir, intersection.normal);
-          double d_factor = out_dir_dot_normal >= 0. ? out_dir_dot_normal : 1.;
-          context.beta *= d_factor / surface_sample.pdf * surface_sample.scatter_function;
-
-          PATH_LOGGING(path_logger.AddScatterEvent(intersection.pos, surface_sample.dir, context.beta, PathLogger::SCATTER_SURFACE);)
-
-          // By definition, intersection.normal points to where the intersection ray is comming from.
-          // Thus we can determine if the sampled direction goes through the surface by looking
-          // if the direction goes in the opposite direction of the normal.
-          if (out_dir_dot_normal < 0.)
+          gogogo = !surface_sample.scatter_function.isZero();
+          if (gogogo)
           {
-            medium_tracker.goingThroughSurface(surface_sample.dir, intersection);
-          }
+            // By definition, intersection.normal points to where the intersection ray is comming from.
+            // Thus we can determine if the sampled direction goes through the surface by looking
+            // if the direction goes in the opposite direction of the normal.
+            double d_factor = 1.;
+            if (Dot(surface_sample.dir, intersection.normal) < 0.)
+            {
+              medium_tracker.goingThroughSurface(surface_sample.dir, intersection);
+            }
+            else
+            {
+              d_factor = std::max(0., Dot(surface_sample.dir, intersection.shading_normal));
+            }
+            context.beta *= d_factor / surface_sample.pdf * surface_sample.scatter_function;
+            PATH_LOGGING(path_logger.AddScatterEvent(intersection.pos, surface_sample.dir, context.beta, PathLogger::SCATTER_SURFACE);)
 
-          segment.ray.org = intersection.pos+AntiSelfIntersectionOffset(intersection, RAY_EPSILON, surface_sample.dir);
-          segment.ray.dir = surface_sample.dir;
-          segment.length  = LargeNumber;
-          level = intersection.shader().IsPassthrough() ? level : level+1;
+            segment.ray.org = intersection.pos+AntiSelfIntersectionOffset(intersection, RAY_EPSILON, surface_sample.dir);
+            segment.ray.dir = surface_sample.dir;
+            segment.length  = LargeNumber;
+            level = intersection.shader().IsPassthrough() ? level : level+1;
+          }
         }
       }
       else

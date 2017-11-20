@@ -1,12 +1,27 @@
 #include "shader.hxx"
-
 #include "ray.hxx"
 #include "scene.hxx"
 
+namespace
+{
+inline Spectral MaybeMultiplyTextureLookup(const Spectral &color, const Texture *tex, const RaySurfaceIntersection &surface_hit)
+{
+  Spectral ret{color};
+  if (tex)
+  {
+    Double3 uv = surface_hit.primitive().GetUV(surface_hit.hitid);
+    ret *= tex->GetTexel(uv[0], uv[1]).array();
+  }
+  return ret;
+}
+}
 
-DiffuseShader::DiffuseShader(const Spectral &_reflectance)
-  : Shader(0),
-    kr_d(_reflectance)
+
+
+DiffuseShader::DiffuseShader(const Spectral &_reflectance, std::unique_ptr<Texture> _diffuse_texture)
+  : Shader(IS_REFLECTIVE),
+    kr_d(_reflectance),
+    diffuse_texture(std::move(_diffuse_texture))
 {
   // Wtf? kr_d is the (constant) Lambertian BRDF. Energy conservation
   // demands Int|_Omega kr_d cos(theta) dw <= 1. Working out the math
@@ -19,54 +34,132 @@ DiffuseShader::DiffuseShader(const Spectral &_reflectance)
 
 Spectral DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
 {
-  double n_dot_out = Dot(surface_hit.normal, out_direction);
+  double n_dot_out = Dot(surface_hit.shading_normal, out_direction);
   if (pdf)
     *pdf = n_dot_out>0. ? n_dot_out/Pi : 0.;
-  return n_dot_out > 0. ? kr_d : Spectral{0.};
+  if (n_dot_out > 0.)
+  {
+    return MaybeMultiplyTextureLookup(kr_d, diffuse_texture.get(), surface_hit);
+  }
+  else
+    return Spectral{0.};
 }
 
 
 BSDFSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const
 {
-  auto m = OrthogonalSystemZAligned(surface_hit.normal);
+  auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
   Double3 v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
   double pdf = v[2]/Pi;
-  v = m * v;
-  return BSDFSample{v, kr_d, pdf};
+  Double3 out_direction = m * v;
+  Spectral value = Dot(out_direction, surface_hit.normal)>0 ? kr_d : Spectral{0.};
+  return BSDFSample{out_direction, value, pdf};
 }
 
 
 
-
-TexturedDiffuseShader::TexturedDiffuseShader(const Spectral &_reflectance, std::unique_ptr<Texture> _texture)
-  : Shader(0),
-    kr_d(_reflectance),
-    texture(std::move(_texture))
+SpecularReflectiveShader::SpecularReflectiveShader(const Spectral& reflectance)
+  : Shader(REFLECTION_IS_SPECULAR|IS_REFLECTIVE),
+    kr_s(reflectance)
 {
-  // See Diffuse Shader
-  kr_d *= 1./Pi;
 }
 
 
-Spectral TexturedDiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
+Spectral SpecularReflectiveShader::EvaluateBSDF(const Double3& incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double* pdf) const
+{
+  if (pdf)
+    *pdf = 0.;
+  return Spectral{0.};
+}
+
+
+BSDFSample SpecularReflectiveShader::SampleBSDF(const Double3& incident_dir, const RaySurfaceIntersection& surface_hit, Sampler& sampler) const
+{
+  Double3 r = Reflected(incident_dir, surface_hit.shading_normal);
+  double cos_rn = Dot(surface_hit.normal, r);
+  if (cos_rn < 0.)
+    return BSDFSample{r, Spectral{0.}, 1.};
+  else
+  {
+    double cos_rsdn = Dot(surface_hit.shading_normal, r);
+    return BSDFSample{r, kr_s/cos_rsdn, 1.};
+  }
+}
+
+
+
+namespace ModifiedPhongDetail
+{
+inline std::pair<double,double> PdfAndFactor(double cos_phi, double alpha)
+{
+  double t =  0.5/Pi*std::pow(cos_phi, alpha);
+  return std::make_pair(t*(alpha+1.), t*(alpha+2.));
+}
+
+inline double CosPhi(const Double3 &reverse_incident_dir, const Double3 &normal, const Double3& out_direction, double alpha)
+{
+  // cos_phi is w.r.t the angle between outgoing in reflected incident directions.
+  double cos_phi = std::max(0., Dot(Reflected(reverse_incident_dir, normal), out_direction));
+  return cos_phi;
+}
+}
+
+
+ModifiedPhongShader::ModifiedPhongShader(
+  const Spectral &_diffuse_reflectance, std::unique_ptr<Texture> _diffuse_texture,
+  const Spectral &_glossy_reflectance, std::unique_ptr<Texture> _glossy_texture,
+  double _glossy_exponent)
+  : Shader(0),
+    kr_d(_diffuse_reflectance), 
+    kr_s(_glossy_reflectance), 
+    alpha(_glossy_exponent),
+    diffuse_texture(std::move(_diffuse_texture)),
+    glossy_texture(std::move(_glossy_texture))
+{
+}
+
+
+Spectral ModifiedPhongShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
 {
   double n_dot_out = Dot(surface_hit.normal, out_direction);
+  double cos_phi = ModifiedPhongDetail::CosPhi(reverse_incident_dir, surface_hit.shading_normal, out_direction, alpha);
+  auto pdf_and_factor = ModifiedPhongDetail::PdfAndFactor(cos_phi, alpha);
+
   if (pdf)
-    *pdf = n_dot_out>0. ? n_dot_out/Pi : 0.;
-  Double3 uv = surface_hit.primitive().GetUV(surface_hit.hitid);
-  Spectral texture_color = texture->GetTexel(uv[0], uv[1]).array();
-  Spectral out_color = texture_color * kr_d;
-  return n_dot_out > 0. ? out_color : Spectral{0.};
+  {
+    *pdf = pdf_and_factor.first;
+  }
+  
+  if (n_dot_out <= 0.)
+    return Spectral{0.};
+
+  auto kr_s_local = MaybeMultiplyTextureLookup(kr_s, glossy_texture.get(), surface_hit);  
+
+  return pdf_and_factor.second * kr_s_local;
 }
 
 
-BSDFSample TexturedDiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const
+BSDFSample ModifiedPhongShader::SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const
 {
-  auto m = OrthogonalSystemZAligned(surface_hit.normal);
-  Double3 v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
-  double pdf = v[2]/Pi;
-  v = m * v;
-  return BSDFSample{v, kr_d, pdf};
+  Double3 reflected = Reflected(reverse_incident_dir, surface_hit.shading_normal);
+  auto m = OrthogonalSystemZAligned(reflected);
+  Double3 w = SampleTrafo::ToPhongHemisphere(sampler.UniformUnitSquare(), alpha);
+  double cos_phi = w[2];
+  Double3 out_direction = m * w;
+  auto pdf_and_factor = ModifiedPhongDetail::PdfAndFactor(cos_phi, alpha);
+  if (Dot(out_direction, surface_hit.normal) < 0.)
+  {
+    // Reject samples that go under the surface. This is done simply by setting the contribution to zero! It is basic rejection sampling. Or isn't it?
+    return BSDFSample{out_direction, Spectral{0.}, pdf_and_factor.first};
+  }
+  else
+  {
+    auto kr_s_local = MaybeMultiplyTextureLookup(kr_s, glossy_texture.get(), surface_hit);  
+    kr_s_local *= pdf_and_factor.second;
+    //double factor = ModifiedPhongDetail::Pdf(reverse_incident_dir, surface_hit.shading_normal, out_direction, alpha);
+    //assert(factor <= 0. || pdf > 0.);
+    return BSDFSample{out_direction, kr_s_local, pdf_and_factor.second};
+  }
 }
 
 

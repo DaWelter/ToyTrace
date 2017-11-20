@@ -249,6 +249,16 @@ inline RaySegment MakeSegmentAt(const RaySurfaceIntersection &intersection, cons
 }
 
 
+TEST(TestMath, Reflect)
+{
+  Double3 n{0., 1., 0.};
+  auto in = Normalized(Double3{0., 1., 2.});
+  Double3 out = Reflected(in, n);
+  auto out_expected = Normalized(Double3{0., 1., -2.});
+  ASSERT_GE(Dot(out, out_expected), 0.99);
+}
+
+
 TEST(TestMath, SphereIntersectionMadness)
 {
   Sampler sampler;
@@ -662,7 +672,7 @@ TEST_F(PerspectiveCameraTesting, Sampling1)
 TEST(Parser, ImportDAE)
 {
   const char* scenestr = R"""(
-shader DefaultMaterial 1 1 1 0.5 0 0 0 0
+diffuse DefaultMaterial 1 1 1 0.5
 m scenes/unitcube.dae
 )""";
   Scene scene;
@@ -699,12 +709,12 @@ resolution 128 128
 
 l   0 0.75 0  255 255 255
 
-shader white  1 1 1 0.5 0 0 0 0
-shader red    1 0 0 0.5 0 0 0 0
-shader green  0 1 0 0.5 0 0 0 0
-shader blue   0 0 1 0.5 0 0 0 0
-shader boxmat 1 1 0 0.8 0 0 0 0
-shader spheremat 0 1 1 0.8 0 0 0 0
+diffuse white  1 1 1 0.5
+diffuse red    1 0 0 0.5
+diffuse green  0 1 0 0.5
+diffuse blue   0 0 1 0.5
+diffuse boxmat 1 1 0 0.8
+diffuse spheremat 0 1 1 0.8
 
 m scenes/cornelbox2.dae
 )""";

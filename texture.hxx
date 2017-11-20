@@ -22,7 +22,7 @@ public:
 */
 	}
 
-	Double3 GetTexel(double u,double v)
+	Double3 GetTexel(double u,double v) const
 	{
 		double dummy;
 		u = modf(u,&dummy);

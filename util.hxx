@@ -44,13 +44,20 @@ inline void impl(std::stringstream &ss, const T& x, Args&& ... args)
    I will probably implement this for String, too.
 */
 template<class ... Args>
-std::string strconcat(Args&& ...args)
+inline std::string strconcat(Args&& ...args)
 {
   std::stringstream ss;
   strconcat_internal::impl(ss, args...);
   return ss.str();
 }
 
+
+inline bool startswith(const std::string &a, const std::string &b)
+{
+  if (a.size() < b.size())
+    return false;
+  return a.substr(0, b.size()) == b;
+}
 
 
 #if 0 // if using c++11

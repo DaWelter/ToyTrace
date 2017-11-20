@@ -31,6 +31,17 @@ Double3 ToCosHemisphere(Double2 r)
   return Double3{cs*rho, sn*rho, z};
 }
 
+Double3 ToPhongHemisphere(Double2 r, double alpha)
+{
+  double t = std::pow(r[0], 1./(alpha+1));
+  double rho = std::sqrt(1.-t);
+  double z   = std::sqrt(t);
+  double omega = 2.*Pi*r[1];
+  double sn = std::sin(omega);
+  double cs = std::cos(omega);
+  return Double3{cs*rho, sn*rho, z};
+}
+
 }
 
 

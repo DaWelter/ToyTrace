@@ -34,7 +34,10 @@ struct BSDFSample
 enum ShaderFlags : int
 {
   REFLECTION_IS_SPECULAR = 1,
-  IS_PASSTHROUGH = 3
+  TRANSMISSION_IS_SPECULAR = 2,
+  IS_PASSTHROUGH = 4,
+  IS_TRANSMISSIVE = 8,
+  IS_REFLECTIVE = 16,
 };
 
 
@@ -54,21 +57,45 @@ public:
 class DiffuseShader : public Shader
 {
   Spectral kr_d; // between zero and 1/Pi.
+  std::unique_ptr<Texture> diffuse_texture; // TODO: Share textures among shaders?
 public:
-  DiffuseShader(const Spectral &reflectance);
+  DiffuseShader(const Spectral &reflectance, std::unique_ptr<Texture> _diffuse_texture);
   BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
   Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
 };
 
 
-class TexturedDiffuseShader : public Shader
+
+class SpecularReflectiveShader : public Shader
 {
-  Spectral kr_d; // between zero and 1/Pi.
-  std::unique_ptr<Texture> texture; // TODO: Share textures among shaders?
+  Spectral kr_s;
 public:
-  TexturedDiffuseShader(const Spectral &_reflectance, std::unique_ptr<Texture> _texture);
+  SpecularReflectiveShader(const Spectral &reflectance);
   BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
   Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
+};
+
+
+/* See INFOMAGR – Advanced Graphics
+ * Lecture 13 "BRDFs" by Jacco Bikker
+ * And also:
+ * http://mathinfo.univ-reims.fr/IMG/pdf/Using_the_modified_Phong_reflectance_model_for_Physically_based_rendering_-_Lafortune.pdf
+*/
+class ModifiedPhongShader : public Shader
+{
+  Spectral kr_d; // Between zero and 1.
+  Spectral kr_s; // Between zero and 1. Additionally kr_d + kr_s < 1
+  double alpha;
+  std::unique_ptr<Texture> glossy_texture;
+  std::unique_ptr<Texture> diffuse_texture;
+public:
+  ModifiedPhongShader(
+    const Spectral &_diffuse_reflectance, std::unique_ptr<Texture> _diffuse_texture,
+    const Spectral &_glossy_reflectance, std::unique_ptr<Texture> _glossy_texture,
+    double _glossy_exponent
+  );
+  BSDFSample SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
+  Spectral EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
 };
 
 

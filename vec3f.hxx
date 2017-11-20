@@ -177,7 +177,11 @@ auto Normalized(const Eigen::MatrixBase<Derived>& u) -> decltype(u.normalized())
   return u.normalized();
 }
 
-
+template<class Derived>
+auto Reflected(const Eigen::MatrixBase<Derived>& reverse_incident_dir, const Eigen::MatrixBase<Derived>& normal) // -> decltype(2.*reverse_incident_dir.dot(normal)*normal - reverse_incident_dir)
+{
+  return 2.*reverse_incident_dir.dot(normal)*normal - reverse_incident_dir;
+}
 
 #ifndef NDEBUG
 #define ASSERT_NORMALIZED(v) assert(std::abs(LengthSqr(v) - 1.) < 1.e-6)

@@ -76,6 +76,9 @@ class NFFParser
   std::string directory;
   std::string filename;
   std::string line;
+  bool        line_stream_state;
+  std::string peek_line;
+  bool        peek_stream_state;
   std::istream &input;
   int lineno;
   RenderingParameters *render_params;
@@ -95,7 +98,7 @@ public:
     lineno{0},
     filename(_path_hint)
   {
-    shaders.set_and_activate("default", new DiffuseShader(Double3(0.8, 0.8, 0.8)));
+    shaders.set_and_activate("default", new DiffuseShader(Double3(0.8, 0.8, 0.8), nullptr));
     currentTransform = decltype(currentTransform)::Identity();
     if (!filename.empty())
     {
@@ -104,6 +107,8 @@ public:
       directory.assign(dirnamec);
       free(dirnamec_storage);
     }
+    line_stream_state = true;
+    peek_stream_state = (bool)std::getline(input, peek_line);
   }
 
   void Parse();
@@ -160,7 +165,11 @@ std::runtime_error NFFParser::MakeException(const std::string &msg)
 
 bool NFFParser::NextLine()
 {
-  return std::getline(input, line) && (++lineno);
+  line = peek_line;
+  line_stream_state = peek_stream_state;
+  ++lineno;
+  peek_stream_state = (bool)std::getline(input, peek_line);
+  return line_stream_state;
 }
 
 
@@ -277,12 +286,17 @@ void NFFParser::Parse()
     
     /* sphere */
 
-    if (!strcmp(token,"s")) {
+    if (!strcmp(token,"s"))
+    {
       Double3 pos;
       double rad;
-      sscanf(line.c_str(),"s %lg %lg %lg %lg",&pos[0],&pos[1],&pos[2],&rad);
-      AssignCurrentMaterialParams(
-        scene->AddPrimitive<Sphere>(pos,rad));
+      int n = sscanf(line.c_str(),"s %lg %lg %lg %lg",&pos[0],&pos[1],&pos[2],&rad);
+      if (n == 4)
+      {
+          AssignCurrentMaterialParams(
+            scene->AddPrimitive<Sphere>(pos,rad));
+      }
+      else throw MakeException("Error");
       continue;
     }
 
@@ -353,43 +367,114 @@ void NFFParser::Parse()
     }
     
     /* shader parameters */
-    
-    if (!strcmp(token,"shader"))
+    if (!strcmp(token, "shader"))
     {
-      double r,g,b,kd,ks,shine,t,ior;
-      char texture_filename[LINESIZE];
       char name[LINESIZE];
-      
-      int num = std::sscanf(line.c_str(),"shader %s %lg %lg %lg %lg %lg %lg %lg %lg %s\n",name, &r,&g,&b,&kd,&ks,&shine,&t,&ior,texture_filename);
-      Double3 color(r,g,b);
+      int num = std::sscanf(line.c_str(), "shader %s\n", name);
       if(num==1)
       {
         shaders.activate(name);
       }
-      else if(num < 10)
-      {
-        shaders.set_and_activate(name, 
-          new DiffuseShader(kd * color));
-      }
-      else if(num >= 10)
-      {
-        auto fullpath = MakeFullPath(texture_filename);
-        auto texture = std::make_unique<Texture>(fullpath);
-        shaders.set_and_activate(name,
-          new TexturedDiffuseShader(kd * color, std::move(texture)));
-      }
-      else {
-        throw MakeException("Error");
-      }
+      else throw MakeException("shader directive needs name of the shader.");
       continue;
     }
+    
+    
+    if (!strcmp(token,"diffuse"))
+    {
+      Spectral rgb;
+      double kd;
+      char name[LINESIZE];
+      int num = std::sscanf(line.c_str(),"diffuse %s %lg %lg %lg %lg\n",name, &rgb[0],&rgb[1],&rgb[2],&kd);
+      if (num == 5)
+      {
+        std::unique_ptr<Texture> diffuse_texture;
+        if (startswith(peek_line, "diffusetexture"))
+        {
+          NextLine();
+          char buffer [LINESIZE];
+          num = std::sscanf(line.c_str(), "diffusetexture %s\n", buffer);
+          if (num == 1)
+          {
+            auto path = MakeFullPath(buffer);
+            diffuse_texture = std::make_unique<Texture>(path);
+          }
+          else throw MakeException("Error");
+        }
+        shaders.set_and_activate(name, 
+          new DiffuseShader(kd * rgb, std::move(diffuse_texture)));
+      }
+      else throw MakeException("Error");
+      continue;
+    }
+    
+    if (!strcmp(token,"specularreflective"))
+    {
+      Spectral rgb;
+      double k;
+      char name[LINESIZE];
+      int num = std::sscanf(line.c_str(),"specularreflective %s %lg %lg %lg %lg\n",name, &rgb[0],&rgb[1],&rgb[2],&k);
+      if (num == 5)
+      {
+        shaders.set_and_activate(name, 
+          new SpecularReflectiveShader(k * rgb));
+      }
+      else throw MakeException("Error");
+      continue;
+    }
+    
+    if (!strcmp(token,"modifiedphong"))
+    {
+      double k, phong_exponent;
+      Spectral kd_rgb, ks_rgb;
+      std::unique_ptr<Texture> diffuse_texture, glossy_texture;
+      char name[LINESIZE];
+      
+      int num = std::sscanf(line.c_str(),"modifiedphong %s %lg %lg %lg %lg %lg %lg %lg %lg\n",name, &kd_rgb[0], &kd_rgb[1], &kd_rgb[2], &ks_rgb[0], &ks_rgb[1], &ks_rgb[2], &k, &phong_exponent);
+      if(num == 9)
+      {
+        while (true)
+        {
+          char buffer [LINESIZE];
+          if (startswith(peek_line, "diffusetexture"))
+          {
+            NextLine();
+            num = std::sscanf(line.c_str(), "diffusetexture %s\n", buffer);
+            if (num == 1)
+            {
+              auto path = MakeFullPath(buffer);
+              diffuse_texture = std::make_unique<Texture>(path);
+            }
+            else throw MakeException("Error");
+          }
+          else if (startswith(peek_line, "glossytexture"))
+          {
+            NextLine();
+            num = std::sscanf(line.c_str(), "glossytexture %s\n", buffer);
+            if (num == 1)
+            {
+              auto path = MakeFullPath(buffer);
+              glossy_texture = std::make_unique<Texture>(path);
+            }
+            else throw MakeException("Error");
+          }
+          else break;
+        }
+        shaders.set_and_activate(name, new ModifiedPhongShader(
+          k*kd_rgb, std::move(diffuse_texture), k*ks_rgb, std::move(glossy_texture), phong_exponent
+        ));
+      }
+      else throw MakeException("Error");
+      continue;
+    }
+    
     
     if (!strcmp(token, "medium"))
     {
       Spectral sigma_s{0.}, sigma_a{1.};
       char name[LINESIZE];
       int num = std::sscanf(line.c_str(), "medium %s %lg %lg %lg %lg %lg %lg\n", name, &sigma_s[0], &sigma_s[1], &sigma_s[2], &sigma_a[0], &sigma_a[1], &sigma_a[2]);
-      if (num==1)
+      if(num == 1)
       {
         mediums.activate(name);
       }
@@ -399,10 +484,7 @@ void NFFParser::Parse()
         mediums.set_and_activate(
           name, medium);
       }
-      else
-      {
-        throw MakeException("Error");
-      }
+      else throw MakeException("Error");
       continue;
     }
   
@@ -651,59 +733,89 @@ private:
   void ReadMesh(const aiMesh* mesh, const NodeRef &ndref)
   {
     auto m = ndref.local_to_world;
-    bool generateTexturedTriangles =
-        mesh->GetNumUVChannels()>0 &&
-        mesh->HasNormals();
+    auto m_linear = aiMatrix3x3(m);
+    bool hasuv = mesh->GetNumUVChannels()>0;
+    bool hasnormals = mesh->HasNormals();
+
+    std::vector<int> triangle_indices; triangle_indices.reserve(1024);
     for (unsigned int face_idx = 0; face_idx < mesh->mNumFaces; ++face_idx)
     {
       const aiFace* face = &mesh->mFaces[face_idx];
-      auto fetchVertex = [this,mesh,face,&m](int corner) -> Double3 {
-        return parser->ApplyTransform(
-                aiVector3_to_myvector(m * mesh->mVertices[face->mIndices[corner]]));
-      };
-      auto fetchNormal = [this,mesh,face,&m](int corner) -> Double3 {
-        return parser->ApplyTransformNormal(
-          aiVector3_to_myvector(m * mesh->mNormals[face->mIndices[corner]]));
-      };
-      auto fetchUV = [this,mesh,face,&m](int corner) -> Double3 {
-        return aiVector3_to_myvector(mesh->mTextureCoords[0][face->mIndices[corner]]);
-      };
-      Double3 vertex0 = fetchVertex(0);
-      Double3 normal0, uv0;
-      if (generateTexturedTriangles)
-      {
-        normal0 = fetchNormal(0);
-        uv0 = fetchUV(0);
-      }
       for (int i=2; i<face->mNumIndices; i++)
       {
-        auto vertex1 = fetchVertex(i-1);
-        auto vertex2 = fetchVertex(i);
-        if (generateTexturedTriangles)
+        triangle_indices.push_back(face->mIndices[0]);
+        triangle_indices.push_back(face->mIndices[i-1]);
+        triangle_indices.push_back(face->mIndices[i]);
+      }
+    }
+    std::vector<Double3> vertices; vertices.reserve(1024);
+    for (int i=0; i<mesh->mNumVertices; ++i)
+    {
+      vertices.push_back(
+            parser->ApplyTransform(
+              aiVector3_to_myvector(
+                m*mesh->mVertices[i])));
+    }
+
+    std::vector<Double3> normals; normals.reserve(1024);
+    if (hasnormals)
+    {
+      for (int i=0; i<mesh->mNumVertices; ++i)
+      {
+        normals.push_back(
+              parser->ApplyTransformNormal(
+                aiVector3_to_myvector(
+                  m_linear*mesh->mNormals[i])));
+      }
+    }
+    std::vector<Double3> uvs; uvs.reserve(1024);
+    if (hasuv)
+    {
+      for (int i=0; i<mesh->mNumVertices; ++i)
+      {
+        uvs.push_back(
+              aiVector3_to_myvector(
+                mesh->mTextureCoords[0][i]));
+      }
+    }
+
+    for (int tri_start = 0; tri_start < triangle_indices.size(); tri_start+=3)
+    {
+      int a = triangle_indices[tri_start];
+      int b = triangle_indices[tri_start+1];
+      int c = triangle_indices[tri_start+2];
+      if (hasuv || hasnormals)
+      {
+        Double3 uv[3] = {Double3{0.}, Double3{0.}, Double3{0.}};
+        Double3 no[3];
+        if (hasnormals)
         {
-          auto normal1 = fetchNormal(i-1);
-          auto normal2 = fetchNormal(i);
-          auto uv1 = fetchUV(i-1);
-          auto uv2 = fetchUV(i);
-//          std::cout << "---" << std::endl;
-//          std::cout << "0: p:" << vertex0 << ", n:"  << normal0 << "uv: " << uv0 << std::endl;
-//          std::cout << "1: p:" << vertex1 << ", n:"  << normal1 << "uv: " << uv1 << std::endl;
-//          std::cout << "2: p:" << vertex2 << ", n:"  << normal2 << "uv: " << uv2 << std::endl;
-          parser->AssignCurrentMaterialParams(
-            scene->AddPrimitive<TexturedSmoothTriangle>(
-              vertex0, vertex1, vertex2,
-              normal0, normal1, normal2,
-              uv0, uv1, uv2
-           ));
+          no[0] = normals[a];
+          no[1] = normals[b];
+          no[2] = normals[c];
         }
         else
         {
-          parser->AssignCurrentMaterialParams(
-            scene->AddPrimitive<Triangle>(
-                vertex0,
-                vertex1,
-                vertex2));
+          no[0] = no[1] = no[2] = Normalized(Cross(vertices[b]-vertices[a], vertices[c]-vertices[a]));
         }
+        if (hasuv)
+        {
+          uv[0] = uvs[a];
+          uv[1] = uvs[b];
+          uv[2] = uvs[c];
+        }
+        parser->AssignCurrentMaterialParams(
+          scene->AddPrimitive<TexturedSmoothTriangle>(
+            vertices[a], vertices[b], vertices[c],
+            no[0], no[1], no[2],
+            uv[0], uv[1], uv[2]
+         ));
+      }
+      else
+      {
+        parser->AssignCurrentMaterialParams(
+          scene->AddPrimitive<Triangle>(
+              vertices[a], vertices[b], vertices[c]));
       }
     }
   }
