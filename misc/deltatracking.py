@@ -5,18 +5,55 @@ Kutz et al. (2017) "Spectral and Decomposition Tracking for Rendering Heterogene
 
 @author: Michael Welter <michael@welter-4d.de>
 """
+from __future__ import print_function
+
 import matplotlib.pyplot as pyplot
 import random
 import math
 import numpy as np
 
 import mediumspec as ms
+ms.init('single_box', 'const')
+
+def print_weights_stats(name, weights):
+  estimate = np.average(weights, axis=0)
+  stdev    = np.std(weights, axis=0) / math.sqrt(len(weights))
+  per_channel = ['%f +/- %f' % (a, b) for (a,b) in zip(estimate, stdev)]
+  print(name, " estimate: ", ', '.join(per_channel))
+
+
+def evaluate_spectral_tracking(sample_generator_function):
+  print("-"*len(sample_generator_function.__name__))
+  print(sample_generator_function.__name__)
+  print("-" * len(sample_generator_function.__name__))
+  Nsamples = 10000
+  samples = []
+  for i in range(Nsamples):
+    s = sample_generator_function()
+    samples.append(s)
+  mask_interacting = np.asarray([ q[0]<=ms.domain_length for q in samples ], np.bool)
+  print ("Interacting fraction: ", np.sum(mask_interacting.astype(np.float32))/Nsamples)
+  print ("Escaping fraction: ", 1. - np.sum(mask_interacting.astype(np.float32))/Nsamples)
+
+  weights = np.asarray([q[1] for q in samples])
+
+  escaping_weights = weights.copy()
+  escaping_weights[mask_interacting] = 0.
+
+  interacting_weights = weights.copy()
+  interacting_weights[~mask_interacting] = 0.
+
+  print_weights_stats("Integral", interacting_weights)
+  print_weights_stats("Transmission", escaping_weights)
+
+
 
 def exp_sample(sigma):
   """
     Generate random number t according to the prob density sigma*exp(-sigma*t)
   """
   return -math.log(random.uniform(0., 1.))/sigma
+
 
 def compute_probabilites_max_scheme(weight, *sigmas):
   """
@@ -37,7 +74,7 @@ def compute_probabilites_history_scheme(weight, *sigmas):
   probs = [ p/normalization for p in probs ]
   return probs
 
-the_probability_scheme = compute_probabilites_history_scheme
+the_probability_scheme = compute_probabilites_max_scheme
 
 def spectral_tracking():
   """
@@ -48,7 +85,7 @@ def spectral_tracking():
   while True:
     x += exp_sample(ms.sigma_t_majorante_across_channels)
     if x > ms.domain_length:
-      return None
+      return (x, weights)
     else:
       sigma_s = ms.get_sigma_s(x)
       sigma_a = ms.get_sigma_a(x)
@@ -75,7 +112,7 @@ def spectral_tracking_no_absorption():
   while True:
     x += exp_sample(ms.sigma_t_majorante_across_channels)
     if x > ms.domain_length:
-      return (x, np.zeros_like(weights))
+      return (x, weights)
     else:
       sigma_s = ms.get_sigma_s(x)
       sigma_a = ms.get_sigma_a(x)
@@ -89,30 +126,18 @@ def spectral_tracking_no_absorption():
         weights *= sigma_n / ms.sigma_t_majorante_across_channels / pn
 
 
-Nsamples = 10000
-samples = []
-for i in range(Nsamples):
-  s = spectral_tracking_no_absorption()
-  samples.append(s)
-interacting_samples = filter(lambda q: q[0]<ms.domain_length, samples)
-print ("Interacting fraction: ", float(len(interacting_samples))/Nsamples)
-print ("Escaping fraction: ", 1. - float(len(interacting_samples))/Nsamples)
-samples_x = map(lambda q: q[0], samples)
-samples_w = np.asarray(map(lambda q: q[1], samples))
+evaluate_spectral_tracking(spectral_tracking)
+evaluate_spectral_tracking(spectral_tracking_no_absorption)
 
-estimate = np.average(samples_w, axis=0)
-stdev    = np.std(samples_w, axis=0) / math.sqrt(Nsamples)
 
-print ("Tracking estimate: ", estimate, " +/- ", stdev)
-
-pyplot.plot(ms.x_arr, ms.sigma_s_arr[:,0], c = 'r')
-pyplot.plot(ms.x_arr, ms.transm_array[:,0], c = 'r')
-pyplot.scatter(samples_x, samples_w[:,0], c = 'r')
-
-pyplot.plot(ms.x_arr, ms.sigma_s_arr[:,1], c = 'g')
-pyplot.plot(ms.x_arr, ms.transm_array[:,1], c = 'g')
-pyplot.scatter(samples_x, samples_w[:,1], c = 'g')
-
+# pyplot.plot(ms.x_arr, ms.sigma_s_arr[:,0], c = 'r')
+# pyplot.plot(ms.x_arr, ms.transm_array[:,0], c = 'r')
+# pyplot.scatter(samples_x, samples_w[:,0], c = 'r')
+#
+# pyplot.plot(ms.x_arr, ms.sigma_s_arr[:,1], c = 'g')
+# pyplot.plot(ms.x_arr, ms.transm_array[:,1], c = 'g')
+# pyplot.scatter(samples_x, samples_w[:,1], c = 'g')
+# pyplot.show()
 
 def delta_tracking(lambda_):
   """
@@ -164,21 +189,20 @@ def weighted_delta_tracking_no_absorption(lambda_):
       else:
         w *= sigma_n / sigma_t_majorante_lambda / pn
 
+# Nsamples = 10000
+# samples_per_lambda = [ [] for _ in  range(ms.sigma_s_arr.shape[1]) ]
+# escapes_per_lambda = np.zeros(ms.sigma_s_arr.shape[1], np.float32)
+# for lambda_ in  range(len(samples_per_lambda)):
+#   for i in range(Nsamples):
+#     x, w = weighted_delta_tracking_no_absorption(lambda_)
+#     samples_per_lambda[lambda_].append(w)
+#     escapes_per_lambda[lambda_] += 1 if x > ms.domain_length else 0
+# samples_per_lambda = np.asarray(samples_per_lambda).T
+#
+# estimate = np.average(samples_per_lambda, axis=0)
+# stdev    = np.std(samples_per_lambda, axis=0) / math.sqrt(len(samples_per_lambda))
+#
+# print ("Single Lambda Tracking: ", estimate, " +/- ", stdev)
+# print ("Fraction of escapes: ", escapes_per_lambda / len(samples_per_lambda))
 
 
-samples_per_lambda = [ [] for _ in  range(ms.sigma_s_arr.shape[1]) ]
-escapes_per_lambda = np.zeros(ms.sigma_s_arr.shape[1], np.float32)
-for lambda_ in  range(len(samples_per_lambda)):
-  for i in range(Nsamples):
-    x, w = weighted_delta_tracking_no_absorption(lambda_)
-    samples_per_lambda[lambda_].append(w)
-    escapes_per_lambda[lambda_] += 1 if x > ms.domain_length else 0
-samples_per_lambda = np.asarray(samples_per_lambda).T
-
-estimate = np.average(samples_per_lambda, axis=0)
-stdev    = np.std(samples_per_lambda, axis=0) / math.sqrt(len(samples_per_lambda))
-
-print ("Single Lambda Tracking: ", estimate, " +/- ", stdev)
-print ("Fraction of escapes: ", escapes_per_lambda / len(samples_per_lambda))
-
-pyplot.show()
