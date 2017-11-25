@@ -423,31 +423,20 @@ void NFFParser::Parse()
       continue;
     }
     
-    if (!strcmp(token,"modifiedphong"))
+    if (!strcmp(token,"glossy"))
     {
       double k, phong_exponent;
       Spectral kd_rgb, ks_rgb;
       std::unique_ptr<Texture> diffuse_texture, glossy_texture;
       char name[LINESIZE];
       
-      int num = std::sscanf(line.c_str(),"modifiedphong %s %lg %lg %lg %lg %lg %lg %lg %lg\n",name, &kd_rgb[0], &kd_rgb[1], &kd_rgb[2], &ks_rgb[0], &ks_rgb[1], &ks_rgb[2], &k, &phong_exponent);
-      if(num == 9)
+      int num = std::sscanf(line.c_str(),"glossy %s %lg %lg %lg %lg %lg\n",name,&ks_rgb[0], &ks_rgb[1], &ks_rgb[2], &k, &phong_exponent);
+      if(num == 6)
       {
         while (true)
         {
           char buffer [LINESIZE];
-          if (startswith(peek_line, "diffusetexture"))
-          {
-            NextLine();
-            num = std::sscanf(line.c_str(), "diffusetexture %s\n", buffer);
-            if (num == 1)
-            {
-              auto path = MakeFullPath(buffer);
-              diffuse_texture = std::make_unique<Texture>(path);
-            }
-            else throw MakeException("Error");
-          }
-          else if (startswith(peek_line, "glossytexture"))
+          if (startswith(peek_line, "glossytexture"))
           {
             NextLine();
             num = std::sscanf(line.c_str(), "glossytexture %s\n", buffer);
@@ -460,8 +449,8 @@ void NFFParser::Parse()
           }
           else break;
         }
-        shaders.set_and_activate(name, new ModifiedPhongShader(
-          k*kd_rgb, std::move(diffuse_texture), k*ks_rgb, std::move(glossy_texture), phong_exponent
+        shaders.set_and_activate(name, new MicrofacetShader(
+          k*ks_rgb, std::move(glossy_texture), phong_exponent
         ));
       }
       else throw MakeException("Error");

@@ -88,78 +88,125 @@ BSDFSample SpecularReflectiveShader::SampleBSDF(const Double3& incident_dir, con
 
 
 
-namespace ModifiedPhongDetail
+namespace MicrofacetDetail
 {
-inline std::pair<double,double> PdfAndFactor(double cos_phi, double alpha)
+double G1(double cos_v_m, double cos_v_n, double alpha)
 {
-  double t =  0.5/Pi*std::pow(cos_phi, alpha);
-  return std::make_pair(t*(alpha+1.), t*(alpha+2.));
+  // From Walter et al. 2007 "Microfacet Models for Refraction"
+  // Eq. 27 which pertains to the Beckman facet distribution.
+  // "... Instead we will use the Smith shadowing-masking approximation [Smi67]."
+  if (cos_v_m * cos_v_n < 0.) return 0.;
+  double a = cos_v_n/(alpha * std::sqrt(1 - cos_v_n * cos_v_n));
+  if (a >= 1.6)
+    return 1.;
+  else
+    return (3.535*a + 2.181*a*a)/(1.+2.276*a+2.577*a*a);
+}
 }
 
-inline double CosPhi(const Double3 &reverse_incident_dir, const Double3 &normal, const Double3& out_direction, double alpha)
-{
-  // cos_phi is w.r.t the angle between outgoing in reflected incident directions.
-  double cos_phi = std::max(0., Dot(Reflected(reverse_incident_dir, normal), out_direction));
-  return cos_phi;
-}
-}
 
-
-ModifiedPhongShader::ModifiedPhongShader(
-  const Spectral &_diffuse_reflectance, std::unique_ptr<Texture> _diffuse_texture,
+MicrofacetShader::MicrofacetShader(
   const Spectral &_glossy_reflectance, std::unique_ptr<Texture> _glossy_texture,
   double _glossy_exponent)
   : Shader(0),
-    kr_d(_diffuse_reflectance), 
     kr_s(_glossy_reflectance), 
     alpha(_glossy_exponent),
-    diffuse_texture(std::move(_diffuse_texture)),
     glossy_texture(std::move(_glossy_texture))
 {
 }
 
 
-Spectral ModifiedPhongShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
+Spectral MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
 {
   double n_dot_out = Dot(surface_hit.normal, out_direction);
-  double cos_phi = ModifiedPhongDetail::CosPhi(reverse_incident_dir, surface_hit.shading_normal, out_direction, alpha);
-  auto pdf_and_factor = ModifiedPhongDetail::PdfAndFactor(cos_phi, alpha);
+  double ns_dot_out = Dot(surface_hit.shading_normal, out_direction);
+  double ns_dot_in  = Dot(surface_hit.shading_normal, reverse_incident_dir);
+  Double3 half_angle_vector = Normalized(reverse_incident_dir + out_direction);
+  double ns_dot_wh = Dot(surface_hit.shading_normal, half_angle_vector);
+  double wh_dot_out = Dot(out_direction, half_angle_vector);
+  double wh_dot_in  = Dot(reverse_incident_dir, half_angle_vector);
 
-  if (pdf)
-  {
-    *pdf = pdf_and_factor.first;
+  double microfacet_distribution_val;
+  { // Beckman Distrib. This formula is using the normalized distribution D(cs) 
+    // such that Int_omega D(cs) cs dw = 1, using the differential solid angle dw, 
+    // integrated over the hemisphere.
+    double cs = ns_dot_wh;
+    double t1 = (cs*cs-1.)/(cs*cs*alpha*alpha);
+    double t2 = alpha*alpha*cs*cs*cs*cs*Pi;
+    microfacet_distribution_val = std::exp(t1)/t2;
   }
   
-  if (n_dot_out <= 0.)
+  if (pdf)
+  {
+    double half_angle_distribution_val = microfacet_distribution_val*std::abs(ns_dot_wh);
+    double out_distribution_val = half_angle_distribution_val*0.25/wh_dot_out; // From density of h_r to density of out direction.
+    *pdf = out_distribution_val;
+  }
+  
+  if (ns_dot_wh <= 0. || n_dot_out <= 0. || wh_dot_out <= 0. || wh_dot_in <= 0.)
     return Spectral{0.};
+  
+  double geometry_term;
+  {
+#if 1
+    // Cook & Torrance model. Seems to work good enough although Walter et al. has concerns about it's realism.
+    // Ref: Cook and Torrance (1982) "A reflectance model for computer graphics"
+    double t1 = 2.*ns_dot_wh*ns_dot_out / wh_dot_out;
+    double t2 = 2.*ns_dot_wh*ns_dot_in / wh_dot_out;
+    geometry_term = std::min(1., std::min(t1, t2));
+#else
+    // Overkill?
+    geometry_term = MicrofacetDetail::G1(wh_dot_in, ns_dot_in, alpha)*
+                    MicrofacetDetail::G1(wh_dot_out, ns_dot_out, alpha);
+#endif
+  }
+  double fresnel_term;
+  {
+#if 0
+    Way too little reflection as these formulae are for dielectrics which reflect mostly at glancing angles.
+    Without a diffuse background this is not good. Anyway, I want to simulate metals with this shader.
+    double eta_i = 1.0;
+    double eta_t = 0.9;
+    double eta = eta_t/eta_i;
+    double c = wh_dot_in;
+    double t5 = eta*eta - 1. + c*c;
+    if (t5 >= 0.)
+    {
+      double g = std::sqrt(t5);
+      double t1 = (g-c)*(g-c)/((g+c)*g+c);
+      double t2 = c*(g+c)-1.;
+      double t3 = c*(g-c)+1.;
+      double t4 = (t2/t3)*(t2/t3);
+      fresnel_term = 0.5*t1*(1. + t4);
+    }
+    else
+      fresnel_term = 1.;
+#else
+    // Schlicks approximation. Parameters for metal.
+    // Ref: Jacco Bikkers Lecture.
+    double kspecular = 0.92; // Alu.
+    fresnel_term = kspecular + (1-kspecular)*std::pow(1-wh_dot_in, 5.);
+#endif
+  }
+  double microfacet_val = fresnel_term*geometry_term*microfacet_distribution_val*0.25/ns_dot_in/ns_dot_out;
 
   auto kr_s_local = MaybeMultiplyTextureLookup(kr_s, glossy_texture.get(), surface_hit);  
 
-  return pdf_and_factor.second * kr_s_local;
+  return microfacet_val * kr_s_local;
 }
 
 
-BSDFSample ModifiedPhongShader::SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const
+BSDFSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const
 {
-  Double3 reflected = Reflected(reverse_incident_dir, surface_hit.shading_normal);
-  auto m = OrthogonalSystemZAligned(reflected);
-  Double3 w = SampleTrafo::ToPhongHemisphere(sampler.UniformUnitSquare(), alpha);
-  double cos_phi = w[2];
-  Double3 out_direction = m * w;
-  auto pdf_and_factor = ModifiedPhongDetail::PdfAndFactor(cos_phi, alpha);
-  if (Dot(out_direction, surface_hit.normal) < 0.)
-  {
-    // Reject samples that go under the surface. This is done simply by setting the contribution to zero! It is basic rejection sampling. Or isn't it?
-    return BSDFSample{out_direction, Spectral{0.}, pdf_and_factor.first};
-  }
-  else
-  {
-    auto kr_s_local = MaybeMultiplyTextureLookup(kr_s, glossy_texture.get(), surface_hit);  
-    kr_s_local *= pdf_and_factor.second;
-    //double factor = ModifiedPhongDetail::Pdf(reverse_incident_dir, surface_hit.shading_normal, out_direction, alpha);
-    //assert(factor <= 0. || pdf > 0.);
-    return BSDFSample{out_direction, kr_s_local, pdf_and_factor.second};
-  }
+  auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
+  Double3 h_r_local = SampleTrafo::ToBeckmanHemisphere(sampler.UniformUnitSquare(), alpha);
+  Double3 h_r = m*h_r_local;
+  // The following is the inversion of the half-vector formula. It is like reflection except for the abs. But the abs is needed.
+  Double3 out_direction = 2.*std::abs(Dot(reverse_incident_dir, h_r))*h_r - reverse_incident_dir;
+  BSDFSample smpl; 
+  smpl.dir = out_direction;
+  smpl.scatter_function = this->EvaluateBSDF(reverse_incident_dir, surface_hit, out_direction, &smpl.pdf);
+  return smpl;
 }
 
 

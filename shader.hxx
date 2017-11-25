@@ -76,21 +76,13 @@ public:
 };
 
 
-/* See INFOMAGR – Advanced Graphics
- * Lecture 13 "BRDFs" by Jacco Bikker
- * And also:
- * http://mathinfo.univ-reims.fr/IMG/pdf/Using_the_modified_Phong_reflectance_model_for_Physically_based_rendering_-_Lafortune.pdf
-*/
-class ModifiedPhongShader : public Shader
+class MicrofacetShader : public Shader
 {
-  Spectral kr_d; // Between zero and 1.
-  Spectral kr_s; // Between zero and 1. Additionally kr_d + kr_s < 1
+  Spectral kr_s;
   double alpha;
   std::unique_ptr<Texture> glossy_texture;
-  std::unique_ptr<Texture> diffuse_texture;
 public:
-  ModifiedPhongShader(
-    const Spectral &_diffuse_reflectance, std::unique_ptr<Texture> _diffuse_texture,
+  MicrofacetShader(
     const Spectral &_glossy_reflectance, std::unique_ptr<Texture> _glossy_texture,
     double _glossy_exponent
   );
