@@ -74,7 +74,7 @@ def compute_probabilites_history_scheme(weight, *sigmas):
   probs = [ p/normalization for p in probs ]
   return probs
 
-the_probability_scheme = compute_probabilites_max_scheme
+the_probability_scheme = compute_probabilites_history_scheme
 
 def spectral_tracking():
   """

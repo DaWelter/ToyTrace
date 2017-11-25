@@ -32,7 +32,7 @@ def init(coefficient_distribution, integrand):
     # A single box. But varying heights per wavelength.
     def get_sigma_s_(x):
       if 0.25 < x <= 0.75:
-        return np.asarray([2., 0.1])
+        return np.asarray([4., 1.])
       else:
         return np.asarray([0., 0.])
     def get_sigma_a_(x):
