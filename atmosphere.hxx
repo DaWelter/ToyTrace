@@ -31,6 +31,7 @@ struct SimpleConstituents
   PhaseFunctions::Rayleigh phasefunction_rayleigh;
 
   inline void ComputeCollisionCoefficients(double altitude, int lambda_idx, double &sigma_s, double &sigma_a) const;
+  inline void ComputeCollisionCoefficients(double altitude, Spectral &sigma_s, Spectral &sigma_a) const;
   inline void ComputeSigmaS(double altitude, Spectral* sigma_s_of_constituent) const;
 };
 
@@ -72,6 +73,21 @@ inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, in
     sigma_s += at_sealevel[i].sigma_s[lambda_idx] * rho_relative;
   }
 }
+
+inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, Spectral& sigma_s, Spectral& sigma_a) const
+{
+  assert (altitude > lower_altitude_cutoff);
+  altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
+  sigma_a = Spectral{0.};
+  sigma_s = Spectral{0.};
+  for (int i=0; i<NUM_CONSTITUENTS; ++i)
+  {
+    double rho_relative = std::exp(-inv_scale_height[i] * altitude);
+    sigma_a += at_sealevel[i].sigma_a * rho_relative;
+    sigma_s += at_sealevel[i].sigma_s * rho_relative;
+  }
+}
+
 
 
 void SimpleConstituents::ComputeSigmaS(double altitude, Spectral* sigma_s_of_constituent) const

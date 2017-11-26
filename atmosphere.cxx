@@ -17,7 +17,8 @@ Simple::Simple(const Double3& _planet_center, double _planet_radius, int _priori
 
 namespace TrackingDetail
 {
-inline bool RussianRouletteSurvival(double &weight, int iteration, Sampler &sampler)
+template<class WeightMultiplyFunctor>
+inline bool RussianRouletteSurvival(double weight, int iteration, Sampler &sampler, WeightMultiplyFunctor multiply_weight_with)
 {
   assert (weight > -0.1); // Should be non-negative, really.
   if (weight <= 0.)
@@ -27,12 +28,40 @@ inline bool RussianRouletteSurvival(double &weight, int iteration, Sampler &samp
   double prob_survival = std::min(weight, 1.);
   if (sampler.Uniform01() < prob_survival)
   {
-    weight /= prob_survival;
+    multiply_weight_with(1./prob_survival);
     return true;
   }
   else
+  {
+    multiply_weight_with(0.);
     return false;
+  }
 }
+
+
+// Is passing parameters like that as efficient has having the same number of item as normal individual arguments?
+void ComputeProbabilitiesHistoryScheme(
+  const Spectral &weights,
+  std::initializer_list<std::reference_wrapper<const Spectral>> sigmas, 
+  std::initializer_list<std::reference_wrapper<double>> probs)
+{
+  double normalization = 0.;
+  auto it_sigma = sigmas.begin();
+  auto it_probs = probs.begin();
+  for (; it_sigma != sigmas.end(); ++it_sigma, ++it_probs)
+  {
+    const Spectral &s = it_sigma->get();
+    assert (s.minCoeff() >= 0.);
+    double p = (s*weights).mean();
+    it_probs->get() = p;
+    normalization += p;
+  }
+  double norm_inv = 1./normalization;
+  it_probs = probs.begin();
+  for (; it_probs != probs.end(); ++it_probs)
+    it_probs->get() *= norm_inv;
+}
+
 }
 
 
@@ -40,25 +69,18 @@ Medium::InteractionSample Simple::SampleInteractionPoint(const RaySegment &segme
 {
   // Select a wavelength
   assert(!context.beta.isZero());
-  Spectral lambda_selection_prob = context.beta.abs();
-  lambda_selection_prob /= lambda_selection_prob.sum();
-  int component = TowerSampling<static_size<Spectral>()>(
-        lambda_selection_prob.data(),
-        sampler.Uniform01());
-  // Initialize weight
   Medium::InteractionSample smpl{
     0.,
-    Spectral{0.}
+    Spectral{1.}
   };
-  smpl.weight[component] = 1./lambda_selection_prob[component];
   // The lowest point gives the largest collision coefficients along the path.
   auto lowest_point = geometry.ComputeLowestPointAlong(segment);
-  // Delta/Woodcock Tracking
-  // First compute the majorante
-  double sigma_s, sigma_a, sigma_n;
+  Spectral sigma_s, sigma_a, sigma_n;
+  double prob_t, prob_n;
+  double altitude = geometry.ComputeAltitude(lowest_point);
   constituents.ComputeCollisionCoefficients(
-        geometry.ComputeAltitude(lowest_point), component, sigma_s, sigma_a);
-  double sigma_t_majorant = sigma_a + sigma_s;
+    altitude, sigma_s, sigma_a);
+  double sigma_t_majorant = (sigma_a + sigma_s).maxCoeff();
   double inv_sigma_t_majorant = 1./sigma_t_majorant;
   // Then start tracking.
   // - No russian roulette because the probability to arrive
@@ -68,92 +90,77 @@ Medium::InteractionSample Simple::SampleInteractionPoint(const RaySegment &segme
   // due to incorrect collisions the path tracer thinks that we are in a medium.
   constexpr int emergency_abort_max_num_iterations = 100;
   int iteration = 0;
-  while (++iteration)
+  while (++iteration < emergency_abort_max_num_iterations)
   {
-    if (iteration > emergency_abort_max_num_iterations)
-    {
-      smpl.weight[component] = 0.;
-      return smpl;
-    }
-
-    smpl.t -=std::log(sampler.Uniform01()) * inv_sigma_t_majorant;
+    smpl.t -= std::log(sampler.Uniform01()) * inv_sigma_t_majorant;
     if (smpl.t > segment.length)
     {
-      break;
+      return smpl;
     }
     else
     {
       const Double3 pos = segment.ray.PointAt(smpl.t);
+      altitude = geometry.ComputeAltitude(pos);
       constituents.ComputeCollisionCoefficients(
-            geometry.ComputeAltitude(pos), component, sigma_s, sigma_a);
+        altitude, sigma_s, sigma_a);
       sigma_n = sigma_t_majorant - sigma_s - sigma_a;
-      assert(sigma_n >= -1.e-3); // By definition of the majorante
+      assert(sigma_n.minCoeff() >= -1.e-3); // By definition of the majorante
+      TrackingDetail::ComputeProbabilitiesHistoryScheme(smpl.weight, {sigma_s, sigma_n}, {prob_t, prob_n});
       double r = sampler.Uniform01();
-      if (r < sigma_a * inv_sigma_t_majorant)
+      if (r < prob_t) // Scattering/Absorption
       {
-        smpl.weight[component] = 0.; // Absorption
+        smpl.weight *= inv_sigma_t_majorant / prob_t * sigma_s;
         return smpl;
       }
-      else if (r < (1. - sigma_n * inv_sigma_t_majorant))
+      else // Null collision
       {
-        return smpl; // Scattering
+        smpl.weight *= inv_sigma_t_majorant / prob_n * sigma_n;
       }
-      // Else we have a null collision.
     }
   }
   // At this point the particle escaped beyond the endpoint of the ray segment.
   // The sample weight must equal T(segment.length)/prob(t > segment.length)
-  // Fortunately the above version of delta tracking distributes samples according
-  // to p(t) = sigma_t*T(t), which ultimately yields a weight of 1.
   return smpl;
 }
 
 
 Spectral Simple::EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const
 {
+  Spectral estimate{1.};
   // The lowest point gives the largest collision coefficients along the path.
   auto lowest_point = geometry.ComputeLowestPointAlong(segment);
   double lowest_altitude = geometry.ComputeAltitude(lowest_point);
-  Spectral estimate{1.};
-  for (int lambda = 0; lambda < static_size<Spectral>(); ++lambda)
+  // First compute the majorante
+  Spectral sigma_s, sigma_a, sigma_n;
+  constituents.ComputeCollisionCoefficients(
+        lowest_altitude, sigma_s, sigma_a);
+  double sigma_t_majorant = (sigma_a + sigma_s).maxCoeff();
+  double inv_sigma_t_majorant = 1./sigma_t_majorant;
+  // Then start tracking.
+  double t = 0.;
+  int iteration = 0;
+  bool gogogo = true;
+  do
   {
-    if (context.beta[lambda] == 0.)
+    t -=std::log(sampler.Uniform01()) * inv_sigma_t_majorant;
+    if (t > segment.length)
     {
-      // No point computing something when the path weight of this wavelength is already zero.
-      // Which is the case when we fall back to single wavelengh sampling.
-      estimate[lambda] = 0.;
+      gogogo = false;
     }
     else
     {
-      // First compute the majorante
-      double sigma_s, sigma_a, sigma_n;
+      const Double3 pos = segment.ray.PointAt(t);
       constituents.ComputeCollisionCoefficients(
-            lowest_altitude, lambda, sigma_s, sigma_a);
-      double sigma_t_majorant = sigma_a + sigma_s;
-      double inv_sigma_t_majorant = 1./sigma_t_majorant;
-      // Then start tracking.
-      double t = 0.;
-      int iteration = 0;
-      do
-      {
-        t -=std::log(sampler.Uniform01()) * inv_sigma_t_majorant;
-        if (t > segment.length)
-        {
-          break;
-        }
-        else
-        {
-          const Double3 pos = segment.ray.PointAt(t);
-          constituents.ComputeCollisionCoefficients(
-                geometry.ComputeAltitude(pos), lambda, sigma_s, sigma_a);
-          sigma_n = sigma_t_majorant - sigma_s - sigma_a;
-          assert(sigma_n >= -1.e-3); // By definition of the majorante
-          estimate[lambda] *= sigma_n * inv_sigma_t_majorant;
-        }
-      }
-      while (TrackingDetail::RussianRouletteSurvival(estimate[lambda], iteration++, sampler));
-    } // contribution of this wavelength is nonzero?
+            geometry.ComputeAltitude(pos), sigma_s, sigma_a);
+      sigma_n = sigma_t_majorant - sigma_s - sigma_a;
+      assert(sigma_n.minCoeff() >= 0.); // By definition of the majorante
+      estimate *= sigma_n * inv_sigma_t_majorant;
+      
+      gogogo = TrackingDetail::RussianRouletteSurvival(
+        estimate.maxCoeff(), iteration++, sampler, [&estimate](double q) { estimate *= q; });
+    }
   }
+  while(gogogo);
   return estimate;
 }
 
