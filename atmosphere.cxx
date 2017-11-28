@@ -118,8 +118,7 @@ Medium::InteractionSample Simple::SampleInteractionPoint(const RaySegment &segme
       }
     }
   }
-  // At this point the particle escaped beyond the endpoint of the ray segment.
-  // The sample weight must equal T(segment.length)/prob(t > segment.length)
+  assert (false);
   return smpl;
 }
 
@@ -210,7 +209,7 @@ Medium::PhaseSample Simple::SamplePhaseFunction(const Double3 &incident_dir, con
   constexpr int NC = SimpleConstituents::NUM_CONSTITUENTS;
 
   Spectral prob_lambda;
-  Spectral prob_constituent_given_lambda[NC];
+  Spectral prob_constituent_given_lambda[NC]; // aka sigma_s,i / (sigma_s,0 + sigma_s,1)
   ComputeProbabilities(pos, context, prob_lambda, prob_constituent_given_lambda);
 
   int lambda = TowerSampling<NL>(prob_lambda.data(), sampler.Uniform01());
@@ -219,17 +218,18 @@ Medium::PhaseSample Simple::SamplePhaseFunction(const Double3 &incident_dir, con
     prob_constituent_given_lambda[1][lambda]
   };
   int constituent = TowerSampling<NC>(contiguous_probs, sampler.Uniform01());
-
-  double pf_pdf[SimpleConstituents::NUM_CONSTITUENTS];
+  int no_sampled_constituent = constituent==SimpleConstituents::MOLECULES ? SimpleConstituents::AEROSOLES : SimpleConstituents::MOLECULES;
   Medium::PhaseSample smpl =
       constituent==SimpleConstituents::MOLECULES ?
         constituents.phasefunction_rayleigh.SampleDirection(incident_dir, pos, sampler) :
         constituents.phasefunction_hg.SampleDirection(incident_dir, pos, sampler);
+  double pf_pdf[SimpleConstituents::NUM_CONSTITUENTS];
   pf_pdf[constituent] = smpl.pdf;
-  constituent==SimpleConstituents::MOLECULES ?
-    constituents.phasefunction_hg.Evaluate(incident_dir, pos, smpl.dir, &pf_pdf[SimpleConstituents::AEROSOLES]) :
-    constituents.phasefunction_rayleigh.Evaluate(incident_dir, pos, smpl.dir, &pf_pdf[SimpleConstituents::MOLECULES]);
-  smpl.value *= prob_constituent_given_lambda[constituent];
+  Spectral other_pf_value =
+    constituent==SimpleConstituents::MOLECULES ?
+      constituents.phasefunction_hg.Evaluate(incident_dir, pos, smpl.dir, &pf_pdf[SimpleConstituents::AEROSOLES]) :
+      constituents.phasefunction_rayleigh.Evaluate(incident_dir, pos, smpl.dir, &pf_pdf[SimpleConstituents::MOLECULES]);
+  smpl.value = prob_constituent_given_lambda[constituent]*smpl.value + prob_constituent_given_lambda[no_sampled_constituent]*other_pf_value;
   smpl.pdf = 0.;
   for (int c = 0; c<NC; ++c)
   {
