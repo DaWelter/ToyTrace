@@ -217,19 +217,17 @@ Medium::PhaseSample Simple::SamplePhaseFunction(const Double3 &incident_dir, con
     prob_constituent_given_lambda[0][lambda],
     prob_constituent_given_lambda[1][lambda]
   };
-  int constituent = TowerSampling<NC>(contiguous_probs, sampler.Uniform01());
-  int no_sampled_constituent = constituent==SimpleConstituents::MOLECULES ? SimpleConstituents::AEROSOLES : SimpleConstituents::MOLECULES;
-  Medium::PhaseSample smpl =
-      constituent==SimpleConstituents::MOLECULES ?
-        constituents.phasefunction_rayleigh.SampleDirection(incident_dir, pos, sampler) :
-        constituents.phasefunction_hg.SampleDirection(incident_dir, pos, sampler);
   double pf_pdf[SimpleConstituents::NUM_CONSTITUENTS];
+  
+  int constituent = TowerSampling<NC>(contiguous_probs, sampler.Uniform01());
+  int not_sampled_constituent = constituent==SimpleConstituents::MOLECULES ? SimpleConstituents::AEROSOLES : SimpleConstituents::MOLECULES;
+  
+  Medium::PhaseSample smpl = constituents.GetPhaseFunction(constituent).SampleDirection(incident_dir, pos, sampler);
   pf_pdf[constituent] = smpl.pdf;
-  Spectral other_pf_value =
-    constituent==SimpleConstituents::MOLECULES ?
-      constituents.phasefunction_hg.Evaluate(incident_dir, pos, smpl.dir, &pf_pdf[SimpleConstituents::AEROSOLES]) :
-      constituents.phasefunction_rayleigh.Evaluate(incident_dir, pos, smpl.dir, &pf_pdf[SimpleConstituents::MOLECULES]);
-  smpl.value = prob_constituent_given_lambda[constituent]*smpl.value + prob_constituent_given_lambda[no_sampled_constituent]*other_pf_value;
+  
+  Spectral other_pf_value = constituents.GetPhaseFunction(not_sampled_constituent).Evaluate(incident_dir, pos, smpl.dir, &pf_pdf[not_sampled_constituent]);
+  
+  smpl.value = prob_constituent_given_lambda[constituent]*smpl.value + prob_constituent_given_lambda[not_sampled_constituent]*other_pf_value;
   smpl.pdf = 0.;
   for (int c = 0; c<NC; ++c)
   {

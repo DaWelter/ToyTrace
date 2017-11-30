@@ -30,6 +30,7 @@ struct SimpleConstituents
   PhaseFunctions::HenleyGreenstein phasefunction_hg;
   PhaseFunctions::Rayleigh phasefunction_rayleigh;
 
+  inline const PhaseFunctions::PhaseFunction& GetPhaseFunction(int idx) const;
   inline void ComputeCollisionCoefficients(double altitude, int lambda_idx, double &sigma_s, double &sigma_a) const;
   inline void ComputeCollisionCoefficients(double altitude, Spectral &sigma_s, Spectral &sigma_a) const;
   inline void ComputeSigmaS(double altitude, Spectral* sigma_s_of_constituent) const;
@@ -90,6 +91,15 @@ inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, Sp
 
 
 
+const PhaseFunctions::PhaseFunction& SimpleConstituents::GetPhaseFunction(int idx) const
+{
+  using PF = PhaseFunctions::PhaseFunction;
+  return (idx==MOLECULES) ? 
+    static_cast<const PF&>(phasefunction_rayleigh) : 
+    static_cast<const PF&>(phasefunction_hg);
+}
+
+
 void SimpleConstituents::ComputeSigmaS(double altitude, Spectral* sigma_s_of_constituent) const
 {
   assert (altitude > lower_altitude_cutoff);
@@ -102,7 +112,7 @@ void SimpleConstituents::ComputeSigmaS(double altitude, Spectral* sigma_s_of_con
 }
 
 
-inline double SphereGeometry::ComputeAltitude(const Double3 &pos) const
+double SphereGeometry::ComputeAltitude(const Double3 &pos) const
 {
   double r = Length(pos - planet_center);
   double h = r - planet_radius;
@@ -110,7 +120,7 @@ inline double SphereGeometry::ComputeAltitude(const Double3 &pos) const
 }
 
 
-inline Double3 SphereGeometry::ComputeLowestPointAlong(const RaySegment &segment) const
+Double3 SphereGeometry::ComputeLowestPointAlong(const RaySegment &segment) const
 {
   Double3 center_to_org = segment.ray.org - planet_center;
   double t_lowest = -Dot(center_to_org, segment.ray.dir); // To planet center
