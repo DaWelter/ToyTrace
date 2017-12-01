@@ -164,107 +164,25 @@ Spectral Simple::EvaluateTransmission(const RaySegment &segment, Sampler &sample
 }
 
 
-void Simple::ComputeProbabilities(const Double3 &pos, const PathContext &context, Spectral &prob_lambda, Spectral *prob_constituent_given_lambda) const
-{
-  constexpr int NL = static_size<Spectral>();
-  constexpr int NC = SimpleConstituents::NUM_CONSTITUENTS;
-  double altitude = geometry.ComputeAltitude(pos);
-
-  double prob_lambda_normalization = 0.;
-
-  constituents.ComputeSigmaS(altitude, prob_constituent_given_lambda);
-  for (int lambda = 0; lambda<NL; ++lambda)
-  {
-    // For a given lambda, the normalization sum goes over the constituents.
-    double normalization = 0.;
-    for (int c=0; c<NC; ++c)
-    {
-      // The probability weight to select a constituent for sampling is
-      // just the coefficient in front of the respective scattering function.
-      normalization += prob_constituent_given_lambda[c][lambda];
-    }
-    assert(normalization > 0.);
-    for (int c=0; c<NC; ++c)
-    {
-      prob_constituent_given_lambda[c][lambda] /= normalization;
-    }
-    // The weights of the current path should be reflected in the probability
-    // to select some lambda. That is to prevent sampling a lambda which already
-    // has a very low weight, or zero as in single wavelength sampling mode.
-    // Add epsilon to protect against all zero beta.
-    prob_lambda[lambda] = normalization * (context.beta[lambda] + Epsilon);
-    prob_lambda_normalization += prob_lambda[lambda];
-  }
-  assert(prob_lambda_normalization > 0.);
-  for (int lambda = 0; lambda<NL; ++lambda)
-  {
-    prob_lambda[lambda] /= prob_lambda_normalization;
-  }
-}
-
-
 Medium::PhaseSample Simple::SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const
 {
-  constexpr int NL = static_size<Spectral>();
-  constexpr int NC = SimpleConstituents::NUM_CONSTITUENTS;
+  double altitude = geometry.ComputeAltitude(pos);
+  Spectral sigma_s[SimpleConstituents::NUM_CONSTITUENTS];
+  constituents.ComputeSigmaS(altitude, sigma_s);
 
-  Spectral prob_lambda;
-  Spectral prob_constituent_given_lambda[NC]; // aka sigma_s,i / (sigma_s,0 + sigma_s,1)
-  ComputeProbabilities(pos, context, prob_lambda, prob_constituent_given_lambda);
-
-  int lambda = TowerSampling<NL>(prob_lambda.data(), sampler.Uniform01());
-  double contiguous_probs[NC] = {
-    prob_constituent_given_lambda[0][lambda],
-    prob_constituent_given_lambda[1][lambda]
-  };
-  double pf_pdf[SimpleConstituents::NUM_CONSTITUENTS];
-  
-  int constituent = TowerSampling<NC>(contiguous_probs, sampler.Uniform01());
-  int not_sampled_constituent = constituent==SimpleConstituents::MOLECULES ? SimpleConstituents::AEROSOLES : SimpleConstituents::MOLECULES;
-  
-  Medium::PhaseSample smpl = constituents.GetPhaseFunction(constituent).SampleDirection(incident_dir, pos, sampler);
-  pf_pdf[constituent] = smpl.pdf;
-  
-  Spectral other_pf_value = constituents.GetPhaseFunction(not_sampled_constituent).Evaluate(incident_dir, pos, smpl.dir, &pf_pdf[not_sampled_constituent]);
-  
-  smpl.value = prob_constituent_given_lambda[constituent]*smpl.value + prob_constituent_given_lambda[not_sampled_constituent]*other_pf_value;
-  smpl.pdf = 0.;
-  for (int c = 0; c<NC; ++c)
-  {
-    for (int lambda = 0; lambda<NL; ++lambda)
-    {
-      smpl.pdf += pf_pdf[c]*prob_lambda[lambda]*prob_constituent_given_lambda[c][lambda];
-    }
-  }
-  return smpl;
+  return PhaseFunctions::Combined(context.beta, sigma_s[0], constituents.GetPhaseFunction(0), sigma_s[1], constituents.GetPhaseFunction(1))
+    .SampleDirection(incident_dir, sampler);
 }
 
 
 Spectral Simple::EvaluatePhaseFunction(const Double3 &incident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const
 {
-  constexpr int NL = static_size<Spectral>();
-  constexpr int NC = SimpleConstituents::NUM_CONSTITUENTS;
-
-  Spectral prob_lambda;
-  Spectral prob_constituent_given_lambda[NC];
-  ComputeProbabilities(pos, context, prob_lambda, prob_constituent_given_lambda);
-
-  if (pdf)
-    *pdf = 0.;
-  Spectral result{0.};
-  double pf_pdf[NC];
-  Spectral pf_val[NC];
-  pf_val[SimpleConstituents::AEROSOLES] = constituents.phasefunction_hg.Evaluate(incident_dir, pos, out_direction, &pf_pdf[SimpleConstituents::AEROSOLES]);
-  pf_val[SimpleConstituents::MOLECULES] = constituents.phasefunction_rayleigh.Evaluate(incident_dir, pos, out_direction, &pf_pdf[SimpleConstituents::MOLECULES]);
-  for (int c = 0; c<NC; ++c)
-  {
-    if (pdf) for (int lambda = 0; lambda<NL; ++lambda)
-    {
-      *pdf += pf_pdf[c]*prob_lambda[lambda]*prob_constituent_given_lambda[c][lambda];
-    }
-    result += prob_constituent_given_lambda[c]*pf_val[c];
-  }
-  return result;
+  double altitude = geometry.ComputeAltitude(pos);
+  Spectral sigma_s[SimpleConstituents::NUM_CONSTITUENTS];
+  constituents.ComputeSigmaS(altitude, sigma_s);
+  
+  return PhaseFunctions::Combined(context.beta, sigma_s[0], constituents.GetPhaseFunction(0), sigma_s[1], constituents.GetPhaseFunction(1))
+    .Evaluate(incident_dir, out_direction, pdf);
 }
 
 

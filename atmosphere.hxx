@@ -51,7 +51,6 @@ class Simple : public Medium
 {
   SimpleConstituents constituents;
   SphereGeometry geometry;
-  void ComputeProbabilities(const Double3 &pos, const PathContext &context, Spectral &prob_lambda, Spectral *prob_constituent_given_lambda) const;
 public:
   Simple(const Double3 &_planet_center, double _planet_radius, int _priority);
   InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;

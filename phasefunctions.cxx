@@ -19,7 +19,7 @@ Double3 mu_to_direction(double mu, double r2)
 
 
 
-Sample Uniform::SampleDirection(const Double3& reverse_incident_dir, const Double3 &pos, Sampler& sampler) const
+Sample Uniform::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
 {
   return Sample{
     SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare()),
@@ -28,7 +28,7 @@ Sample Uniform::SampleDirection(const Double3& reverse_incident_dir, const Doubl
   };
 }
 
-Spectral Uniform::Evaluate(const Double3& reverse_indcident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
+Spectral Uniform::Evaluate(const Double3& reverse_indcident_dir, const Double3& out_direction, double* pdf) const
 {
   if (pdf)
     *pdf = 1./UnitSphereSurfaceArea;
@@ -55,7 +55,7 @@ double value(double mu)
 }
 
 
-Sample Rayleigh::SampleDirection(const Double3& reverse_incident_dir, const Double3 &pos, Sampler& sampler) const
+Sample Rayleigh::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
 {
   auto m = OrthogonalSystemZAligned(-reverse_incident_dir);
   Double2 r = sampler.UniformUnitSquare();
@@ -70,7 +70,7 @@ Sample Rayleigh::SampleDirection(const Double3& reverse_incident_dir, const Doub
 }
 
 
-Spectral Rayleigh::Evaluate(const Double3& reverse_incident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
+Spectral Rayleigh::Evaluate(const Double3& reverse_incident_dir, const Double3& out_direction, double* pdf) const
 {
   auto val = RayleighDetail::value(Dot(-reverse_incident_dir, out_direction));
   if (pdf)
@@ -113,7 +113,7 @@ double value(double mu, double g)
 }
 
 
-Sample HenleyGreenstein::SampleDirection(const Double3& reverse_incident_dir, const Double3 &pos, Sampler& sampler) const
+Sample HenleyGreenstein::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
 {
   auto m = OrthogonalSystemZAligned(-reverse_incident_dir);
   Double2 r = sampler.UniformUnitSquare();
@@ -128,12 +128,73 @@ Sample HenleyGreenstein::SampleDirection(const Double3& reverse_incident_dir, co
 }
 
 
-Spectral HenleyGreenstein::Evaluate(const Double3& reverse_incident_dir, const Double3& pos, const Double3& out_direction, double* pdf) const
+Spectral HenleyGreenstein::Evaluate(const Double3& reverse_incident_dir, const Double3& out_direction, double* pdf) const
 {
   auto val = HenleyGreensteinDetail::value(Dot(-reverse_incident_dir, out_direction), g);
   if (pdf)
     *pdf = val;
   return Spectral{val};
 }
+
+
+PhaseFunctions::Sample Combined::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
+{
+  constexpr int NL = static_size<Spectral>();
+  constexpr int NC = NUM_CONSTITUENTS;
+  static_assert(NC == 2, "Must be 2 constituents");
+
+  int lambda = TowerSampling<NL>(prob_lambda.data(), sampler.Uniform01());
+  double contiguous_probs[NC] = {
+    prob_constituent_given_lambda[0][lambda],
+    prob_constituent_given_lambda[1][lambda]
+  };
+  double pf_pdf[NUM_CONSTITUENTS];
+  
+  int constituent = TowerSampling<NC>(contiguous_probs, sampler.Uniform01());
+  int not_sampled_constituent = constituent==0 ? 1 : 0;
+  
+  auto smpl = pf[constituent]->SampleDirection(reverse_incident_dir, sampler);
+  pf_pdf[constituent] = smpl.pdf;
+  
+  Spectral other_pf_value = pf[not_sampled_constituent]->Evaluate(reverse_incident_dir, smpl.dir, &pf_pdf[not_sampled_constituent]);
+  
+  smpl.value = prob_constituent_given_lambda[constituent]*smpl.value + prob_constituent_given_lambda[not_sampled_constituent]*other_pf_value;
+  smpl.pdf = 0.;
+  for (int c = 0; c<NC; ++c)
+  {
+    for (int lambda = 0; lambda<NL; ++lambda)
+    {
+      smpl.pdf += pf_pdf[c]*prob_lambda[lambda]*prob_constituent_given_lambda[c][lambda];
+    }
+  }
+  return smpl;
+}
+
+
+Spectral Combined::Evaluate(const Double3& reverse_indcident_dir, const Double3& out_direction, double* pdf) const
+{
+  constexpr int NL = static_size<Spectral>();
+  constexpr int NC = NUM_CONSTITUENTS;
+  static_assert(NC == 2, "Must be 2 constituents");
+
+  if (pdf)
+    *pdf = 0.;
+  Spectral result{0.};
+  double pf_pdf[NC];
+  Spectral pf_val[NC];
+  pf_val[0] = pf[0]->Evaluate(reverse_indcident_dir, out_direction, &pf_pdf[0]);
+  pf_val[1] = pf[1]->Evaluate(reverse_indcident_dir, out_direction, &pf_pdf[1]);
+  for (int c = 0; c<NC; ++c)
+  {
+    if (pdf) for (int lambda = 0; lambda<NL; ++lambda)
+    {
+      *pdf += pf_pdf[c]*prob_lambda[lambda]*prob_constituent_given_lambda[c][lambda];
+    }
+    result += prob_constituent_given_lambda[c]*pf_val[c];
+  }
+  return result;
+}
+
+
 
 }

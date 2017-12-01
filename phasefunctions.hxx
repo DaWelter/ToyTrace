@@ -4,6 +4,7 @@
 
 class Sampler;
 
+void WeightsToCombinationProbabilities(Spectral &prob_lambda, Spectral *prob_constituent_given_lambda, int num_constituents); // forward decl. TODO find place for this.
 
 namespace PhaseFunctions
 {
@@ -19,16 +20,16 @@ struct Sample
 class PhaseFunction
 {
   public:
-    virtual Sample SampleDirection(const Double3 &reverse_incident_dir, const Double3 &pos, Sampler &sampler) const = 0;
-    virtual Spectral Evaluate(const Double3 &reverse_indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const = 0;
+    virtual Sample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const = 0;
+    virtual Spectral Evaluate(const Double3 &reverse_indcident_dir, const Double3 &out_direction, double *pdf) const = 0;
 };
 
 
 class Uniform : public PhaseFunction
 {
   public:
-    Sample SampleDirection(const Double3 &reverse_incident_dir, const Double3 &pos, Sampler &sampler) const override;
-    Spectral Evaluate(const Double3 &reverse_indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const override;
+    Sample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const override;
+    Spectral Evaluate(const Double3 &reverse_indcident_dir, const Double3 &out_direction, double *pdf) const override;
 };
 
 
@@ -36,8 +37,8 @@ class Uniform : public PhaseFunction
 class Rayleigh : public PhaseFunction
 {
   public:
-    Sample SampleDirection(const Double3 &reverse_incident_dir, const Double3 &pos, Sampler &sampler) const override;
-    Spectral Evaluate(const Double3 &reverse_indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const override;
+    Sample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const override;
+    Spectral Evaluate(const Double3 &reverse_indcident_dir, const Double3 &out_direction, double *pdf) const override;
 };
 
 
@@ -49,8 +50,68 @@ class HenleyGreenstein : public PhaseFunction
     HenleyGreenstein(double _g)
       : g(_g) 
       {}
-    Sample SampleDirection(const Double3 &reverse_incident_dir, const Double3 &pos, Sampler &sampler) const override;
-    Spectral Evaluate(const Double3 &reverse_indcident_dir, const Double3 &pos, const Double3 &out_direction, double *pdf) const override;
+    Sample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const override;
+    Spectral Evaluate(const Double3 &reverse_indcident_dir, const Double3 &out_direction, double *pdf) const override;
 };
+
+
+class Combined : public PhaseFunction
+{
+    static constexpr int NUM_CONSTITUENTS = 2;
+    const PhaseFunction* pf[2];
+    Spectral prob_lambda;
+    Spectral prob_constituent_given_lambda[2];
+  public:
+    Combined(const Spectral &lambda_weight, const Spectral &weight1, const PhaseFunction &pf1, const Spectral &weight2, const PhaseFunction &pf2);
+    
+    Sample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const override;
+    Spectral Evaluate(const Double3 &reverse_indcident_dir, const Double3 &out_direction, double *pdf) const override;
+};
+
+
+/* Inplace transformation of weighting factors pertaining to some components to selection probabilities of that components.
+ * Example phase function sampling:
+ * prob_lambda [In]: Path throughput [Out]: Probability to select each lambda.
+ * prob_constituent_given_lambda [In]: Weighting factors per wavelength of each component. [Out] Probability to select each component conditioned on lambda.
+ */
+inline void WeightsToCombinationProbabilities(Spectral &prob_lambda, Spectral *prob_constituent_given_lambda, int num_constituents)
+{
+  double prob_lambda_normalization = 0.;
+  for (int lambda = 0; lambda<static_size<Spectral>(); ++lambda)
+  {
+    // For a given lambda, the normalization sum goes over the constituents.
+    double normalization = 0.;
+    for (int c=0; c<num_constituents; ++c)
+    {
+      // The probability weight to select a constituent for sampling is
+      // just the coefficient in front of the respective scattering function.
+      normalization += prob_constituent_given_lambda[c][lambda];
+    }
+    assert(normalization > 0.);
+    for (int c=0; c<num_constituents; ++c)
+    {
+      prob_constituent_given_lambda[c][lambda] /= normalization;
+    }
+    // The weights of the current path should be reflected in the probability
+    // to select some lambda. That is to prevent sampling a lambda which already
+    // has a very low weight, or zero as in single wavelength sampling mode.
+    // Add epsilon to protect against all zero beta.
+    prob_lambda[lambda] = normalization * (prob_lambda[lambda] + Epsilon);
+    prob_lambda_normalization += prob_lambda[lambda];
+  }
+  assert(prob_lambda_normalization > 0.);
+  for (int lambda = 0; lambda<static_size<Spectral>(); ++lambda)
+  {
+    prob_lambda[lambda] /= prob_lambda_normalization;
+  }
+}
+
+
+inline Combined::Combined(const Spectral& lambda_weight, const Spectral& weight1, const PhaseFunctions::PhaseFunction& pf1, const Spectral& weight2, const PhaseFunctions::PhaseFunction& pf2)
+  : pf{&pf1, &pf2}, prob_lambda(lambda_weight), prob_constituent_given_lambda{weight1, weight2}
+{
+  WeightsToCombinationProbabilities(prob_lambda, prob_constituent_given_lambda, NUM_CONSTITUENTS);
+}
+
 
 }
