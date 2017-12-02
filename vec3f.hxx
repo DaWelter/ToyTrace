@@ -55,18 +55,10 @@ typedef Vec<long, 2> Long3;
 #define VECD Vec<T, d>
 #endif
 
-typedef Eigen::Array<double, 3, 1> Spectral;
-
 template<class T>
 constexpr int static_size()
 {
   return 0;
-}
-
-template<>
-constexpr int static_size<Spectral>()
-{
-  return Spectral::RowsAtCompileTime;
 }
 
 

@@ -257,7 +257,7 @@ public:
       if (isfinite)
       {
         for (int i=0; i<3; ++i)
-          rgb[i] = average[i]*255.999;
+          rgb[i] = Color::LinearToSRGB(average[i])*255.999;
         dest.set_pixel(x, dest.height() - 1 - y, rgb[0], rgb[1], rgb[2]);
       }
     }
@@ -427,7 +427,7 @@ public:
       return Spectral{0.};
 
     auto transmittance = TransmittanceEstimate(segment_to_light, (intersection ? intersection->hitid : HitId()), medium_tracker_parent, context);
-    
+
     auto sample_value = (transmittance * light_sample.measurement_contribution * scatter_factor)
                         * d_factor / (light_sample.pdf * (light_sample.is_direction ? 1. : Sqr(segment_to_light.length)) * pmf_of_light);
 

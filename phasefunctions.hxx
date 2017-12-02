@@ -1,6 +1,7 @@
 #pragma once
 
 #include"vec3f.hxx"
+#include"spectral.hxx"
 
 class Sampler;
 

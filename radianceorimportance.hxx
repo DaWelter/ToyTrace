@@ -1,5 +1,6 @@
 #pragma once
 #include "vec3f.hxx"
+#include "spectral.hxx"
 #include "ray.hxx"
 #include "sampler.hxx"
 

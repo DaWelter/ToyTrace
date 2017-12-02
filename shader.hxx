@@ -4,6 +4,7 @@
 #include <memory>
 
 #include"vec3f.hxx"
+#include"spectral.hxx"
 #include"texture.hxx"
 #include"phasefunctions.hxx"
 
@@ -163,5 +164,6 @@ public:
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;
   virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
 };
+
 
 #endif
