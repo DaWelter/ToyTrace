@@ -32,8 +32,6 @@ class Vec : public Eigen::Matrix<T, d, 1>
 
 
 #if 0
-typedef Eigen::Matrix<int, dim, 1> Intd;
-typedef Eigen::Matrix<double, dim, 1> Doubled;
 typedef Eigen::Matrix<int, 3, 1> Int3;
 typedef Eigen::Matrix<int, 2, 1> Int2;
 typedef Eigen::Matrix<double, 3, 1> Double3;
@@ -43,8 +41,6 @@ typedef Eigen::Matrix<double, 2, 1> Float2;
 #define VECDARG class T,int d
 #define VECD Eigen::Matrix<T, d, 1>
 #else
-//typedef Vec<int, dim> Intd;
-//typedef Vec<double, dim> Doubled;
 typedef Vec<int, 3> Int3;
 typedef Vec<int, 2> Int2;
 typedef Vec<bool, 3> Bool3;
@@ -123,44 +119,44 @@ inline std::istream& operator>>(std::istream &is, VECD &v)
 }
 
 
-template <class U, class T, int dim>
-inline Vec<U, dim> Cast(const Vec<T, dim> &v)
-{
-  return v.template cast<U>().eval();
-}
+// template <class U, class T, int dim>
+// inline Vec<U, dim> Cast(const Vec<T, dim> &v)
+// {
+//   return v.template cast<U>().eval();
+// }
 
 template<class T>
-inline T Cross( const Vec<T,2>& u, const Vec<T,2> &v )
+inline T Cross( const Eigen::Matrix<T,2,1>& u, const Eigen::Matrix<T,2,1> &v )
 {
   return u.x()*v.y()-u.y()*v.x();
 }
 
 template<class Derived1, class Derived2>
-auto Cross( const Eigen::MatrixBase<Derived1>& u, const Eigen::MatrixBase<Derived2> &v ) -> decltype(u.cross(v))
+auto Cross( const Eigen::MatrixBase<Derived1>& u, const Eigen::MatrixBase<Derived2> &v )
 {
   return u.cross(v);
 }
 
 template<class Derived1, class Derived2>
-auto Product( const Eigen::MatrixBase<Derived1>& u, const Eigen::MatrixBase<Derived2> &v ) -> decltype(u.cwiseProduct(v))
+auto Product( const Eigen::MatrixBase<Derived1>& u, const Eigen::MatrixBase<Derived2> &v )
 {
   return u.cwiseProduct(v);
 }
 
 template<class Derived1, class Derived2>
-auto Dot(const Eigen::MatrixBase<Derived1> &u, const Eigen::MatrixBase<Derived2> &v ) -> decltype(u.dot(v))
+auto Dot(const Eigen::MatrixBase<Derived1> &u, const Eigen::MatrixBase<Derived2> &v )
 {
   return u.dot(v);
 }
 
 template<class Derived>
-auto Length(const Eigen::MatrixBase<Derived> &a) -> decltype(a.norm())
+auto Length(const Eigen::MatrixBase<Derived> &a)
 {
   return a.norm();
 }
 
 template<class Derived>
-auto LengthSqr(const Eigen::MatrixBase<Derived> &a) -> decltype(a.squaredNorm())
+auto LengthSqr(const Eigen::MatrixBase<Derived> &a)
 {
   return a.squaredNorm();
 }
@@ -172,7 +168,7 @@ inline void Normalize(Eigen::MatrixBase<Derived>& u)
 }
 
 template<class Derived>
-auto Normalized(const Eigen::MatrixBase<Derived>& u) -> decltype(u.normalized())
+auto Normalized(const Eigen::MatrixBase<Derived>& u)
 {
   return u.normalized();
 }
