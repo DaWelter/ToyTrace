@@ -1,6 +1,7 @@
 #include "shader.hxx"
 #include "ray.hxx"
 #include "scene.hxx"
+#include "shader_util.hxx"
 
 namespace
 {
@@ -288,96 +289,42 @@ PhaseFunctions::Sample HomogeneousMedium::SamplePhaseFunction(const Double3& inc
 
 Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler, const PathContext &context) const
 {
-#if 0
-  Medium::InteractionSample smpl;
-  /* Collision coefficients that vary with wavelength are handled by a probability
-   * density for t that is a sum, i.e. p(t) = 1/n sum_i=1..n sigma_t,i exp(-sigma_t,i t).
-   * See PBRT pg 893.
-   * This is equivalent to using the balance heuristic for strategies
-   * which mean taking a sample implied by the transmittance of some selected channel.
-   * The balance heuristic would compute weights which would result in identical
-   * smpl.weight coefficients as computed here.
-   * Veach shows (p.g. 275) that in the case of a "one-sample" model which I
-   * have here this is the best MIS scheme one can use.
-  */
-  Spectral weights{1./static_size< Spectral >()};
-  double r = sampler.Uniform01();
-  int component = r<weights[0] ? 0 : (r<(weights[1]+weights[0]) ? 1 : 2);
-  smpl.t = - std::log(1-sampler.Uniform01()) / sigma_ext[component];
-  smpl.t = smpl.t < LargeNumber ? smpl.t : LargeNumber;
-  double t = std::min(smpl.t, segment.length);
-  Spectral transmittance = (-sigma_ext * t).exp();
-  if (smpl.t < segment.length)
-  {
-    
-    double pdf = (weights * sigma_ext * transmittance).sum();
-    smpl.weight = sigma_s * transmittance / pdf;
-  }
-  else
-  {
-    double p_surf = (weights * transmittance).sum();
-    smpl.weight = transmittance / p_surf;
-  }
-  return smpl;
-#else
-  /* Split the integral into one summand per wavelength.
-   * However, evaluate only one of the summands probabilistically
-   * and ommit the other ones, akin to russian roulette termination.
-   * Sample the volume marching integral based on the selected wavelength.
-   * Regardless, I transport the full spectrum with each term.
-   * Thus I can form a weighted sum over the summands, with coefficients
-   * depending on the summand and lambda. For much different collision
-   * coefficients (sigma_ext) the coefficients should be identical to the
-   * Kroneker Delta, so that one term transports exactly one wavelength.
-   * However if all sigma_ext_lamba are equal then the method should
-   * transport the full spectrum with the sample currently taken. Thus,
-   * recovering the sampling method for monochromatic media.
-   * TODO: Generalize for more then 3 wavelengths.
-   */
   assert(!context.beta.isZero());
-  Spectral lambda_selection_prob = context.beta.abs();
-  lambda_selection_prob /= lambda_selection_prob.sum();
-
-#if 0
-  // Strict single wavelength sampling!
-  Spectral combine_weights[] = {
-    Spectral{1, 0, 0},
-    Spectral{0, 1, 0},
-    Spectral{0, 0, 1}
+  Medium::InteractionSample smpl{
+    0.,
+    Spectral{1.}
   };
-#else
-  Spectral lambda_filter_base = context.beta * sigma_ext;
-  double lambda_filter_min = lambda_filter_base.minCoeff();
-  double lambda_filter_max = lambda_filter_base.maxCoeff();
-  double f = (lambda_filter_max - lambda_filter_min)/(std::abs(lambda_filter_max) + std::abs(lambda_filter_min));
-  f = f<0.33 ? 0. : 1.;
-  double f_eq = (1.-f) / static_size< Spectral >();
-  Spectral combine_weights[] = {
-    Spectral{f + f_eq, f_eq, f_eq },
-    Spectral{f_eq, f + f_eq, f_eq },
-    Spectral{f_eq, f_eq, f + f_eq }
-  };
-#endif
-
-  Medium::InteractionSample smpl;
-  int component = TowerSampling<static_size<Spectral>()>(
-        lambda_selection_prob.data(),
-        sampler.Uniform01());
-  smpl.t = - std::log(sampler.Uniform01()) / sigma_ext[component];
-  smpl.t = smpl.t < LargeNumber ? smpl.t : LargeNumber;
-  double t = std::min(smpl.t, segment.length);
-  Spectral transmittance = (-sigma_ext * t).exp();
-  if (smpl.t < segment.length)
+  double sigma_t_majorant = sigma_ext.maxCoeff();
+  double inv_sigma_t_majorant = 1./sigma_t_majorant;
+  constexpr int emergency_abort_max_num_iterations = 100;
+  int iteration = 0;
+  while (++iteration < emergency_abort_max_num_iterations)
   {
-    smpl.weight = combine_weights[component] * sigma_s * transmittance / (sigma_ext[component] * transmittance[component] * lambda_selection_prob[component]);
+    smpl.t -= std::log(sampler.Uniform01()) * inv_sigma_t_majorant;
+    if (smpl.t > segment.length)
+    {
+      return smpl;
+    }
+    else
+    {
+      Spectral sigma_n = sigma_t_majorant - sigma_ext;
+      assert(sigma_n.minCoeff() >= -1.e-3); // By definition of the majorante
+      double prob_t, prob_n;
+      TrackingDetail::ComputeProbabilitiesHistoryScheme(smpl.weight, {sigma_s, sigma_n}, {prob_t, prob_n});
+      double r = sampler.Uniform01();
+      if (r < prob_t) // Scattering/Absorption
+      {
+        smpl.weight *= inv_sigma_t_majorant / prob_t * sigma_s;
+        return smpl;
+      }
+      else // Null collision
+      {
+        smpl.weight *= inv_sigma_t_majorant / prob_n * sigma_n;
+      }
+    }
   }
-  else
-  {
-    double p_surf = transmittance[component] * lambda_selection_prob[component];
-    smpl.weight = combine_weights[component] * transmittance / p_surf;
-  }
+  assert (false);
   return smpl;
-#endif
 }
 
 
