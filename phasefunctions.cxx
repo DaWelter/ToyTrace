@@ -9,8 +9,8 @@ namespace
 // Incidient direction is assumed +z. 
 Double3 mu_to_direction(double mu, double r2)
 {
-  const double sn = std::sin(Pi * r2);
-  const double cs = std::cos(Pi * r2);
+  const double sn = std::sin(Pi*2.* r2);
+  const double cs = std::cos(Pi*2.* r2);
   const double z = mu;
   const double rho = std::sqrt(1. - z*z);
   return Double3{sn*rho, cs*rho, z};
@@ -22,7 +22,7 @@ Double3 mu_to_direction(double mu, double r2)
 Sample Uniform::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
 {
   return Sample{
-    SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare()),
+    SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare()),
     Spectral{1./UnitSphereSurfaceArea},
     1./UnitSphereSurfaceArea
   };
