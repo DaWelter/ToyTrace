@@ -8,11 +8,13 @@
 *.swp # create by vim
 *.log
 .fuse_*
+.ipynb_checkpoints
 
 #pycharm project files
 .idea
 
 #CMake stuff
+CMakeLists.txt.user
 CMakeCache.txt
 CMakeFiles
 Makefile
