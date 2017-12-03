@@ -96,7 +96,7 @@ public:
 class InvisibleShader : public Shader
 {
 public:
-  InvisibleShader() : Shader(IS_PASSTHROUGH) {}
+  InvisibleShader() : Shader(IS_PASSTHROUGH|REFLECTION_IS_SPECULAR|TRANSMISSION_IS_SPECULAR) {}
   BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
   Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
 };
