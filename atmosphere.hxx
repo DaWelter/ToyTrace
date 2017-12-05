@@ -20,7 +20,7 @@ struct SimpleConstituents
   static constexpr int AEROSOLES = 1;
   struct SealevelQuantities
   {
-    Spectral sigma_s, sigma_a;
+    Spectral3 sigma_s, sigma_a;
   };
   static constexpr int NUM_CONSTITUENTS = 2;
   SealevelQuantities at_sealevel[NUM_CONSTITUENTS];
@@ -32,8 +32,8 @@ struct SimpleConstituents
 
   inline const PhaseFunctions::PhaseFunction& GetPhaseFunction(int idx) const;
   inline void ComputeCollisionCoefficients(double altitude, int lambda_idx, double &sigma_s, double &sigma_a) const;
-  inline void ComputeCollisionCoefficients(double altitude, Spectral &sigma_s, Spectral &sigma_a) const;
-  inline void ComputeSigmaS(double altitude, Spectral* sigma_s_of_constituent) const;
+  inline void ComputeCollisionCoefficients(double altitude, Spectral3 &sigma_s, Spectral3 &sigma_a) const;
+  inline void ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent) const;
 };
 
 
@@ -54,9 +54,9 @@ class Simple : public Medium
 public:
   Simple(const Double3 &_planet_center, double _planet_radius, int _priority);
   InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
-  Spectral EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
+  Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
   PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;
-  Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
+  Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
 };
 
 
@@ -74,12 +74,12 @@ inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, in
   }
 }
 
-inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, Spectral& sigma_s, Spectral& sigma_a) const
+inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, Spectral3& sigma_s, Spectral3& sigma_a) const
 {
   assert (altitude > lower_altitude_cutoff);
   altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
-  sigma_a = Spectral{0.};
-  sigma_s = Spectral{0.};
+  sigma_a = Spectral3{0.};
+  sigma_s = Spectral3{0.};
   for (int i=0; i<NUM_CONSTITUENTS; ++i)
   {
     double rho_relative = std::exp(-inv_scale_height[i] * altitude);
@@ -99,7 +99,7 @@ const PhaseFunctions::PhaseFunction& SimpleConstituents::GetPhaseFunction(int id
 }
 
 
-void SimpleConstituents::ComputeSigmaS(double altitude, Spectral* sigma_s_of_constituent) const
+void SimpleConstituents::ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent) const
 {
   assert (altitude > lower_altitude_cutoff);
   altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;

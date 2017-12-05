@@ -20,14 +20,14 @@ struct PathContext
   PathContext() :
     beta{1.}
   {}
-  Spectral beta;
+  Spectral3 beta;
 };
 
 
 struct BSDFSample
 {
   Double3 dir;
-  Spectral scatter_function;
+  Spectral3 scatter_function;
   double pdf;
 };
 
@@ -49,7 +49,7 @@ public:
   Shader(int _flags = 0) : flags(_flags) {}
   virtual ~Shader() {}
   virtual BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const = 0;
-  virtual Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, double *pdf) const = 0;
+  virtual Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, double *pdf) const = 0;
   bool IsReflectionSpecular() const { return flags & REFLECTION_IS_SPECULAR; }
   bool IsPassthrough() const { return flags & IS_PASSTHROUGH; }
 };
@@ -57,38 +57,38 @@ public:
 
 class DiffuseShader : public Shader
 {
-  Spectral kr_d; // between zero and 1/Pi.
+  Spectral3 kr_d; // between zero and 1/Pi.
   std::unique_ptr<Texture> diffuse_texture; // TODO: Share textures among shaders?
 public:
-  DiffuseShader(const Spectral &reflectance, std::unique_ptr<Texture> _diffuse_texture);
+  DiffuseShader(const Spectral3 &reflectance, std::unique_ptr<Texture> _diffuse_texture);
   BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
-  Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
+  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
 };
 
 
 
 class SpecularReflectiveShader : public Shader
 {
-  Spectral kr_s;
+  Spectral3 kr_s;
 public:
-  SpecularReflectiveShader(const Spectral &reflectance);
+  SpecularReflectiveShader(const Spectral3 &reflectance);
   BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
-  Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
+  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
 };
 
 
 class MicrofacetShader : public Shader
 {
-  Spectral kr_s;
+  Spectral3 kr_s;
   double alpha;
   std::unique_ptr<Texture> glossy_texture;
 public:
   MicrofacetShader(
-    const Spectral &_glossy_reflectance, std::unique_ptr<Texture> _glossy_texture,
+    const Spectral3 &_glossy_reflectance, std::unique_ptr<Texture> _glossy_texture,
     double _glossy_exponent
   );
   BSDFSample SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
-  Spectral EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
 };
 
 
@@ -98,7 +98,7 @@ class InvisibleShader : public Shader
 public:
   InvisibleShader() : Shader(IS_PASSTHROUGH|REFLECTION_IS_SPECULAR|TRANSMISSION_IS_SPECULAR) {}
   BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const override;
-  Spectral EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
+  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double *pdf) const override;
 };
 
 
@@ -112,7 +112,7 @@ public:
     // Following PBRT pg 893, the returned weight is either
     // beta_surf = T(t_intersect)/p_surf if the sampled t lies beyond the end of the ray, i.e. t > t_intersect, or
     // beta_med = sigma_s(t) T(t) / p(t) 
-    Spectral weight;
+    Spectral3 weight;
   };
   using PhaseSample = PhaseFunctions::Sample;
   
@@ -120,9 +120,9 @@ public:
   Medium(int _priority) : priority(_priority) {}
   virtual ~Medium() {}
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const = 0;
-  virtual Spectral EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const = 0;
+  virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const = 0;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const = 0;
-  virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
+  virtual Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
 };
 
 
@@ -132,23 +132,23 @@ class VacuumMedium : public Medium
 public:
   VacuumMedium() : Medium(-1) {}
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
-  virtual Spectral EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
+  virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;
-  virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
+  virtual Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
 };
 
 
 class HomogeneousMedium : public Medium
 {
-  Spectral sigma_s, sigma_a, sigma_ext;
+  Spectral3 sigma_s, sigma_a, sigma_ext;
 public:
   std::unique_ptr<PhaseFunctions::PhaseFunction> phasefunction; // filled by parser
 public:
-  HomogeneousMedium(const Spectral &_sigma_s, const Spectral &_sigma_a, int _priority); 
+  HomogeneousMedium(const Spectral3 &_sigma_s, const Spectral3 &_sigma_a, int _priority); 
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const;
-  virtual Spectral EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
+  virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;
-  virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
+  virtual Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
 };
 
 
@@ -160,9 +160,9 @@ public:
 public:
   MonochromaticHomogeneousMedium(double _sigma_s, double _sigma_a, int _priority); 
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
-  virtual Spectral EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
+  virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;
-  virtual Spectral EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
+  virtual Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
 };
 
 

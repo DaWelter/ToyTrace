@@ -98,7 +98,7 @@ public:
     lineno{0},
     filename(_path_hint)
   {
-    shaders.set_and_activate("default", new DiffuseShader(Double3(0.8, 0.8, 0.8), nullptr));
+    shaders.set_and_activate("default", new DiffuseShader(Spectral3(0.8, 0.8, 0.8), nullptr));
     currentTransform = decltype(currentTransform)::Identity();
     if (!filename.empty())
     {
@@ -382,7 +382,7 @@ void NFFParser::Parse()
     
     if (!strcmp(token,"diffuse"))
     {
-      Spectral rgb;
+      Spectral3 rgb;
       double kd;
       char name[LINESIZE];
       int num = std::sscanf(line.c_str(),"diffuse %s %lg %lg %lg %lg\n",name, &rgb[0],&rgb[1],&rgb[2],&kd);
@@ -410,7 +410,7 @@ void NFFParser::Parse()
     
     if (!strcmp(token,"specularreflective"))
     {
-      Spectral rgb;
+      Spectral3 rgb;
       double k;
       char name[LINESIZE];
       int num = std::sscanf(line.c_str(),"specularreflective %s %lg %lg %lg %lg\n",name, &rgb[0],&rgb[1],&rgb[2],&k);
@@ -426,7 +426,7 @@ void NFFParser::Parse()
     if (!strcmp(token,"glossy"))
     {
       double k, phong_exponent;
-      Spectral kd_rgb, ks_rgb;
+      Spectral3 kd_rgb, ks_rgb;
       std::unique_ptr<Texture> diffuse_texture, glossy_texture;
       char name[LINESIZE];
       
@@ -460,7 +460,7 @@ void NFFParser::Parse()
     
     if (!strcmp(token, "medium"))
     {
-      Spectral sigma_s{0.}, sigma_a{1.};
+      Spectral3 sigma_s{0.}, sigma_a{1.};
       char name[LINESIZE];
       int num = std::sscanf(line.c_str(), "medium %s %lg %lg %lg %lg %lg %lg\n", name, &sigma_s[0], &sigma_s[1], &sigma_s[2], &sigma_a[0], &sigma_a[1], &sigma_a[2]);
       if(num == 1)
@@ -540,7 +540,7 @@ void NFFParser::Parse()
     if (!strcmp(token, "lddirection"))
     {
       Double3 dir_out;
-      Spectral col;
+      Spectral3 col;
       int num = sscanf(line.c_str(),"lddirection %lg %lg %lg %lg %lg %lg",
           &dir_out[0],&dir_out[1],&dir_out[2],
           &col[0],&col[1],&col[2]);
@@ -560,7 +560,7 @@ void NFFParser::Parse()
     if (!strcmp(token, "lddome"))
     {
       Double3 dir_up;
-      Spectral col;
+      Spectral3 col;
       int num = sscanf(line.c_str(),"lddome %lg %lg %lg %lg %lg %lg",
           &dir_up[0],&dir_up[1],&dir_up[2],
           &col[0],&col[1],&col[2]);
@@ -581,14 +581,14 @@ void NFFParser::Parse()
   if (!strcmp(token,"l")) 
 	{
 		Double3 pos;
-    Spectral col;
+    Spectral3 col;
 		int num = sscanf(line.c_str(),"l %lg %lg %lg %lg %lg %lg",
 			   &pos[0],&pos[1],&pos[2],
 			   &col[0],&col[1],&col[2]);
     col *= 1.0/255.9999;
 		if (num == 3) {
 			// light source with position only
-			col = Spectral(1,1,1);
+			col = Spectral3(1,1,1);
 			scene->AddLight(std::make_unique<PointLight>(col,pos));	
 		} else if (num == 6) {
 			// light source with position and color

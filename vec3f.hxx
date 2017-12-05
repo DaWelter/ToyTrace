@@ -207,19 +207,31 @@ inline OrthogonalSystemZAligned(const Eigen::MatrixBase<Derived> &_Z)
 }
 
 
-template<int n>
-inline int TowerSampling(const double *probs, double r)
+template<int n_, class T>
+inline int TowerSampling(const T *probs, T r)
 {
-  if (r < probs[n-1])
-    return n-1;
-  r -= probs[n-1];
-  return TowerSampling<n-1>(probs, r);
-}
-
-template<>
-inline int TowerSampling<0>(const double *probs, double r)
-{
-  return 0;
+  // |- p0 -|- p1 -|- p2 -|- p3 -|
+  //            r <--------------| // r falls in one of those bins.
+  // Linear search. Measure r from the "rear".
+  int n = n_-1;
+  while (r >= probs[n] && n>0)
+  {
+    // Shed the last bin.
+    r -= probs[n];
+    --n;
+  }
+  return n;
+//   if (n == 0)
+//   {
+//     return 0;
+//   }
+//   else
+//   {
+//     if (r < probs[n-1])
+//       return n-1;
+//     r -= probs[n-1];
+//     return TowerSampling<n-1>(probs, r);
+//   }
 }
 
 

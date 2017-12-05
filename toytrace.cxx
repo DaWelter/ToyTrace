@@ -10,10 +10,10 @@
 class Worker
 {
   const Scene &scene;
-  SpectralImageBuffer &buffer;
+  Spectral3ImageBuffer &buffer;
   PathTracing algo;
   //NormalVisualizer algo;
-  const int pixel_stride = 64 / sizeof(Spectral); // Because false sharing.
+  const int pixel_stride = 64 / sizeof(Spectral3); // Because false sharing.
   int num_pixels;
   std::atomic_int &shared_pixel_index;
   std::atomic_int shared_request, shared_state;
@@ -35,7 +35,7 @@ public:
     REQUEST_GO        = 2,
   };
   
-  Worker(std::atomic_int &_shared_pixel_index, SpectralImageBuffer &_buffer, const Scene &_scene, RenderingParameters &render_params) :
+  Worker(std::atomic_int &_shared_pixel_index, Spectral3ImageBuffer &_buffer, const Scene &_scene, RenderingParameters &render_params) :
     shared_request(REQUEST_NONE),
     shared_state(THREAD_WAITING),
     shared_pixel_index(_shared_pixel_index),
@@ -141,7 +141,7 @@ private:
       const int nsmpl = samples_per_pixel;
       for(int i=0;i<nsmpl;i++)
       {
-        Spectral smpl = algo.MakePrettyPixel(pixel_index);
+        Spectral3 smpl = algo.MakePrettyPixel(pixel_index);
         buffer.Insert(pixel_index, smpl);
       }
     }
@@ -233,7 +233,7 @@ int main(int argc, char *argv[])
   
   auto start_time = std::chrono::steady_clock::now();
   
-  SpectralImageBuffer buffer{render_params.width, render_params.height};
+  Spectral3ImageBuffer buffer{render_params.width, render_params.height};
 
   if (render_params.num_threads > 0)
   { 
@@ -315,7 +315,7 @@ int main(int argc, char *argv[])
             int pixel_index = scene.GetCamera().PixelToUnit({x, y});
             for (int s = 0; s < samples_per_pixel_per_iteration; ++s)
             {
-              Spectral smpl = algo.MakePrettyPixel(pixel_index);
+              Spectral3 smpl = algo.MakePrettyPixel(pixel_index);
               buffer.Insert(pixel_index, smpl);
             }
           }
@@ -331,7 +331,7 @@ int main(int argc, char *argv[])
     {
       int pixel_index = scene.GetCamera().PixelToUnit(
         {render_params.pixel_x, render_params.pixel_y});
-      Spectral smpl = algo.MakePrettyPixel(pixel_index);
+      Spectral3 smpl = algo.MakePrettyPixel(pixel_index);
       buffer.Insert(pixel_index, smpl);
       buffer.ToImage(bm, render_params.pixel_y, render_params.pixel_y+1);
       display.show(bm);

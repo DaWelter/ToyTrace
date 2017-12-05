@@ -22,9 +22,9 @@ public:
     SCATTER_SURFACE = 's'
   };
   PathLogger();
-  void AddSegment(const Double3 &x1, const Double3 &x2, const Spectral &beta_at_end_before_scatter, SegmentType type);
-  void AddScatterEvent(const Double3 &pos, const Double3 &out_dir, const Spectral &beta_after, ScatterType type);
-  void NewTrace(const Spectral &beta_init);
+  void AddSegment(const Double3 &x1, const Double3 &x2, const Spectral3 &beta_at_end_before_scatter, SegmentType type);
+  void AddScatterEvent(const Double3 &pos, const Double3 &out_dir, const Spectral3 &beta_after, ScatterType type);
+  void NewTrace(const Spectral3 &beta_init);
 };
 
 
@@ -49,7 +49,7 @@ void PathLogger::PreventLogFromGrowingTooMuch()
 }
 
 
-void PathLogger::AddSegment(const Double3 &x1, const Double3 &x2, const Spectral &beta_at_end_before_scatter, SegmentType type)
+void PathLogger::AddSegment(const Double3 &x1, const Double3 &x2, const Spectral3 &beta_at_end_before_scatter, SegmentType type)
 {
   const auto &b = beta_at_end_before_scatter;
   file << static_cast<char>(type) << ", "
@@ -59,7 +59,7 @@ void PathLogger::AddSegment(const Double3 &x1, const Double3 &x2, const Spectral
   file.flush();
 }
 
-void PathLogger::AddScatterEvent(const Double3 &pos, const Double3 &out_dir, const Spectral &beta_after, ScatterType type)
+void PathLogger::AddScatterEvent(const Double3 &pos, const Double3 &out_dir, const Spectral3 &beta_after, ScatterType type)
 {
   const auto &b = beta_after;
   file << static_cast<char>(type) << ", "
@@ -70,7 +70,7 @@ void PathLogger::AddScatterEvent(const Double3 &pos, const Double3 &out_dir, con
 }
 
 
-void PathLogger::NewTrace(const Spectral &beta_init)
+void PathLogger::NewTrace(const Spectral3 &beta_init)
 {
   ++total_path_index;
   ++num_paths_written;
@@ -220,22 +220,22 @@ void MediumTracker::leaveVolume(const Medium* medium)
 }
 
 
-class SpectralImageBuffer
+class Spectral3ImageBuffer
 {
   std::vector<int> count;
-  std::vector<Spectral, boost::alignment::aligned_allocator<Spectral, 128> >  accumulator;
+  std::vector<Spectral3, boost::alignment::aligned_allocator<Spectral3, 128> >  accumulator;
   int xres, yres;
 public:
-  SpectralImageBuffer(int _xres, int _yres)
+  Spectral3ImageBuffer(int _xres, int _yres)
     : xres(_xres), yres(_yres)
   {
     int sz = _xres * _yres;
     assert(sz > 0);
     count.resize(sz, 0);
-    accumulator.resize(sz, Spectral{0.});
+    accumulator.resize(sz, Spectral3{0.});
   }
   
-  void Insert(int pixel_index, const Spectral &value)
+  void Insert(int pixel_index, const Spectral3 &value)
   {
     assert (pixel_index >= 0 && pixel_index < count.size() && pixel_index < accumulator.size());
     ++count[pixel_index];
@@ -249,7 +249,7 @@ public:
     for (int x=0; x<xres; ++x)
     {
       int pixel_index = xres * y + x;
-      Spectral average = accumulator[pixel_index]/count[pixel_index];
+      Spectral3 average = accumulator[pixel_index]/count[pixel_index];
       Image::uchar rgb[3];
       bool isfinite = average.isFinite().all();
       //bool iszero = (accumulator[pixel_index]==0.).all();
@@ -287,7 +287,7 @@ public:
     return std::make_tuple(&light, pmf_of_light);
   }
   
-  virtual Spectral MakePrettyPixel(int pixel_index) = 0;
+  virtual Spectral3 MakePrettyPixel(int pixel_index) = 0;
 };
 
 
@@ -297,7 +297,7 @@ class NormalVisualizer : public BaseAlgo
 public:
   NormalVisualizer(const Scene &_scene) : BaseAlgo(_scene) {}
   
-  Spectral MakePrettyPixel(int pixel_index) override
+  Spectral3 MakePrettyPixel(int pixel_index) override
   {
     auto cam_sample = TakeRaySample(scene.GetCamera(), pixel_index, sampler);
     
@@ -306,12 +306,12 @@ public:
     if (hit)
     {
       RaySurfaceIntersection intersection{hit, seg};
-      Spectral col = (intersection.normal.array() * 0.5 + 0.5);
+      Spectral3 col = (intersection.normal.array() * 0.5 + 0.5).cast<Color::Scalar>();
       return col;
     }
     else
     {
-      return Spectral{0.};
+      return Spectral3{0.};
     }
   };
 };
@@ -333,7 +333,7 @@ public:
   }
   
   
-  bool RouletteSurvival(Spectral &beta, int level)
+  bool RouletteSurvival(Spectral3 &beta, int level)
   {
     static constexpr int MIN_LEVEL = 3;
     static constexpr double LOW_CONTRIBUTION = 0.5;
@@ -371,11 +371,11 @@ public:
   }
   
   
-  Spectral TransmittanceEstimate(RaySegment seg, HitId last_hit, MediumTracker medium_tracker, const PathContext &context)
+  Spectral3 TransmittanceEstimate(RaySegment seg, HitId last_hit, MediumTracker medium_tracker, const PathContext &context)
   {
     // TODO: Russian roulette.
-    Spectral result{1.};
-    auto SegmentContribution = [&seg, &medium_tracker, &context, this](double t1, double t2) -> Spectral
+    Spectral3 result{1.};
+    auto SegmentContribution = [&seg, &medium_tracker, &context, this](double t1, double t2) -> Spectral3
     {
       RaySegment subseg{{seg.ray.PointAt(t1), seg.ray.dir}, t2-t1};
       return medium_tracker.getCurrentMedium().EvaluateTransmission(subseg, sampler, context);
@@ -399,10 +399,10 @@ public:
   }
   
   
-  Spectral LightConnection(const Double3 &pos, const Double3 &incident_dir, const RaySurfaceIntersection *intersection, const MediumTracker &medium_tracker_parent, const PathContext &context)
+  Spectral3 LightConnection(const Double3 &pos, const Double3 &incident_dir, const RaySurfaceIntersection *intersection, const MediumTracker &medium_tracker_parent, const PathContext &context)
   {
     if (scene.GetNumLights() <= 0)
-      return Spectral{0.};
+      return Spectral3{0.};
 
     const Light* light; double pmf_of_light; std::tie(light, pmf_of_light) = PickLightUniform();
 
@@ -410,7 +410,7 @@ public:
     RaySegment segment_to_light = MakeSegmentToLight(pos, light_sample, intersection);
 
     double d_factor = 1.;
-    Spectral scatter_factor;
+    Spectral3 scatter_factor;
     if (intersection)
     {
       d_factor = std::max(0., Dot(intersection->shading_normal, segment_to_light.ray.dir));
@@ -424,7 +424,7 @@ public:
     }
 
     if (d_factor <= 0.)
-      return Spectral{0.};
+      return Spectral3{0.};
 
     auto transmittance = TransmittanceEstimate(segment_to_light, (intersection ? intersection->hitid : HitId()), medium_tracker_parent, context);
 
@@ -439,7 +439,7 @@ public:
     return sample_value;
   }
   
-  Spectral MakePrettyPixel(int pixel_index) override
+  Spectral3 MakePrettyPixel(int pixel_index) override
   {
     PathContext context;
     auto cam_sample = TakeRaySample(scene.GetCamera(), pixel_index, sampler);
@@ -451,7 +451,7 @@ public:
     PATH_LOGGING(
       path_logger.NewTrace(context.beta);)
 
-    Spectral path_sample_value{0.};
+    Spectral3 path_sample_value{0.};
     RaySegment segment{cam_sample.ray_out, LargeNumber};
     int level = 1;
 
@@ -604,7 +604,7 @@ struct PathNode
 //   PathNode(PathNode &&);
 //   PathNode& operator=(const PathNode &&);
   DirectionalSample SampleDirection(Sampler &sampler) const;
-  Spectral EvaluateDirection(const Double3 &outbound_dir) const;
+  Spectral3 EvaluateDirection(const Double3 &outbound_dir) const;
   Double3 Position() const;
   Double3 DirectionToEmitter() const;
   Double3 InboundDir() const;
@@ -682,7 +682,7 @@ PathNode& PathNode::operator=(const PathNode& other)
 }
 
 
-Spectral PathNode::EvaluateDirection(const Double3& outbound_dir) const
+Spectral3 PathNode::EvaluateDirection(const Double3& outbound_dir) const
 {
   const auto &node = *this;
   if (node.type ==NODE1 || node.type == NODE1_DIRECTIONAL)
@@ -748,16 +748,16 @@ class Bdpt : public BaseAlgo
   
   struct BdptHistory
   {
-    Spectral measurement_contribution[MAX_PATH_LENGTH];
+    Spectral3 measurement_contribution[MAX_PATH_LENGTH];
     double  pdf_product_up_to_node[MAX_PATH_LENGTH];
     BdptHistory()
     {
       pdf_product_up_to_node[0] = 1.;
-      measurement_contribution[0] = Spectral{1.};
+      measurement_contribution[0] = Spectral3{1.};
       for (int i=1; i<MAX_PATH_LENGTH; ++i)
       {
         pdf_product_up_to_node[i] = NaN;
-        measurement_contribution[i] = Spectral{NaN};
+        measurement_contribution[i] = Spectral3{NaN};
       }
     }
     void Copy(int src, int dst)
@@ -765,7 +765,7 @@ class Bdpt : public BaseAlgo
       measurement_contribution[dst] = measurement_contribution[src];
       pdf_product_up_to_node[dst] = pdf_product_up_to_node[src];
     }
-    void MultiplyNodeValues(int idx, double pdf_factor, const Spectral &contrib_factor)
+    void MultiplyNodeValues(int idx, double pdf_factor, const Spectral3 &contrib_factor)
     {
       measurement_contribution[idx] *= contrib_factor;
       pdf_product_up_to_node[idx] *= pdf_factor;
@@ -778,9 +778,9 @@ public:
   }
   
 
-  Spectral MakePrettyPixel() override
+  Spectral3 MakePrettyPixel() override
   {
-    Spectral ret{0.};
+    Spectral3 ret{0.};
     ret += BiDirectionPathTraceOfLength(2, 1);
     ret += BiDirectionPathTraceOfLength(2, 2);
     ret += BiDirectionPathTraceOfLength(2, 3);
@@ -790,31 +790,31 @@ public:
   }
   
   
-  Spectral BiDirectionPathTraceOfLength(int eye_path_length, int light_path_length)
+  Spectral3 BiDirectionPathTraceOfLength(int eye_path_length, int light_path_length)
   {
     BdptHistory history_from_eye;
     BdptHistory history_from_light;
 
     if (eye_path_length <= 0)
-      return Spectral(0.);
+      return Spectral3(0.);
     if (light_path_length <= 0)
-      return Spectral(0.);
+      return Spectral3(0.);
     
     auto eye_node = TracePath(scene.GetCamera(), eye_path_length, history_from_eye);
-    if (eye_node.type == PathNode::ESCAPED) return Spectral{0};
+    if (eye_node.type == PathNode::ESCAPED) return Spectral3{0};
     
     const Light* the_light; double pmf_of_light; 
     std::tie(the_light, pmf_of_light) = PickLightUniform();
     auto light_node = TracePath(*the_light, light_path_length, history_from_light);
-    if (light_node.type == PathNode::ESCAPED) return Spectral{0};
+    if (light_node.type == PathNode::ESCAPED) return Spectral3{0};
     
-    Spectral measurement_contribution = 
+    Spectral3 measurement_contribution = 
       GeometryTermAndScattering(light_node, eye_node) *
       history_from_eye.measurement_contribution[eye_node.index] *
       history_from_light.measurement_contribution[light_node.index];
     double  path_pdf = history_from_eye.pdf_product_up_to_node[eye_node.index] *
                        history_from_light.pdf_product_up_to_node[light_node.index];
-    Spectral path_sample_value = measurement_contribution / path_pdf;
+    Spectral3 path_sample_value = measurement_contribution / path_pdf;
     return path_sample_value;
   };
     
@@ -880,7 +880,7 @@ public:
   }
   
   
-  Spectral GeometryTermAndScattering(
+  Spectral3 GeometryTermAndScattering(
     const PathNode &node1,
     const PathNode &node2
   )
@@ -892,7 +892,7 @@ public:
     // by s=0,t=2 or s=2,t=0 paths.
     if (node1.type == PathNode::NODE1_DIRECTIONAL && 
         node2.type == PathNode::NODE1_DIRECTIONAL)
-      return Spectral{0.};
+      return Spectral3{0.};
     
     RaySegment segment;
     HitId hits_ignored[2];
@@ -913,7 +913,7 @@ public:
       hits_ignored[1] = node2.hitId();
     }
     if (scene.Occluded(segment.ray, segment.length, hits_ignored[0], hits_ignored[1]))
-      return Spectral{0.};
+      return Spectral3{0.};
     bool isAreaMeasure = segment.length<LargeNumber; // i.e. nodes are not directional.
     double geom_term = isAreaMeasure ? Sqr(1./segment.length) : 1.;
     if (node1.type == PathNode::SURFACE)
@@ -921,8 +921,8 @@ public:
     if (node2.type == PathNode::SURFACE)
       geom_term *= DFactor(node2, -segment.ray.dir);    
 
-    Spectral scatter1 = node1.EvaluateDirection(segment.ray.dir);
-    Spectral scatter2 = node2.EvaluateDirection(-segment.ray.dir);
+    Spectral3 scatter1 = node1.EvaluateDirection(segment.ray.dir);
+    Spectral3 scatter2 = node2.EvaluateDirection(-segment.ray.dir);
     return geom_term * scatter1 * scatter2;
   }
 };

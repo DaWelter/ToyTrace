@@ -79,7 +79,7 @@ public:
 
   virtual Sample TakePositionSample(int unit_index, Sampler &sampler) const override
   {
-    Sample s{this->pos, 1., Double3::Constant(1.), false};    
+    Sample s{this->pos, 1., Spectral3::Constant(1.), false};    
     return s;
   }
   
@@ -94,7 +94,7 @@ public:
       1.0);
     Normalize(v);
     Double3 emission_dir = right*v[0] + up*v[1] + dir*v[2];
-    DirectionalSample s{{pos, emission_dir}, 1.0, Double3::Constant(1.)};
+    DirectionalSample s{{pos, emission_dir}, 1.0, Spectral3::Constant(1.)};
     return s;
   }
   

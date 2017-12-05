@@ -19,9 +19,9 @@
 
 TEST(BasicAssumptions, EigenTypes)
 {
-  // Spectral is currently an Eigen::Array type. It is still a row vector/array.
-  EXPECT_EQ(Spectral::ColsAtCompileTime, 1);
-  EXPECT_EQ(Spectral::RowsAtCompileTime, 3);
+  // Spectral3 is currently an Eigen::Array type. It is still a row vector/array.
+  EXPECT_EQ(Spectral3::ColsAtCompileTime, 1);
+  EXPECT_EQ(Spectral3::RowsAtCompileTime, 3);
   // Vectors in eigen are Eigen::Matrix row vectors.
   EXPECT_EQ(Double3::ColsAtCompileTime, 1);
   EXPECT_EQ(Double3::RowsAtCompileTime, 3);
@@ -145,6 +145,40 @@ TEST(TestMath, TowerSampling)
     CheckNumberOfSamplesInBin(strconcat("Bin[",i,"]").c_str(), bins[i], Nsamples, probs[i]);
   }
 }
+
+
+TEST(Spectral, RGBConversion)
+{
+  using namespace Color;
+  std::array<Spectral3, 10> trials = {{
+    { 0., 0., 0. },
+    { 1., 0., 0. },
+    { 0., 1., 0. },
+    { 0., 0., 1. },
+    { 1., 1., 0. },
+    { 1., 0., 1. },
+    { 0., 1., 1. },
+    { 1., 1., 1. },
+    { 1., 0.5, 0.3 },
+    { 0.5, 0.8, 0.9 },
+  }};
+  for (Spectral3 trial : trials)
+  {
+    SpectralN s = RGBToSpectrum(trial);
+    for (int i=0; i<s.size(); ++i)
+      EXPECT_GE(s[i], 0.);
+    Spectral3 back = SpectrumToRGB(s);
+    EXPECT_NEAR(trial[0], back[0], 1.3e-2);
+    EXPECT_NEAR(trial[1], back[1], 1.3e-2);
+    EXPECT_NEAR(trial[2], back[2], 1.3e-2);
+    for (int lambda=0; lambda<Color::NBINS; ++lambda)
+    {
+      Scalar intensity = RGBToSpectrum(lambda, trial);
+      EXPECT_NEAR(intensity, s[lambda], 1.e-6);
+    }
+  }
+}
+
 
 
 class TestIntersection : public testing::Test
@@ -492,14 +526,14 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
   ImageDisplay display;
   Image img{500, 10};
   img.SetColor(64, 64, 64);
-  Spectral length_scales{1., 5., 10.};
+  Spectral3 length_scales{1., 5., 10.};
   double cutoff_length = 5.; // Integrate transmission T(x) up to this x.
   double img_dx = img.width() / cutoff_length / 2.;
   img.DrawRect(0, 0, img_dx * cutoff_length, img.height()-1);
-  Spectral sigma_s{1./length_scales}, sigma_a{1./length_scales};
+  Spectral3 sigma_s{1./length_scales}, sigma_a{1./length_scales};
   HomogeneousMedium medium{sigma_s, sigma_a, 0};
   int N = 1000;
-  Spectral integral{0.};
+  Spectral3 integral{0.};
   for (int i=0; i<N; ++i)
   {
     PathContext context;
@@ -518,8 +552,8 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
     img.DrawLine(imgx, 0, imgx, img.height()-1);
   }
   integral *= 1./N;
-  Spectral exact_solution = 1. - (-(sigma_a+sigma_s)*cutoff_length).exp();
-  for (int k=0; k<static_size<Spectral>(); ++k)
+  Spectral3 exact_solution = 1. - (-(sigma_a+sigma_s)*cutoff_length).exp();
+  for (int k=0; k<static_size<Spectral3>(); ++k)
     EXPECT_NEAR(integral[k], exact_solution[k], 0.1 * integral[k]);
   display.show(img);
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -543,7 +577,7 @@ public:
     /* I want to check if the sampling frequency of some solid angle areas match the probabilities
      * returned by the Evaluate function. I further want to validate the normalization constraint. */
     auto bin_probabilities = ComputeBinProbabilities(pf, reverse_incident_dir);
-    Spectral integral{0.};
+    Spectral3 integral{0.};
     int bin_sample_count[6][Nbins][Nbins] = {}; // Zero initialize?
     for (int snum = 0; snum<num_samples; ++snum)
     {
@@ -1103,10 +1137,10 @@ m scenes/unitcube.dae
   ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
   auto res = rt.TransmittanceEstimate(seg, HitId(), medium_tracker, context);
   
-  auto sigma_e = Spectral{3.};
-  Spectral expected = (-2.*sigma_e).exp();
+  auto sigma_e = Spectral3{3.};
+  Spectral3 expected = (-2.*sigma_e).exp();
   
-  for (int i=0; i<static_size<Spectral>(); ++i)
+  for (int i=0; i<static_size<Spectral3>(); ++i)
     ASSERT_NEAR(res[i], expected[i], 1.e-3);
 }
 

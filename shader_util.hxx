@@ -30,8 +30,8 @@ inline bool RussianRouletteSurvival(double weight, int iteration, Sampler &sampl
 
 // Is passing parameters like that as efficient has having the same number of item as normal individual arguments?
 inline void ComputeProbabilitiesHistoryScheme(
-  const Spectral &weights,
-  std::initializer_list<std::reference_wrapper<const Spectral>> sigmas,
+  const Spectral3 &weights,
+  std::initializer_list<std::reference_wrapper<const Spectral3>> sigmas,
   std::initializer_list<std::reference_wrapper<double>> probs)
 {
   double normalization = 0.;
@@ -39,7 +39,7 @@ inline void ComputeProbabilitiesHistoryScheme(
   auto it_probs = probs.begin();
   for (; it_sigma != sigmas.end(); ++it_sigma, ++it_probs)
   {
-    const Spectral &s = it_sigma->get();
+    const Spectral3 &s = it_sigma->get();
     assert (s.minCoeff() >= 0.);
     double p = (s*weights).mean();
     it_probs->get() = p;

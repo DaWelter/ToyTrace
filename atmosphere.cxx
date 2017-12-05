@@ -21,11 +21,11 @@ Medium::InteractionSample Simple::SampleInteractionPoint(const RaySegment &segme
   assert(!context.beta.isZero());
   Medium::InteractionSample smpl{
     0.,
-    Spectral{1.}
+    Spectral3{1.}
   };
   // The lowest point gives the largest collision coefficients along the path.
   auto lowest_point = geometry.ComputeLowestPointAlong(segment);
-  Spectral sigma_s, sigma_a, sigma_n;
+  Spectral3 sigma_s, sigma_a, sigma_n;
   double prob_t, prob_n;
   double altitude = geometry.ComputeAltitude(lowest_point);
   constituents.ComputeCollisionCoefficients(
@@ -73,14 +73,14 @@ Medium::InteractionSample Simple::SampleInteractionPoint(const RaySegment &segme
 }
 
 
-Spectral Simple::EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const
+Spectral3 Simple::EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const
 {
-  Spectral estimate{1.};
+  Spectral3 estimate{1.};
   // The lowest point gives the largest collision coefficients along the path.
   auto lowest_point = geometry.ComputeLowestPointAlong(segment);
   double lowest_altitude = geometry.ComputeAltitude(lowest_point);
   // First compute the majorante
-  Spectral sigma_s, sigma_a, sigma_n;
+  Spectral3 sigma_s, sigma_a, sigma_n;
   constituents.ComputeCollisionCoefficients(
         lowest_altitude, sigma_s, sigma_a);
   double sigma_t_majorant = (sigma_a + sigma_s).maxCoeff();
@@ -117,7 +117,7 @@ Spectral Simple::EvaluateTransmission(const RaySegment &segment, Sampler &sample
 Medium::PhaseSample Simple::SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const
 {
   double altitude = geometry.ComputeAltitude(pos);
-  Spectral sigma_s[SimpleConstituents::NUM_CONSTITUENTS];
+  Spectral3 sigma_s[SimpleConstituents::NUM_CONSTITUENTS];
   constituents.ComputeSigmaS(altitude, sigma_s);
 
   return PhaseFunctions::Combined(context.beta, sigma_s[0], constituents.GetPhaseFunction(0), sigma_s[1], constituents.GetPhaseFunction(1))
@@ -125,10 +125,10 @@ Medium::PhaseSample Simple::SamplePhaseFunction(const Double3 &incident_dir, con
 }
 
 
-Spectral Simple::EvaluatePhaseFunction(const Double3 &incident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const
+Spectral3 Simple::EvaluatePhaseFunction(const Double3 &incident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const
 {
   double altitude = geometry.ComputeAltitude(pos);
-  Spectral sigma_s[SimpleConstituents::NUM_CONSTITUENTS];
+  Spectral3 sigma_s[SimpleConstituents::NUM_CONSTITUENTS];
   constituents.ComputeSigmaS(altitude, sigma_s);
   
   return PhaseFunctions::Combined(context.beta, sigma_s[0], constituents.GetPhaseFunction(0), sigma_s[1], constituents.GetPhaseFunction(1))
@@ -143,10 +143,10 @@ SimpleConstituents::SimpleConstituents()
 {
   inv_scale_height[MOLECULES] = 1./8.; // km
   inv_scale_height[AEROSOLES] = 1./1.2;  // km
-  at_sealevel[MOLECULES].sigma_a = Spectral{0};
-  at_sealevel[MOLECULES].sigma_s = 1.e-3 * Spectral{5.8, 13.5, 33.1};
-  at_sealevel[AEROSOLES].sigma_a = 1.e-3 * Spectral{2.22};
-  at_sealevel[AEROSOLES].sigma_s = 1.e-3 * Spectral{20.};
+  at_sealevel[MOLECULES].sigma_a = Spectral3{0};
+  at_sealevel[MOLECULES].sigma_s = 1.e-3 * Spectral3{5.8, 13.5, 33.1};
+  at_sealevel[AEROSOLES].sigma_a = 1.e-3 * Spectral3{2.22};
+  at_sealevel[AEROSOLES].sigma_s = 1.e-3 * Spectral3{20.};
   for (auto inv_h : inv_scale_height)
     lower_altitude_cutoff = std::max(-1./inv_h, lower_altitude_cutoff);
 }

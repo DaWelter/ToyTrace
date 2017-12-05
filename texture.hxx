@@ -23,7 +23,7 @@ public:
     */
   }
 
-  Double3 GetTexel(double u, double v) const
+  Spectral3 GetTexel(double u, double v) const
   {
     double dummy;
     u = modf(u, &dummy);
@@ -32,11 +32,11 @@ public:
     if (v < 0) v = 1. + v;
     if (u > 1. - Epsilon) u -= Epsilon;
     if (v > 1. - Epsilon) v -= Epsilon;
-    if (bm.empty()) return Double3(1.);
+    if (bm.empty()) return Spectral3::Constant(1.);
     int x = u * bm.width();
     int y = v * bm.height();
     auto rgb = bm.get_pixel_uc3(x, y);
-    Double3 c;
+    Spectral3 c;
     c[0] = Color::SRGBToLinear(std::get<0>(rgb) / 255.0);
     c[1] = Color::SRGBToLinear(std::get<1>(rgb) / 255.0);
     c[2] = Color::SRGBToLinear(std::get<2>(rgb) / 255.0);

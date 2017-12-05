@@ -5,36 +5,57 @@
 namespace Color
 {
 
-using Scalar = double;
-typedef Eigen::Array<Scalar, 3, 1> Spectral;
+using Scalar = double; // TODO: Use float?
 
+constexpr Scalar operator"" _sp (long double d) { return Scalar(d); }
+constexpr Scalar operator"" _sp (unsigned long long int d) { return Scalar(d); }
+
+static constexpr Scalar lambda_min = 380;
+static constexpr Scalar lambda_max = 720;
+static constexpr int NBINS = 10;
+
+using Spectral3 = Eigen::Array<Scalar, 3, 1>;
+using SpectralN = Eigen::Array<Scalar, NBINS, 1>;
 
 // Applies gamma correction. See https://en.wikipedia.org/wiki/SRGB
 inline Scalar SRGBToLinear(Scalar x)
 {
-  using S = Scalar;
-  return (x <= S(0.04045)) ? 
-         (x/S(12.92)) : 
-         (std::pow((x+S(0.055))/S(1.055f), S(2.4)));
+  return (x <= 0.04045_sp) ? 
+         (x/12.92_sp) : 
+         (std::pow((x+0.055_sp)/1.055_sp, 2.4_sp));
 }
 
 
 // Applies gamma correction. See https://en.wikipedia.org/wiki/SRGB
 inline Scalar LinearToSRGB(Scalar x)
 {    
-  using S = Scalar;
-  return   (x <= S(0.0031308)) ? 
-           (S(12.92)*x) : 
-           (S(1.055)*std::pow(x, S(1.0/2.4)) - S(0.055));
-}
-
+  return   (x <= 0.0031308_sp) ? 
+           (12.92_sp*x) : 
+           (1.055_sp*std::pow(x, 1.0_sp/2.4_sp) - 0.055_sp);
 }
 
 
-using Spectral = Color::Spectral;
+Scalar GetWavelength(int bin);
+Scalar RGBToSpectrum(int bin, const Spectral3 &rgb);
+SpectralN RGBToSpectrum(const Spectral3 &rgb);
+Spectral3 SpectrumToRGB(const SpectralN &val);
+
+/*
+  the spectral intensity emitted per area and steradian
+  [ W / m^2 / sr / m / wavelength]
+  http://csep10.phys.utk.edu/astr162/lect/light/radiation.html
+  https://upload.wikimedia.org/wikipedia/commons/1/19/Black_body.svg
+  I normalized the result by the using the sum of the vector entries
+*/
+SpectralN MaxwellBoltzmanDistribution(double temp);
+
+}
+
+
+using Spectral3 = Color::Spectral3;
 
 template<>
-constexpr int static_size<Spectral>()
+constexpr int static_size<Spectral3>()
 {
-  return Spectral::RowsAtCompileTime;
+  return Spectral3::RowsAtCompileTime;
 }

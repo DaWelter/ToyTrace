@@ -23,16 +23,16 @@ Sample Uniform::SampleDirection(const Double3& reverse_incident_dir, Sampler& sa
 {
   return Sample{
     SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare()),
-    Spectral{1./UnitSphereSurfaceArea},
+    Spectral3{1./UnitSphereSurfaceArea},
     1./UnitSphereSurfaceArea
   };
 }
 
-Spectral Uniform::Evaluate(const Double3& reverse_indcident_dir, const Double3& out_direction, double* pdf) const
+Spectral3 Uniform::Evaluate(const Double3& reverse_indcident_dir, const Double3& out_direction, double* pdf) const
 {
   if (pdf)
     *pdf = 1./UnitSphereSurfaceArea;
-  return Spectral{1./UnitSphereSurfaceArea};
+  return Spectral3{1./UnitSphereSurfaceArea};
 }
 
 
@@ -64,18 +64,18 @@ Sample Rayleigh::SampleDirection(const Double3& reverse_incident_dir, Sampler& s
   auto value = RayleighDetail::value(mu);
   return Sample{
     m * dir,
-    Spectral{value},
+    Spectral3{value},
     value // is also a valid probability density since energy conservation demands normalization to one over the unit sphere.
   };
 }
 
 
-Spectral Rayleigh::Evaluate(const Double3& reverse_incident_dir, const Double3& out_direction, double* pdf) const
+Spectral3 Rayleigh::Evaluate(const Double3& reverse_incident_dir, const Double3& out_direction, double* pdf) const
 {
   auto val = RayleighDetail::value(Dot(-reverse_incident_dir, out_direction));
   if (pdf)
     *pdf = val;
-  return Spectral{val};
+  return Spectral3{val};
 }
 
 
@@ -122,41 +122,41 @@ Sample HenleyGreenstein::SampleDirection(const Double3& reverse_incident_dir, Sa
   auto value = HenleyGreensteinDetail::value(mu, g);
   return Sample{
     m * dir,
-    Spectral{value},
+    Spectral3{value},
     value
   };
 }
 
 
-Spectral HenleyGreenstein::Evaluate(const Double3& reverse_incident_dir, const Double3& out_direction, double* pdf) const
+Spectral3 HenleyGreenstein::Evaluate(const Double3& reverse_incident_dir, const Double3& out_direction, double* pdf) const
 {
   auto val = HenleyGreensteinDetail::value(Dot(-reverse_incident_dir, out_direction), g);
   if (pdf)
     *pdf = val;
-  return Spectral{val};
+  return Spectral3{val};
 }
 
 
 PhaseFunctions::Sample Combined::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
 {
-  constexpr int NL = static_size<Spectral>();
+  constexpr int NL = static_size<Spectral3>();
   constexpr int NC = NUM_CONSTITUENTS;
   static_assert(NC == 2, "Must be 2 constituents");
 
-  int lambda = TowerSampling<NL>(prob_lambda.data(), sampler.Uniform01());
-  double contiguous_probs[NC] = {
+  int lambda = TowerSampling<NL, Color::Scalar>(prob_lambda.data(), sampler.Uniform01());
+  Color::Scalar contiguous_probs[NC] = {
     prob_constituent_given_lambda[0][lambda],
     prob_constituent_given_lambda[1][lambda]
   };
-  double pf_pdf[NUM_CONSTITUENTS];
+  Color::Scalar pf_pdf[NUM_CONSTITUENTS];
   
-  int constituent = TowerSampling<NC>(contiguous_probs, sampler.Uniform01());
+  int constituent = TowerSampling<NC, Color::Scalar>(contiguous_probs, sampler.Uniform01());
   int not_sampled_constituent = constituent==0 ? 1 : 0;
   
   auto smpl = pf[constituent]->SampleDirection(reverse_incident_dir, sampler);
   pf_pdf[constituent] = smpl.pdf;
   
-  Spectral other_pf_value = pf[not_sampled_constituent]->Evaluate(reverse_incident_dir, smpl.dir, &pf_pdf[not_sampled_constituent]);
+  Spectral3 other_pf_value = pf[not_sampled_constituent]->Evaluate(reverse_incident_dir, smpl.dir, &pf_pdf[not_sampled_constituent]);
   
   smpl.value = prob_constituent_given_lambda[constituent]*smpl.value + prob_constituent_given_lambda[not_sampled_constituent]*other_pf_value;
   smpl.pdf = 0.;
@@ -171,17 +171,17 @@ PhaseFunctions::Sample Combined::SampleDirection(const Double3& reverse_incident
 }
 
 
-Spectral Combined::Evaluate(const Double3& reverse_indcident_dir, const Double3& out_direction, double* pdf) const
+Spectral3 Combined::Evaluate(const Double3& reverse_indcident_dir, const Double3& out_direction, double* pdf) const
 {
-  constexpr int NL = static_size<Spectral>();
+  constexpr int NL = static_size<Spectral3>();
   constexpr int NC = NUM_CONSTITUENTS;
   static_assert(NC == 2, "Must be 2 constituents");
 
   if (pdf)
     *pdf = 0.;
-  Spectral result{0.};
+  Spectral3 result{0.};
   double pf_pdf[NC];
-  Spectral pf_val[NC];
+  Spectral3 pf_val[NC];
   pf_val[0] = pf[0]->Evaluate(reverse_indcident_dir, out_direction, &pf_pdf[0]);
   pf_val[1] = pf[1]->Evaluate(reverse_indcident_dir, out_direction, &pf_pdf[1]);
   for (int c = 0; c<NC; ++c)

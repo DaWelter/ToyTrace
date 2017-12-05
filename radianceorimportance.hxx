@@ -12,7 +12,7 @@ struct Sample
   // If "is_direction" is true then pos represents a solid angle.
   Double3 pos;
   double pdf;
-  Spectral measurement_contribution;
+  Spectral3 measurement_contribution;
   bool is_direction;
 };
 
@@ -20,7 +20,7 @@ struct DirectionalSample
 {
   Ray ray_out;
   double pdf;
-  Spectral measurement_contribution;
+  Spectral3 measurement_contribution;
 };
 
 class EmitterSensor
@@ -29,8 +29,8 @@ public:
   virtual ~EmitterSensor() {}
   virtual Sample TakePositionSample(Sampler &sampler) const = 0;
   virtual DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler) const = 0;
-  virtual Spectral EvaluatePositionComponent(const Double3 &pos, double *pdf) const = 0;
-  virtual Spectral EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, double *pdf) const = 0;
+  virtual Spectral3 EvaluatePositionComponent(const Double3 &pos, double *pdf) const = 0;
+  virtual Spectral3 EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, double *pdf) const = 0;
 };
 
 
@@ -40,7 +40,7 @@ public:
   const int num_units;
   struct Response
   {
-    Spectral measurement_contribution;
+    Spectral3 measurement_contribution;
     int unit_index;
     double pdf;
   };
