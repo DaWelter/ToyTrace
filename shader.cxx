@@ -5,13 +5,14 @@
 
 namespace
 {
-inline Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Texture *tex, const RaySurfaceIntersection &surface_hit)
+inline Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Texture *tex, const RaySurfaceIntersection &surface_hit, const Index3 &lambda_idx)
 {
   Spectral3 ret{color};
   if (tex)
   {
     Double3 uv = surface_hit.primitive().GetUV(surface_hit.hitid);
-    ret *= tex->GetTexel(uv[0], uv[1]).array();
+    RGB col = tex->GetTexel(uv[0], uv[1]).array();
+    ret *= Take(Color::RGBToSpectrum(col), lambda_idx); // TODO: optimize, I don't have to compute the full spectrum.
   }
   return ret;
 }
@@ -19,9 +20,9 @@ inline Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Textur
 
 
 
-DiffuseShader::DiffuseShader(const Spectral3 &_reflectance, std::unique_ptr<Texture> _diffuse_texture)
+DiffuseShader::DiffuseShader(const RGB &_reflectance, std::unique_ptr<Texture> _diffuse_texture)
   : Shader(IS_REFLECTIVE),
-    kr_d(_reflectance),
+    kr_d(Color::RGBToSpectrum(_reflectance)),
     diffuse_texture(std::move(_diffuse_texture))
 {
   // Wtf? kr_d is the (constant) Lambertian BRDF. Energy conservation
@@ -33,27 +34,28 @@ DiffuseShader::DiffuseShader(const Spectral3 &_reflectance, std::unique_ptr<Text
 }
 
 
-Spectral3 DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
+Spectral3 DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
   double n_dot_out = Dot(surface_hit.shading_normal, out_direction);
   if (pdf)
     *pdf = n_dot_out>0. ? n_dot_out/Pi : 0.;
   if (n_dot_out > 0.)
   {
-    return MaybeMultiplyTextureLookup(kr_d, diffuse_texture.get(), surface_hit);
+    auto kr_d_taken = Take(kr_d, context.lambda_idx);
+    return MaybeMultiplyTextureLookup(kr_d_taken, diffuse_texture.get(), surface_hit, context.lambda_idx);
   }
   else
     return Spectral3{0.};
 }
 
 
-BSDFSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const
+BSDFSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
 {
   auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
   Double3 v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
   double pdf = v[2]/Pi;
   Double3 out_direction = m * v;
-  Spectral3 value = Dot(out_direction, surface_hit.normal)>0 ? kr_d : Spectral3{0.};
+  Spectral3 value = Dot(out_direction, surface_hit.normal)>0 ? Take(kr_d, context.lambda_idx) : Spectral3{0.};
   return BSDFSample{out_direction, value, pdf};
 }
 
@@ -61,12 +63,12 @@ BSDFSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfa
 
 SpecularReflectiveShader::SpecularReflectiveShader(const Spectral3& reflectance)
   : Shader(REFLECTION_IS_SPECULAR|IS_REFLECTIVE),
-    kr_s(reflectance)
+    kr_s(Color::RGBToSpectrum(reflectance))
 {
 }
 
 
-Spectral3 SpecularReflectiveShader::EvaluateBSDF(const Double3& incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, double* pdf) const
+Spectral3 SpecularReflectiveShader::EvaluateBSDF(const Double3& incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double* pdf) const
 {
   if (pdf)
     *pdf = 0.;
@@ -74,7 +76,7 @@ Spectral3 SpecularReflectiveShader::EvaluateBSDF(const Double3& incident_dir, co
 }
 
 
-BSDFSample SpecularReflectiveShader::SampleBSDF(const Double3& incident_dir, const RaySurfaceIntersection& surface_hit, Sampler& sampler) const
+BSDFSample SpecularReflectiveShader::SampleBSDF(const Double3& incident_dir, const RaySurfaceIntersection& surface_hit, Sampler& sampler, const PathContext &context) const
 {
   Double3 r = Reflected(incident_dir, surface_hit.shading_normal);
   double cos_rn = Dot(surface_hit.normal, r);
@@ -83,7 +85,8 @@ BSDFSample SpecularReflectiveShader::SampleBSDF(const Double3& incident_dir, con
   else
   {
     double cos_rsdn = Dot(surface_hit.shading_normal, r);
-    return BSDFSample{r, kr_s/cos_rsdn, 1.};
+    auto kr_s_taken = Take(kr_s, context.lambda_idx);
+    return BSDFSample{r, kr_s_taken/cos_rsdn, 1.};
   }
 }
 
@@ -110,14 +113,14 @@ MicrofacetShader::MicrofacetShader(
   const Spectral3 &_glossy_reflectance, std::unique_ptr<Texture> _glossy_texture,
   double _glossy_exponent)
   : Shader(0),
-    kr_s(_glossy_reflectance), 
+    kr_s(Color::RGBToSpectrum(_glossy_reflectance)), 
     alpha(_glossy_exponent),
     glossy_texture(std::move(_glossy_texture))
 {
 }
 
 
-Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
+Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
   double n_dot_out = Dot(surface_hit.normal, out_direction);
   double ns_dot_out = Dot(surface_hit.shading_normal, out_direction);
@@ -191,13 +194,14 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
   }
   double microfacet_val = fresnel_term*geometry_term*microfacet_distribution_val*0.25/ns_dot_in/ns_dot_out;
 
-  auto kr_s_local = MaybeMultiplyTextureLookup(kr_s, glossy_texture.get(), surface_hit);  
+  auto kr_s_taken = Take(kr_s, context.lambda_idx);
+  auto kr_s_local = MaybeMultiplyTextureLookup(kr_s_taken, glossy_texture.get(), surface_hit, context.lambda_idx);  
 
   return microfacet_val * kr_s_local;
 }
 
 
-BSDFSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const
+BSDFSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
 {
   auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
   Double3 h_r_local = SampleTrafo::ToBeckmanHemisphere(sampler.UniformUnitSquare(), alpha);
@@ -206,14 +210,14 @@ BSDFSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, con
   Double3 out_direction = 2.*std::abs(Dot(reverse_incident_dir, h_r))*h_r - reverse_incident_dir;
   BSDFSample smpl; 
   smpl.dir = out_direction;
-  smpl.scatter_function = this->EvaluateBSDF(reverse_incident_dir, surface_hit, out_direction, &smpl.pdf);
+  smpl.scatter_function = this->EvaluateBSDF(reverse_incident_dir, surface_hit, out_direction, context, &smpl.pdf);
   return smpl;
 }
 
 
 
 
-Spectral3 InvisibleShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, double *pdf) const
+Spectral3 InvisibleShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
   constexpr double tol = Epsilon;
   double u = LengthSqr(incident_dir + out_direction);
@@ -224,7 +228,7 @@ Spectral3 InvisibleShader::EvaluateBSDF(const Double3 &incident_dir, const RaySu
 }
 
 
-BSDFSample InvisibleShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler) const
+BSDFSample InvisibleShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
 {
   return BSDFSample{-incident_dir, Spectral3{1.}, 1.};
 }
@@ -268,8 +272,8 @@ Spectral3 VacuumMedium::EvaluateTransmission(const RaySegment& segment, Sampler 
 
 
 
-HomogeneousMedium::HomogeneousMedium(const Spectral3& _sigma_s, const Spectral3& _sigma_a, int priority)
-  : Medium(priority), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{_sigma_s + _sigma_a},
+HomogeneousMedium::HomogeneousMedium(const RGB& _sigma_s, const RGB& _sigma_a, int priority)
+  : Medium(priority), sigma_s{Color::RGBToSpectrum(_sigma_s)}, sigma_a{Color::RGBToSpectrum(_sigma_a)}, sigma_ext{sigma_s + sigma_a},
     phasefunction{new PhaseFunctions::Uniform()}
 {
 }
@@ -294,6 +298,9 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
     0.,
     Spectral3{1.}
   };
+  // Shadow the member var by the new var taking only the current lambdas.
+  Spectral3 sigma_ext = Take(this->sigma_ext, context.lambda_idx);
+  Spectral3 sigma_s   = Take(this->sigma_s,   context.lambda_idx);
   double sigma_t_majorant = sigma_ext.maxCoeff();
   double inv_sigma_t_majorant = 1./sigma_t_majorant;
   constexpr int emergency_abort_max_num_iterations = 100;
@@ -330,6 +337,7 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
 
 Spectral3 HomogeneousMedium::EvaluateTransmission(const RaySegment& segment, Sampler &sampler, const PathContext &context) const
 {
+  Spectral3 sigma_ext = Take(this->sigma_ext, context.lambda_idx);
   return (-sigma_ext * segment.length).exp();
 }
 

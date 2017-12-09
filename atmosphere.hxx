@@ -20,7 +20,7 @@ struct SimpleConstituents
   static constexpr int AEROSOLES = 1;
   struct SealevelQuantities
   {
-    Spectral3 sigma_s, sigma_a;
+    SpectralN sigma_s, sigma_a;
   };
   static constexpr int NUM_CONSTITUENTS = 2;
   SealevelQuantities at_sealevel[NUM_CONSTITUENTS];
@@ -31,9 +31,8 @@ struct SimpleConstituents
   PhaseFunctions::Rayleigh phasefunction_rayleigh;
 
   inline const PhaseFunctions::PhaseFunction& GetPhaseFunction(int idx) const;
-  inline void ComputeCollisionCoefficients(double altitude, int lambda_idx, double &sigma_s, double &sigma_a) const;
-  inline void ComputeCollisionCoefficients(double altitude, Spectral3 &sigma_s, Spectral3 &sigma_a) const;
-  inline void ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent) const;
+  inline void ComputeCollisionCoefficients(double altitude, Spectral3 &sigma_s, Spectral3 &sigma_a, const Index3 &lambda_idx) const;
+  inline void ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent, const Index3 &lambda_idx) const;
 };
 
 
@@ -60,21 +59,7 @@ public:
 };
 
 
-inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, int lambda_idx, double &sigma_s, double &sigma_a) const
-{
-  assert (altitude > lower_altitude_cutoff);
-  altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
-  sigma_a = 0.;
-  sigma_s = 0.;
-  for (int i=0; i<NUM_CONSTITUENTS; ++i)
-  {
-    double rho_relative = std::exp(-inv_scale_height[i] * altitude);
-    sigma_a += at_sealevel[i].sigma_a[lambda_idx] * rho_relative;
-    sigma_s += at_sealevel[i].sigma_s[lambda_idx] * rho_relative;
-  }
-}
-
-inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, Spectral3& sigma_s, Spectral3& sigma_a) const
+inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, Spectral3& sigma_s, Spectral3& sigma_a, const Index3 &lambda_idx) const
 {
   assert (altitude > lower_altitude_cutoff);
   altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
@@ -83,8 +68,8 @@ inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, Sp
   for (int i=0; i<NUM_CONSTITUENTS; ++i)
   {
     double rho_relative = std::exp(-inv_scale_height[i] * altitude);
-    sigma_a += at_sealevel[i].sigma_a * rho_relative;
-    sigma_s += at_sealevel[i].sigma_s * rho_relative;
+    sigma_a += Take(at_sealevel[i].sigma_a, lambda_idx) * rho_relative;
+    sigma_s += Take(at_sealevel[i].sigma_s, lambda_idx) * rho_relative;
   }
 }
 
@@ -99,14 +84,14 @@ const PhaseFunctions::PhaseFunction& SimpleConstituents::GetPhaseFunction(int id
 }
 
 
-void SimpleConstituents::ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent) const
+void SimpleConstituents::ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent, const Index3 &lambda_idx) const
 {
   assert (altitude > lower_altitude_cutoff);
   altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
   for (int i=0; i<NUM_CONSTITUENTS; ++i)
   {
     double rho_relative = std::exp(-inv_scale_height[i] * altitude);
-    sigma_s_of_constituent[i]= at_sealevel[i].sigma_s * rho_relative;
+    sigma_s_of_constituent[i]= Take(at_sealevel[i].sigma_s, lambda_idx) * rho_relative;
   }
 }
 

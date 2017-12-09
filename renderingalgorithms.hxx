@@ -324,12 +324,36 @@ class PathTracing : public BaseAlgo
 {
   int max_ray_depth;
   double sufficiently_long_distance_to_go_outside_the_scene_bounds;
+
+  struct LambdaSelectionFactory
+  {
+    SpectralN lambda_weights;
+    LambdaSelectionFactory()
+    {
+      lambda_weights.setConstant(1.);
+      lambda_weights[0] = 3.;
+      lambda_weights[1] = 2./3.;
+      lambda_weights[lambda_weights.size()-1] = 3.;
+      lambda_weights[lambda_weights.size()-2] = 2./3.;
+    }
+    
+    std::pair<Index3, Spectral3> WithWeights(Sampler &sampler) const
+    {
+      int center_idx = sampler.UniformInt(1, Color::NBINS-2);
+      auto idx     = Index3{center_idx-1, center_idx, center_idx+1};
+      auto weights = Take(lambda_weights, idx);
+      return std::make_pair(idx, weights);
+    }
+  } lambda_selection_factory;
+  
+  
 public:
   PathTracing(const Scene &_scene, const AlgorithmParameters &algo_params) 
   : BaseAlgo(_scene), max_ray_depth(algo_params.max_ray_depth) 
   {
     Box bb = _scene.GetBoundingBox();
     sufficiently_long_distance_to_go_outside_the_scene_bounds = 10.*(bb.max - bb.min).maxCoeff();
+
   }
   
   
@@ -387,7 +411,7 @@ public:
     for (const auto &hit : hits)
     {
       RaySurfaceIntersection intersection{hit, seg};
-      result *= intersection.shader().EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, nullptr);
+      result *= intersection.shader().EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, context, nullptr);
       if (result.isZero())
         return result;
       result *= SegmentContribution(t, hit.t);
@@ -415,7 +439,7 @@ public:
     {
       d_factor = std::max(0., Dot(intersection->shading_normal, segment_to_light.ray.dir));
       const auto &shader = intersection->shader();
-      scatter_factor = shader.EvaluateBSDF(-incident_dir, *intersection, segment_to_light.ray.dir, nullptr);
+      scatter_factor = shader.EvaluateBSDF(-incident_dir, *intersection, segment_to_light.ray.dir, context, nullptr);
     }
     else
     {
@@ -439,9 +463,11 @@ public:
     return sample_value;
   }
   
-  Spectral3 MakePrettyPixel(int pixel_index) override
+  
+  RGB MakePrettyPixel(int pixel_index) override
   {
-    PathContext context;
+    auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
+    PathContext context{lambda_selection.first};
     auto cam_sample = TakeRaySample(scene.GetCamera(), pixel_index, sampler);
 
     MediumTracker medium_tracker = this->medium_tracker_root;
@@ -501,7 +527,7 @@ public:
         gogogo = RouletteSurvival(context.beta, level);
         if (gogogo)
         {
-          auto surface_sample  = intersection.shader().SampleBSDF(-segment.ray.dir, intersection, sampler);
+          auto surface_sample  = intersection.shader().SampleBSDF(-segment.ray.dir, intersection, sampler, context);
           gogogo = !surface_sample.scatter_function.isZero();
           if (gogogo)
           {
@@ -533,8 +559,8 @@ public:
       }
       assert(context.beta.allFinite());
     }
-    
-    return path_sample_value;
+
+    return Color::SpectralSelectionToRGB(lambda_selection.second*path_sample_value, lambda_selection.first);
   }
 };
 

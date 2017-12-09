@@ -41,19 +41,15 @@ typedef Eigen::Matrix<double, 2, 1> Float2;
 #define VECDARG class T,int d
 #define VECD Eigen::Matrix<T, d, 1>
 #else
-typedef Vec<int, 3> Int3;
-typedef Vec<int, 2> Int2;
-typedef Vec<bool, 3> Bool3;
-typedef Vec<bool, 2> Bool2;
 typedef Vec<double, 3> Double3;
 typedef Vec<double, 2> Double2;
 typedef Vec<double, 3> Float3;
 typedef Vec<double, 2> Float2;
-typedef Vec<long, 2> Long2;
-typedef Vec<long, 2> Long3;
 #define VECDARG class T,int d
 #define VECD Vec<T, d>
 #endif
+
+using Index3 = Eigen::Array<int, 3, 1>;
 
 template<class T>
 constexpr int static_size()
@@ -221,18 +217,21 @@ inline int TowerSampling(const T *probs, T r)
     --n;
   }
   return n;
-//   if (n == 0)
-//   {
-//     return 0;
-//   }
-//   else
-//   {
-//     if (r < probs[n-1])
-//       return n-1;
-//     r -= probs[n-1];
-//     return TowerSampling<n-1>(probs, r);
-//   }
 }
+
+
+template<class T, int N, int M>
+inline Eigen::Array<T,M,1> Take(const Eigen::Array<T,N,1>& u, const Eigen::Array<int, M, 1> &indices)
+{
+  Eigen::Array<T,M,1> ret;
+  for (int i=0; i<indices.size(); ++i)
+  {
+    assert(indices[i] >= 0 && indices[i]<u.size());
+    ret[i] = u[indices[i]];
+  }
+  return ret;
+}
+
 
 
 constexpr auto Epsilon = std::numeric_limits<double>::epsilon();

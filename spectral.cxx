@@ -40,7 +40,7 @@ static const double mat_spectrum_to_rgb[3][NBINS] = {
 };
 
 
-double RGBToSpectrum(int bin, const Spectral3 &rgb)
+double RGBToSpectrum(int bin, const RGB &rgb)
 {
   const double red = rgb[0], green = rgb[1], blue = rgb[2];
   double ret = 0.;
@@ -85,13 +85,8 @@ double RGBToSpectrum(int bin, const Spectral3 &rgb)
   return ret;
 }
 
-double GetWavelength(int bin)
-{
-  return (bin+0.5)/(NBINS)*(lambda_max-lambda_min) + lambda_min;
-}
 
-
-Spectral3 SpectrumToRGB(int bin, double intensity)
+RGB SpectrumToRGB(int bin, double intensity)
 {
   Spectral3 x;
   for (int i=0; i<3; ++i)
@@ -109,7 +104,7 @@ inline void LinComb(double *dst, double a, const double *sa, double b, const dou
 }
 
 
-SpectralN RGBToSpectrum(const Spectral3 &rgb)
+SpectralN RGBToSpectrum(const RGB &rgb)
 {
   const double red = rgb[0], green = rgb[1], blue = rgb[2];
   SpectralN ret;
@@ -161,9 +156,9 @@ SpectralN RGBToSpectrum(const Spectral3 &rgb)
   return ret;
 }
 
-Spectral3 SpectrumToRGB(const SpectralN &val)
+RGB SpectrumToRGB(const SpectralN &val)
 {
-  Spectral3 x;
+  RGB x;
   for (int i=0; i<3; ++i)
   {
     x[i] = 0.;
@@ -173,6 +168,17 @@ Spectral3 SpectrumToRGB(const SpectralN &val)
   return x;
 }
 
+RGB SpectralSelectionToRGB(const Spectral3 &val, const Index3 &idx)
+{
+  RGB x;
+  for (int i=0; i<3; ++i)
+  {
+    x[i] = 0.;
+    for (int j=0; j<idx.size(); ++j)
+      x[i] += val[j] * mat_spectrum_to_rgb[i][idx[j]];
+  }
+  return x;
+}
 
 SpectralN MaxwellBoltzmanDistribution(double temp)
 {

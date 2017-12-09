@@ -45,6 +45,16 @@ TEST(BasicAssumptions, UniqueAlgo)
 }
 
 
+TEST(BasicAssumptions, TakeFromVectorByIndices)
+{
+  Eigen::Array<double, 10, 1> m; m << 0, 1, 2, 3, 4, 5, 6, 7, 8, 9;
+  Eigen::Array<double, 3, 1> v = Take(m, Index3{3,4,9});
+  ASSERT_EQ(v[0], 3);
+  ASSERT_EQ(v[1], 4);
+  ASSERT_EQ(v[2], 9);
+}
+
+
 // Throw a one with probability p and zero with probability 1-p.
 // Let this be reflected by random variable X \in {0, 1}.
 // What is the expectation E[X] and std deviation sqrt(Var[X])?
@@ -179,6 +189,26 @@ TEST(Spectral, RGBConversion)
   }
 }
 
+
+TEST(Spectral, RGBConversionLinearity)
+{
+  using namespace Color;
+  SpectralN spectra[3] = {
+    SpectralN::Zero(), SpectralN::Zero(), SpectralN::Zero()};
+  spectra[0][0] = 1.;
+  spectra[1][2] = 1.;
+  spectra[2][NBINS-1] = 1.;
+  auto CheckLinear = [](const SpectralN &a, const SpectralN &b)
+  {
+    RGB rgb_a = SpectrumToRGB(a);
+    RGB rgb_b = SpectrumToRGB(b);
+    RGB rgb_ab = SpectrumToRGB(a+b);
+    EXPECT_LE((rgb_ab - rgb_b - rgb_a).abs().maxCoeff(), 1.e-3);
+  };
+  CheckLinear(spectra[0], spectra[1]);
+  CheckLinear(spectra[0], spectra[2]);
+  CheckLinear(spectra[1], spectra[2]);
+}
 
 
 class TestIntersection : public testing::Test
@@ -536,7 +566,7 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
   Spectral3 integral{0.};
   for (int i=0; i<N; ++i)
   {
-    PathContext context;
+    PathContext context{Color::LambdaIdxClosestToRGBPrimaries()};
     Medium::InteractionSample s = medium.SampleInteractionPoint(RaySegment{{{0.,0.,0.}, {0., 0., 1.,}}, cutoff_length}, sampler, context);
     if (s.t  > cutoff_length)
       img.SetColor(255, 0, 0);
@@ -1127,7 +1157,7 @@ m scenes/unitcube.dae
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
   scene.PrintInfo();
-  PathContext context{};
+  PathContext context{Color::LambdaIdxClosestToRGBPrimaries()};
   PathTracing rt(scene, AlgorithmParameters());
   MediumTracker medium_tracker(scene);
   HitVector hits_temporary_buffer;
@@ -1166,17 +1196,17 @@ TEST(SimpleAtmosphereTest, CollisionCoefficients)
 {
   Atmosphere::SimpleConstituents constituents{};
   double altitude = 10.;
-  int lambda = 0;
-  double sigma_s, sigma_a;
-  constituents.ComputeCollisionCoefficients(altitude, lambda, sigma_s, sigma_a);
+  Spectral3 sigma_s, sigma_a;
+  Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
+  constituents.ComputeCollisionCoefficients(altitude, sigma_s, sigma_a, lambda_idx);
   double expected_sigma_s =
-      std::exp(-altitude/8.)*5.8e-3 +
+      std::exp(-altitude/8.)*0.00781519 +
       std::exp(-altitude/1.2)*20.e-3;
   double expected_sigma_a =
       std::exp(-altitude/8.)*0.e-3 +
       std::exp(-altitude/1.2)*2.22e-3;
-  EXPECT_NEAR(sigma_s, expected_sigma_s, 1.e-12);
-  EXPECT_NEAR(sigma_a, expected_sigma_a, 1.e-12);
+  EXPECT_NEAR(sigma_s[0], expected_sigma_s, 1.e-8);
+  EXPECT_NEAR(sigma_a[0], expected_sigma_a, 1.e-8);
 }
 
 
