@@ -295,11 +295,16 @@ public:
 class NormalVisualizer : public BaseAlgo
 {
 public:
-  NormalVisualizer(const Scene &_scene) : BaseAlgo(_scene) {}
+  NormalVisualizer(const Scene &_scene) : BaseAlgo(_scene) 
+  {
+  }
   
   Spectral3 MakePrettyPixel(int pixel_index) override
   {
-    auto cam_sample = TakeRaySample(scene.GetCamera(), pixel_index, sampler);
+    auto cam_sample = TakeRaySample(
+      scene.GetCamera(), pixel_index, sampler,
+      RadianceOrImportance::LightPathContext(Color::LambdaIdxClosestToRGBPrimaries())
+    );
     
     RaySegment seg{cam_sample.ray_out, LargeNumber};
     HitId hit = scene.Intersect(seg.ray, seg.length);
@@ -430,7 +435,9 @@ public:
 
     const Light* light; double pmf_of_light; std::tie(light, pmf_of_light) = PickLightUniform();
 
-    RadianceOrImportance::Sample light_sample = light->TakePositionSample(sampler);
+    RadianceOrImportance::Sample light_sample = light->TakePositionSample(
+      sampler, 
+      RadianceOrImportance::LightPathContext(context.lambda_idx));
     RaySegment segment_to_light = MakeSegmentToLight(pos, light_sample, intersection);
 
     double d_factor = 1.;
@@ -463,12 +470,30 @@ public:
     return sample_value;
   }
   
+  Spectral3 EvaluateEnvironmentalRadianceField(const Double3 &viewing_dir, const RadianceOrImportance::LightPathContext &context)
+  {
+    Spectral3 environmental_radiance{0.};
+    for (int i=0; i<scene.GetNumLights(); ++i)
+    {
+      const auto &light = scene.GetLight(i);
+      if (light.is_environmental_radiance_distribution) // What an aweful hack. Should there not be an env map class or similar?
+      {
+        environmental_radiance += light.EvaluatePositionComponent(
+          -viewing_dir,
+          context,
+          nullptr);
+      }
+    }
+    return environmental_radiance;
+  }
   
   RGB MakePrettyPixel(int pixel_index) override
   {
     auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
     PathContext context{lambda_selection.first};
-    auto cam_sample = TakeRaySample(scene.GetCamera(), pixel_index, sampler);
+    auto cam_sample = TakeRaySample(
+      scene.GetCamera(), pixel_index, sampler, 
+      RadianceOrImportance::LightPathContext{lambda_selection.first});
 
     MediumTracker medium_tracker = this->medium_tracker_root;
     medium_tracker.initializePosition(cam_sample.ray_out.org, hits);
@@ -479,7 +504,7 @@ public:
 
     Spectral3 path_sample_value{0.};
     RaySegment segment{cam_sample.ray_out, LargeNumber};
-    int level = 1;
+    int number_of_interactions = 0;
 
     bool gogogo = true;
     while (gogogo)
@@ -496,10 +521,12 @@ public:
         Double3 interaction_location = segment.ray.PointAt(medium_smpl.t);
         PATH_LOGGING(path_logger.AddSegment(segment.ray.org, interaction_location, context.beta, PathLogger::EYE_SEGMENT);)
 
+        ++number_of_interactions;
+        
         path_sample_value += context.beta *
           LightConnection(interaction_location, segment.ray.dir, nullptr, medium_tracker, context);
 
-        gogogo = RouletteSurvival(context.beta, level);
+        gogogo = RouletteSurvival(context.beta, number_of_interactions);
         if (gogogo)
         {
           auto scatter_smpl = medium.SamplePhaseFunction(-segment.ray.dir, interaction_location, sampler, context);
@@ -510,7 +537,6 @@ public:
           segment.ray.org = interaction_location;
           segment.ray.dir = scatter_smpl.dir;
           segment.length  = LargeNumber;
-          ++level;
         }
       }
       else if (hit)
@@ -518,13 +544,15 @@ public:
         RaySurfaceIntersection intersection{hit, segment};
         PATH_LOGGING(path_logger.AddSegment(segment.ray.org, intersection.pos, context.beta, PathLogger::EYE_SEGMENT);)
 
+        number_of_interactions = intersection.shader().IsPassthrough() ? number_of_interactions : number_of_interactions+1;
+        
         if (!intersection.shader().IsReflectionSpecular())
         {
           auto lc = LightConnection(intersection.pos, segment.ray.dir, &intersection, medium_tracker, context);
           path_sample_value += context.beta * lc;
         }
 
-        gogogo = RouletteSurvival(context.beta, level);
+        gogogo = RouletteSurvival(context.beta, number_of_interactions);
         if (gogogo)
         {
           auto surface_sample  = intersection.shader().SampleBSDF(-segment.ray.dir, intersection, sampler, context);
@@ -549,7 +577,6 @@ public:
             segment.ray.org = intersection.pos+AntiSelfIntersectionOffset(intersection, RAY_EPSILON, surface_sample.dir);
             segment.ray.dir = surface_sample.dir;
             segment.length  = LargeNumber;
-            level = intersection.shader().IsPassthrough() ? level : level+1;
           }
         }
       }
@@ -560,6 +587,16 @@ public:
       assert(context.beta.allFinite());
     }
 
+    if (number_of_interactions == 0)
+    {
+      // I should actually do this whenever there was no deterministic light connection.
+      // And that would be of course here, if the primary ray hit nothing, or if the last interaction
+      // was perfectly specular.
+      path_sample_value += 1./cam_sample.pdf * cam_sample.measurement_contribution * EvaluateEnvironmentalRadianceField(
+        segment.ray.dir,
+        RadianceOrImportance::LightPathContext(lambda_selection.first));
+    }
+    
     return Color::SpectralSelectionToRGB(lambda_selection.second*path_sample_value, lambda_selection.first);
   }
 };

@@ -20,6 +20,7 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 
+// TODO: Rename this
 template<class Thing>
 class CurrentThing
 {
@@ -536,6 +537,32 @@ void NFFParser::Parse()
       continue;
     }
 
+    
+    if (!strcmp(token, "lsun"))
+    {
+      Double3 dir_out;
+      double total_power, opening_angle;
+      int num = std::sscanf(line.c_str(),"lsun %lg %lg %lg %lg %lg",
+          &dir_out[0],&dir_out[1],&dir_out[2], &total_power, &opening_angle);
+      Normalize(dir_out);
+      if (num == 4)
+      {
+        // "The Sun is seen from Earth at an average angular diameter of about 9.35×10−3 radians."
+        // https://en.wikipedia.org/wiki/Solid_angle
+        opening_angle = 0.26;
+        num = 5;
+      }
+      if (num == 5)
+      {
+        scene->AddLight(std::make_unique<Sun>(total_power, dir_out, opening_angle));
+      }
+      else
+      {
+        throw MakeException("Error");
+      }
+      continue;
+    }
+    
   
     if (!strcmp(token, "lddirection"))
     {

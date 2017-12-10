@@ -931,7 +931,9 @@ public:
     constexpr int Nsamples = 100;
     for (int i = 0; i < Nsamples; ++i)
     {
-      auto s = cam->TakeDirectionSampleFrom(cam->PixelToUnit({_pixel_x, _pixel_y}), pos, sampler);
+      auto s = cam->TakeDirectionSampleFrom(
+        cam->PixelToUnit({_pixel_x, _pixel_y}), pos, sampler,
+        RadianceOrImportance::LightPathContext{Color::LambdaIdxClosestToRGBPrimaries()});
       HitId hit;
       double length = 100.;
       bool is_hit = imageplane.Intersect(s.ray_out, length, hit);
