@@ -236,8 +236,58 @@ void NFFParser::Parse()
       std::cout << "Transform: t=\n" << currentTransform.translation() << "\nr=\n" << currentTransform.linear() << std::endl;
       continue;
     }
+    
     /* camera */
-
+    
+    struct CommonCameraData
+    {
+      Double3 pos{NaN}, at{NaN}, up{NaN};
+      int resX{-1}, resY{-1};
+    };
+    
+    auto ParseCameraData = [this]() -> CommonCameraData
+    {
+      CommonCameraData cd;
+      bool ok;
+      ok = 3 == std::sscanf(line.c_str(),"from %lg %lg %lg\n",&cd.pos[0],&cd.pos[1],&cd.pos[2]);
+      if (!ok) throw MakeException("Error");
+      NextLine();
+      ok = 3 == std::sscanf(line.c_str(),"at %lg %lg %lg\n",&cd.at[0],&cd.at[1],&cd.at[2]);
+      if (!ok) throw MakeException("Error");
+      NextLine();
+      ok = 3 == std::sscanf(line.c_str(),"up %lg %lg %lg\n",&cd.up[0],&cd.up[1],&cd.up[2]);
+      if (!ok) throw MakeException("Error");
+      NextLine();
+      ok = 2 == std::sscanf(line.c_str(),"resolution %d %d\n",&cd.resX,&cd.resY);
+      if (!ok) throw MakeException("Error");
+      NextLine();
+      return cd;
+    };
+    
+    auto MakeConsistentResolutionSettings = [this](CommonCameraData &cd)
+    {
+      if (render_params)
+      {
+        if (render_params->height > 0)
+          cd.resY = render_params->height;
+        else
+          render_params->height = cd.resY;
+        if (render_params->width > 0)
+          cd.resX = render_params->width;
+        else
+          render_params->width = cd.resX;
+      }
+    };
+    
+    if (!strcmp(token, "vfisheye"))
+    {
+      NextLine();
+      auto cd = ParseCameraData();
+      MakeConsistentResolutionSettings(cd);
+      scene->SetCamera<FisheyeHemisphereCamera>(cd.pos,cd.at-cd.pos,cd.up,cd.resX,cd.resY);
+      continue;
+    }
+    
     if (!strcmp(token,"v"))
     {
       // FORMAT:
@@ -245,43 +295,16 @@ void NFFParser::Parse()
       //     from %lg %lg %lg
       //     at %lg %lg %lg
       //     up %lg %lg %lg
-      //     angle %lg
-      //     hither %lg
       //     resolution %d %d
-      Double3 pos{NaN}, at{NaN}, up{NaN};
-      double angle{NaN}, hither{NaN};
-      int resX{-1}, resY{-1};
-      bool ok;
+      //     angle %lg
+      double angle{NaN};
       NextLine();
-      ok = 3 == sscanf(line.c_str(),"from %lg %lg %lg\n",&pos[0],&pos[1],&pos[2]);
-      if (!ok) throw MakeException("Error");
+      auto cd = ParseCameraData();
+      MakeConsistentResolutionSettings(cd);
+      if (1 != std::sscanf(line.c_str(),"angle %lg\n",&angle)) 
+        throw MakeException("Error");
       NextLine();
-      ok = 3 == sscanf(line.c_str(),"at %lg %lg %lg\n",&at[0],&at[1],&at[2]);
-      if (!ok) throw MakeException("Error");
-      NextLine();
-      ok = 3 == sscanf(line.c_str(),"up %lg %lg %lg\n",&up[0],&up[1],&up[2]);
-      if (!ok) throw MakeException("Error");
-      NextLine();
-      ok = 1 == sscanf(line.c_str(),"angle %lg\n",&angle);
-      if (!ok) throw MakeException("Error");
-      NextLine();
-      ok = 1 == sscanf(line.c_str(),"hither %lg\n",&hither);
-      if (!ok) throw MakeException("Error");
-      NextLine();
-      ok = 2 == sscanf(line.c_str(),"resolution %d %d\n",&resX,&resY);
-      if (!ok) throw MakeException("Error");
-      if (render_params)
-      {
-        if (render_params->height > 0)
-          resY = render_params->height;
-        else
-          render_params->height = resY;
-        if (render_params->width > 0)
-          resX = render_params->width;
-        else
-          render_params->width = resX;
-      }
-      scene->SetCamera<PerspectiveCamera>(pos,at-pos,up,angle,resX,resY);
+      scene->SetCamera<PerspectiveCamera>(cd.pos,cd.at-cd.pos,cd.up,angle,cd.resX,cd.resY);
       continue;
     }
     

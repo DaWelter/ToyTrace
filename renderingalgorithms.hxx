@@ -495,6 +495,9 @@ public:
       scene.GetCamera(), pixel_index, sampler, 
       RadianceOrImportance::LightPathContext{lambda_selection.first});
 
+    if (cam_sample.measurement_contribution.isZero())
+      return RGB::Zero();
+    
     MediumTracker medium_tracker = this->medium_tracker_root;
     medium_tracker.initializePosition(cam_sample.ray_out.org, hits);
     
