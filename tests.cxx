@@ -1197,7 +1197,7 @@ TEST(SimpleAtmosphereTest, Altitude)
 
 TEST(SimpleAtmosphereTest, CollisionCoefficients)
 {
-  Atmosphere::SimpleConstituents constituents{};
+  Atmosphere::ExponentialConstituentDistribution constituents{};
   double altitude = 10.;
   Spectral3 sigma_s, sigma_a;
   Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();

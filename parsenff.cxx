@@ -549,9 +549,9 @@ void NFFParser::Parse()
       }
       else if(num == 5)
       {
-        auto *medium = new Atmosphere::Simple(planet_center, radius, mediums.size());
+        auto medium = Atmosphere::MakeSimple(planet_center, radius, mediums.size());
         mediums.set_and_activate(
-          name, medium);
+          name, medium.release());
       }
       else
       {

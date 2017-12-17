@@ -10,30 +10,52 @@ class SimpleAtmosphereTesting;
 namespace Atmosphere
 {
 
+// Uses km as length units.
+static constexpr int MOLECULES = 0;
+static constexpr int AEROSOLES = 1;
+static constexpr int NUM_CONSTITUENTS = 2;
+  
 
-struct SimpleConstituents
+template<class ConstituentDistribution_, class Geometry_>
+class AtmosphereTemplate : public Medium
 {
-  SimpleConstituents();
+public:
+  using ConstituentDistribution = ConstituentDistribution_;
+  using Geometry = Geometry_;
 
-  // Uses km as length units.
-  static constexpr int MOLECULES = 0;
-  static constexpr int AEROSOLES = 1;
+private:
+  Geometry geometry;
+  ConstituentDistribution constituents;
+  
+  PhaseFunctions::HenleyGreenstein phasefunction_hg;
+  PhaseFunctions::Rayleigh phasefunction_rayleigh;
+  inline const PhaseFunctions::PhaseFunction& GetPhaseFunction(int idx) const;
+  
+public:
+  AtmosphereTemplate(const Geometry &geometry_, const ConstituentDistribution &constituents_, int _priority);
+  InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
+  Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
+  PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;
+  Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
+};
+
+
+
+struct ExponentialConstituentDistribution
+{
+  ExponentialConstituentDistribution();
   struct SealevelQuantities
   {
     SpectralN sigma_s, sigma_a;
   };
-  static constexpr int NUM_CONSTITUENTS = 2;
   SealevelQuantities at_sealevel[NUM_CONSTITUENTS];
   double inv_scale_height[NUM_CONSTITUENTS];
   double lower_altitude_cutoff;
 
-  PhaseFunctions::HenleyGreenstein phasefunction_hg;
-  PhaseFunctions::Rayleigh phasefunction_rayleigh;
-
-  inline const PhaseFunctions::PhaseFunction& GetPhaseFunction(int idx) const;
-  inline void ComputeCollisionCoefficients(double altitude, Spectral3 &sigma_s, Spectral3 &sigma_a, const Index3 &lambda_idx) const;
-  inline void ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent, const Index3 &lambda_idx) const;
+  void ComputeCollisionCoefficients(double altitude, Spectral3 &sigma_s, Spectral3 &sigma_a, const Index3 &lambda_idx) const;
+  void ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent, const Index3 &lambda_idx) const;
 };
+
 
 
 struct SphereGeometry
@@ -44,56 +66,6 @@ struct SphereGeometry
   inline double ComputeAltitude(const Double3 &pos) const;
   inline Double3 ComputeLowestPointAlong(const RaySegment &seg) const;
 };
-
-
-class Simple : public Medium
-{
-  SimpleConstituents constituents;
-  SphereGeometry geometry;
-public:
-  Simple(const Double3 &_planet_center, double _planet_radius, int _priority);
-  InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
-  Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
-  PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;
-  Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
-};
-
-
-inline void SimpleConstituents::ComputeCollisionCoefficients(double altitude, Spectral3& sigma_s, Spectral3& sigma_a, const Index3 &lambda_idx) const
-{
-  assert (altitude > lower_altitude_cutoff);
-  altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
-  sigma_a = Spectral3{0.};
-  sigma_s = Spectral3{0.};
-  for (int i=0; i<NUM_CONSTITUENTS; ++i)
-  {
-    double rho_relative = std::exp(-inv_scale_height[i] * altitude);
-    sigma_a += Take(at_sealevel[i].sigma_a, lambda_idx) * rho_relative;
-    sigma_s += Take(at_sealevel[i].sigma_s, lambda_idx) * rho_relative;
-  }
-}
-
-
-
-const PhaseFunctions::PhaseFunction& SimpleConstituents::GetPhaseFunction(int idx) const
-{
-  using PF = PhaseFunctions::PhaseFunction;
-  return (idx==MOLECULES) ? 
-    static_cast<const PF&>(phasefunction_rayleigh) : 
-    static_cast<const PF&>(phasefunction_hg);
-}
-
-
-void SimpleConstituents::ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent, const Index3 &lambda_idx) const
-{
-  assert (altitude > lower_altitude_cutoff);
-  altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
-  for (int i=0; i<NUM_CONSTITUENTS; ++i)
-  {
-    double rho_relative = std::exp(-inv_scale_height[i] * altitude);
-    sigma_s_of_constituent[i]= Take(at_sealevel[i].sigma_s, lambda_idx) * rho_relative;
-  }
-}
 
 
 double SphereGeometry::ComputeAltitude(const Double3 &pos) const
@@ -116,5 +88,10 @@ Double3 SphereGeometry::ComputeLowestPointAlong(const RaySegment &segment) const
   return lowest_point;
 }
 
+
+using Simple = AtmosphereTemplate<ExponentialConstituentDistribution, SphereGeometry>;
+
+
+std::unique_ptr<Simple> MakeSimple(const Double3 &planet_center, double radius, int _priority);
 
 }

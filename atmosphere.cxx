@@ -8,16 +8,29 @@
 namespace Atmosphere
 {
 
-Simple::Simple(const Double3& _planet_center, double _planet_radius, int _priority)
+template<class ConstituentDistribution_, class Geometry_>
+AtmosphereTemplate<ConstituentDistribution_, Geometry_>::AtmosphereTemplate(const Geometry &geometry_, const ConstituentDistribution &constituents_, int _priority)
   : Medium(_priority),
-    geometry{_planet_center, _planet_radius},
-    constituents{}
+    geometry{geometry_},
+    constituents{constituents_},
+    phasefunction_hg(0.76)
 {
 
 }
 
 
-Medium::InteractionSample Simple::SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const
+template<class ConstituentDistribution_, class Geometry_>
+const PhaseFunctions::PhaseFunction& AtmosphereTemplate<ConstituentDistribution_, Geometry_>::GetPhaseFunction(int idx) const
+{
+  using PF = PhaseFunctions::PhaseFunction;
+  return (idx==MOLECULES) ? 
+    static_cast<const PF&>(phasefunction_rayleigh) : 
+    static_cast<const PF&>(phasefunction_hg);
+}
+
+
+template<class ConstituentDistribution_, class Geometry_>
+Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_>::SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const
 {
   assert(!context.beta.isZero());
   Medium::InteractionSample smpl{
@@ -74,7 +87,8 @@ Medium::InteractionSample Simple::SampleInteractionPoint(const RaySegment &segme
 }
 
 
-Spectral3 Simple::EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const
+template<class ConstituentDistribution_, class Geometry_>
+Spectral3 AtmosphereTemplate<ConstituentDistribution_, Geometry_>::EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const
 {
   Spectral3 estimate{1.};
   // The lowest point gives the largest collision coefficients along the path.
@@ -115,32 +129,35 @@ Spectral3 Simple::EvaluateTransmission(const RaySegment &segment, Sampler &sampl
 }
 
 
-Medium::PhaseSample Simple::SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const
+template<class ConstituentDistribution_, class Geometry_>
+Medium::PhaseSample AtmosphereTemplate<ConstituentDistribution_, Geometry_>::SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const
 {
   double altitude = geometry.ComputeAltitude(pos);
-  Spectral3 sigma_s[SimpleConstituents::NUM_CONSTITUENTS];
+  Spectral3 sigma_s[NUM_CONSTITUENTS];
   constituents.ComputeSigmaS(altitude, sigma_s, context.lambda_idx);
 
-  return PhaseFunctions::Combined(context.beta, sigma_s[0], constituents.GetPhaseFunction(0), sigma_s[1], constituents.GetPhaseFunction(1))
+  return PhaseFunctions::Combined(context.beta, sigma_s[0], GetPhaseFunction(0), sigma_s[1], GetPhaseFunction(1))
     .SampleDirection(incident_dir, sampler);
 }
 
 
-Spectral3 Simple::EvaluatePhaseFunction(const Double3 &incident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const
+template<class ConstituentDistribution_, class Geometry_>
+Spectral3 AtmosphereTemplate<ConstituentDistribution_, Geometry_>::EvaluatePhaseFunction(const Double3 &incident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const
 {
   double altitude = geometry.ComputeAltitude(pos);
-  Spectral3 sigma_s[SimpleConstituents::NUM_CONSTITUENTS];
+  Spectral3 sigma_s[NUM_CONSTITUENTS];
   constituents.ComputeSigmaS(altitude, sigma_s, context.lambda_idx);
   
-  return PhaseFunctions::Combined(context.beta, sigma_s[0], constituents.GetPhaseFunction(0), sigma_s[1], constituents.GetPhaseFunction(1))
+  return PhaseFunctions::Combined(context.beta, sigma_s[0], GetPhaseFunction(0), sigma_s[1], GetPhaseFunction(1))
     .Evaluate(incident_dir, out_direction, pdf);
 }
 
 
 
-SimpleConstituents::SimpleConstituents()
-  : phasefunction_hg(0.76),
-    lower_altitude_cutoff(-std::numeric_limits<double>::max())
+
+
+ExponentialConstituentDistribution::ExponentialConstituentDistribution()
+  : lower_altitude_cutoff(-std::numeric_limits<double>::max())
 {
   inv_scale_height[MOLECULES] = 1./8.; // km
   inv_scale_height[AEROSOLES] = 1./1.2;  // km
@@ -167,6 +184,39 @@ SimpleConstituents::SimpleConstituents()
   at_sealevel[AEROSOLES].sigma_s = 1.e-3 * SpectralN{20.};
   for (auto inv_h : inv_scale_height)
     lower_altitude_cutoff = std::max(-1./inv_h, lower_altitude_cutoff);
+}
+
+
+void ExponentialConstituentDistribution::ComputeCollisionCoefficients(double altitude, Spectral3& sigma_s, Spectral3& sigma_a, const Index3 &lambda_idx) const
+{
+  assert (altitude > lower_altitude_cutoff);
+  altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
+  sigma_a = Spectral3{0.};
+  sigma_s = Spectral3{0.};
+  for (int i=0; i<NUM_CONSTITUENTS; ++i)
+  {
+    double rho_relative = std::exp(-inv_scale_height[i] * altitude);
+    sigma_a += Take(at_sealevel[i].sigma_a, lambda_idx) * rho_relative;
+    sigma_s += Take(at_sealevel[i].sigma_s, lambda_idx) * rho_relative;
+  }
+}
+
+
+void ExponentialConstituentDistribution::ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent, const Index3 &lambda_idx) const
+{
+  assert (altitude > lower_altitude_cutoff);
+  altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
+  for (int i=0; i<NUM_CONSTITUENTS; ++i)
+  {
+    double rho_relative = std::exp(-inv_scale_height[i] * altitude);
+    sigma_s_of_constituent[i]= Take(at_sealevel[i].sigma_s, lambda_idx) * rho_relative;
+  }
+}
+
+
+std::unique_ptr<Simple> MakeSimple(const Double3 &planet_center, double radius, int _priority)
+{
+  return std::make_unique<Simple>(SphereGeometry{planet_center, radius}, ExponentialConstituentDistribution{}, _priority);
 }
 
 }
