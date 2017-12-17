@@ -4,6 +4,7 @@
 #include <chrono>
 #include <algorithm>
 #include <boost/math/special_functions/next.hpp>
+#include <rapidjson/document.h>
 
 #include "ray.hxx"
 #include "image.hxx"
@@ -1238,6 +1239,31 @@ TEST(SimpleAtmosphereTest, LowestPoint)
     EXPECT_NEAR(p[1], 0., 1.e-8);
     EXPECT_NEAR(p[2], 101., 1.e-8);
   }
+}
+
+
+TEST(AtmosphereTest, LoadTabulatedData)
+{
+  const std::string filename = "scenes/earth_atmosphere_collission_coefficients.json";
+  rapidjson::Document d;
+  std::ifstream is(filename.c_str(), std::ios::binary | std::ios::ate);
+  std::string data;
+  { // Following http://en.cppreference.com/w/cpp/io/basic_istream/read
+    auto size = is.tellg();
+    data.resize(size);
+    is.seekg(0);
+    is.read(&data[0], size);
+  }
+  d.Parse(data.c_str());
+  ASSERT_TRUE(d.IsObject());
+  const rapidjson::Value& val = d["H0"];
+  ASSERT_TRUE(std::isfinite(val.GetDouble()));
+  const auto& sigma_t = d["sigma_t"]; // Note: My version of rapidjson is age old. In up to date versions this should read blabla.GetArray().
+  ASSERT_GT(sigma_t.Size(), 0);
+  const auto& sigma_t_at_altitude0 = sigma_t[0];
+  ASSERT_EQ(sigma_t_at_altitude0.Size(), Color::NBINS);
+  const auto& value = sigma_t_at_altitude0[0];
+  ASSERT_TRUE(std::isfinite(value.GetDouble()));
 }
 
 
