@@ -54,6 +54,30 @@ struct ExponentialConstituentDistribution
 
   void ComputeCollisionCoefficients(double altitude, Spectral3 &sigma_s, Spectral3 &sigma_a, const Index3 &lambda_idx) const;
   void ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent, const Index3 &lambda_idx) const;
+  double ComputeSigmaTMajorante(double altitude, const Index3 &lambda_idx) const;
+};
+
+
+
+struct TabulatedConstituents
+{
+  static constexpr int LAMBDA_STRATA_SIZE = Color::NBINS / static_size< Spectral3 >();
+  using MajoranteType = Eigen::Array<Color::Scalar, LAMBDA_STRATA_SIZE,1>;
+  std::vector<MajoranteType> sigma_t_majorante;
+  std::vector<Color::SpectralN> sigma_t; // Total.
+  std::vector<Color::SpectralN> sigma_s[NUM_CONSTITUENTS];
+  double lower_altitude_cutoff;
+  double upper_altitude_cutoff;
+  double delta_h, inv_delta_h;
+  
+  inline int AltitudeTableSize() const { return sigma_t_majorante.size(); }
+  inline double RealTableIndex(double altitude) const { return (altitude - lower_altitude_cutoff)*inv_delta_h; }
+  
+  TabulatedConstituents(const TabulatedConstituents &other) = default;
+  TabulatedConstituents(const std::string &filename); // Read from JSON.
+  void ComputeCollisionCoefficients(double altitude, Spectral3 &sigma_s, Spectral3 &sigma_a, const Index3 &lambda_idx) const;
+  void ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent, const Index3 &lambda_idx) const;
+  double ComputeSigmaTMajorante(double altitude, const Index3 &lambda_idx) const;
 };
 
 
@@ -90,8 +114,9 @@ Double3 SphereGeometry::ComputeLowestPointAlong(const RaySegment &segment) const
 
 
 using Simple = AtmosphereTemplate<ExponentialConstituentDistribution, SphereGeometry>;
-
+using Tabulated = AtmosphereTemplate<TabulatedConstituents, SphereGeometry>;
 
 std::unique_ptr<Simple> MakeSimple(const Double3 &planet_center, double radius, int _priority);
+std::unique_ptr<Tabulated> MakeTabulated(const Double3 &planet_center, double radius, const std::string &datafile, int _priority);
 
 }

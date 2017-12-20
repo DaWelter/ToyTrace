@@ -1,3 +1,6 @@
+#include <rapidjson/document.h>
+#include <fstream>
+
 #include "atmosphere.hxx"
 #include "ray.hxx"
 #include "sampler.hxx"
@@ -13,7 +16,7 @@ AtmosphereTemplate<ConstituentDistribution_, Geometry_>::AtmosphereTemplate(cons
   : Medium(_priority),
     geometry{geometry_},
     constituents{constituents_},
-    phasefunction_hg(0.76)
+    phasefunction_hg(0.7) // or 0.76? Peter Kutz used 0.7
 {
 
 }
@@ -37,14 +40,17 @@ Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_
     0.,
     Spectral3{1.}
   };
+  Spectral3 sigma_s, sigma_a;
+  double prob_t, prob_n;
   // The lowest point gives the largest collision coefficients along the path.
   auto lowest_point = geometry.ComputeLowestPointAlong(segment);
-  Spectral3 sigma_s, sigma_a, sigma_n;
-  double prob_t, prob_n;
   double altitude = geometry.ComputeAltitude(lowest_point);
-  constituents.ComputeCollisionCoefficients(
-    altitude, sigma_s, sigma_a, context.lambda_idx);
-  double sigma_t_majorant = (sigma_a + sigma_s).maxCoeff();
+  double sigma_t_majorant = constituents.ComputeSigmaTMajorante(altitude, context.lambda_idx);
+  if (sigma_t_majorant <= 0.)
+  {
+    smpl.t = LargeNumber;
+    return smpl;
+  }
   double inv_sigma_t_majorant = 1./sigma_t_majorant;
   // Then start tracking.
   // - No russian roulette because the probability to arrive
@@ -52,7 +58,7 @@ Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_
   // - Need to limit the number of iterations to protect against evil edge
   // cases where a particles escapes outside of the scene boundaries but
   // due to incorrect collisions the path tracer thinks that we are in a medium.
-  constexpr int emergency_abort_max_num_iterations = 100;
+  constexpr int emergency_abort_max_num_iterations = 1000;
   int iteration = 0;
   while (++iteration < emergency_abort_max_num_iterations)
   {
@@ -67,7 +73,7 @@ Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_
       altitude = geometry.ComputeAltitude(pos);
       constituents.ComputeCollisionCoefficients(
         altitude, sigma_s, sigma_a, context.lambda_idx);
-      sigma_n = sigma_t_majorant - sigma_s - sigma_a;
+      Spectral3 sigma_n = sigma_t_majorant - sigma_s - sigma_a;
       assert(sigma_n.minCoeff() >= -1.e-3); // By definition of the majorante
       TrackingDetail::ComputeProbabilitiesHistoryScheme(smpl.weight, {sigma_s, sigma_n}, {prob_t, prob_n});
       double r = sampler.Uniform01();
@@ -91,14 +97,13 @@ template<class ConstituentDistribution_, class Geometry_>
 Spectral3 AtmosphereTemplate<ConstituentDistribution_, Geometry_>::EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const
 {
   Spectral3 estimate{1.};
+  Spectral3 sigma_s, sigma_a;
   // The lowest point gives the largest collision coefficients along the path.
   auto lowest_point = geometry.ComputeLowestPointAlong(segment);
   double lowest_altitude = geometry.ComputeAltitude(lowest_point);
-  // First compute the majorante
-  Spectral3 sigma_s, sigma_a, sigma_n;
-  constituents.ComputeCollisionCoefficients(
-        lowest_altitude, sigma_s, sigma_a, context.lambda_idx);
-  double sigma_t_majorant = (sigma_a + sigma_s).maxCoeff();
+  double sigma_t_majorant = constituents.ComputeSigmaTMajorante(lowest_altitude, context.lambda_idx);
+  if (sigma_t_majorant <= 0.)
+    return estimate;
   double inv_sigma_t_majorant = 1./sigma_t_majorant;
   // Then start tracking.
   double t = 0.;
@@ -116,7 +121,7 @@ Spectral3 AtmosphereTemplate<ConstituentDistribution_, Geometry_>::EvaluateTrans
       const Double3 pos = segment.ray.PointAt(t);
       constituents.ComputeCollisionCoefficients(
             geometry.ComputeAltitude(pos), sigma_s, sigma_a, context.lambda_idx);
-      sigma_n = sigma_t_majorant - sigma_s - sigma_a;
+      Spectral3 sigma_n = sigma_t_majorant - sigma_s - sigma_a;
       assert(sigma_n.minCoeff() >= 0.); // By definition of the majorante
       estimate *= sigma_n * inv_sigma_t_majorant;
       
@@ -214,9 +219,188 @@ void ExponentialConstituentDistribution::ComputeSigmaS(double altitude, Spectral
 }
 
 
+double ExponentialConstituentDistribution::ComputeSigmaTMajorante(double altitude, const Index3 &lambda_idx) const
+{
+  Spectral3 sigma_s, sigma_a;
+  ComputeCollisionCoefficients(altitude, sigma_s, sigma_a, lambda_idx);
+  return (sigma_a + sigma_a).maxCoeff();
+}
+
+
+
+
+
+
+std::vector<Color::SpectralN> ReadArrayOfSpectra(const rapidjson::Value &array)
+{
+  std::vector<Color::SpectralN> ret;
+  //for (auto &json_spectrum : array)
+  for (int i=0; i<array.Size(); ++i)
+  {
+    const auto &json_spectrum = array[i];
+    if (json_spectrum.Size() != Color::NBINS)
+      throw std::invalid_argument("The number of wavelengths in the array does not match the requirement.");
+    Color::SpectralN s;
+    for (int i=0; i<Color::NBINS; ++i)
+    {
+      s[i] = json_spectrum[i].GetDouble();
+    }
+    ret.push_back(s);
+  }
+  return ret;
+}
+
+
+TabulatedConstituents::TabulatedConstituents(const std::string& filename)
+{
+  rapidjson::Document d;
+  std::ifstream is(filename.c_str(), std::ios::binary | std::ios::ate);
+  std::string data;
+  { // Following http://en.cppreference.com/w/cpp/io/basic_istream/read
+    auto size = is.tellg();
+    data.resize(size);
+    is.seekg(0);
+    is.read(&data[0], size);
+  }
+  d.Parse(data.c_str());
+   
+  sigma_t = ReadArrayOfSpectra(d["sigma_t"]);
+  sigma_s[MOLECULES] = ReadArrayOfSpectra(d["sigma_s_molecules"]);
+  sigma_s[AEROSOLES] = ReadArrayOfSpectra(d["sigma_s_aerosoles"]);
+   
+  if ((sigma_t.size() != sigma_s[MOLECULES].size()) || (sigma_t.size() != sigma_s[AEROSOLES].size()))
+    throw std::invalid_argument("The number of altitude support points is inconsistent among arrays.");
+  
+  for (auto &s : sigma_t)
+  {
+    MajoranteType m;
+    for (int lambda = 0; lambda < LAMBDA_STRATA_SIZE; ++lambda)
+    {
+      auto lambda_idx = LambdaSelectionFactory::MakeIndices(lambda);
+      m[lambda] = Take(s, lambda_idx).maxCoeff();
+    }
+    sigma_t_majorante.push_back(m);
+  }
+  
+  /* It could happen that going from high to low altitudes, the majorante takes a dip. Perhaps
+   * due to a dense aerosole layer. Unfortunately, the largest majorante is expected at the lowest point
+   * of a ray traversing the atmosphere.
+   * In order to ensure that this is true, the following filtering fills the dips with the upper bound of the values 
+   * encountered so far going from high to low alt. */
+  for (int i=sigma_t_majorante.size()-2; i>=0; --i)
+  {
+    for (int k=0; k<LAMBDA_STRATA_SIZE; ++k)
+      sigma_t_majorante[i][k] = std::max(sigma_t_majorante[i][k], sigma_t_majorante[i+1][k]);
+    // HELP: The line below crashes with seg fault! It should be equivalent to the operation in the two lines above! Lib-Eigen shenanigans?
+    // When run with valgrind, there is no crash either way. No memory error detected!
+    //sigma_t_majorante[i] = sigma_t_majorante[i].max(sigma_t_majorante[i+1]).eval();
+  }
+  
+  if ((sigma_t_majorante[0] < sigma_t_majorante[sigma_t_majorante.size()-1]).any())
+    throw std::runtime_error("The extinction majorante at the lowest altitude is lower than at the highest altitude. There is very probably something wrong. Not going to work with that data.");
+  
+  lower_altitude_cutoff = d["H0"].GetDouble();
+  delta_h = d["deltaH"].GetDouble();
+  upper_altitude_cutoff = lower_altitude_cutoff + delta_h * (sigma_t_majorante.size()-1);
+  inv_delta_h = 1./delta_h;
+}
+
+
+inline Spectral3 Lerp(const SpectralN &y0, const SpectralN &y1, double f, const Index3& lambda_idx)
+{
+  auto x0 = Take(y0, lambda_idx);
+  auto x1 = Take(y1, lambda_idx);
+  return (1.-f)*x0 + f*x1;
+}
+
+inline double Lerp(double x0, double x1, double f)
+{
+  return (1.-f)*x0 + f*x1;
+}
+
+
+void TabulatedConstituents::ComputeCollisionCoefficients(double altitude, Spectral3& sigma_s, Spectral3& sigma_a, const Index3& lambda_idx) const
+{
+  double real_index = RealTableIndex(altitude);
+  int idx = real_index; // Cutting the fractional part amounts to going to the grid site which is lower in altitude.
+  if (idx >= 0 && idx < AltitudeTableSize()-1)
+  {
+    double f = real_index - idx; // The fractional part.
+    sigma_s = Lerp(this->sigma_s[AEROSOLES][idx], this->sigma_s[AEROSOLES][idx+1], f, lambda_idx) + 
+              Lerp(this->sigma_s[MOLECULES][idx], this->sigma_s[MOLECULES][idx+1], f, lambda_idx);
+    sigma_a = Lerp(this->sigma_t[idx], this->sigma_t[idx+1], f, lambda_idx);
+    sigma_a -= sigma_s;
+  }
+  else if (idx < 0)
+  {
+    sigma_s = Take(this->sigma_s[AEROSOLES][0], lambda_idx) +
+              Take(this->sigma_s[MOLECULES][0], lambda_idx);
+    sigma_a = Take(this->sigma_t[0], lambda_idx);
+    sigma_a -= sigma_s;
+  }
+  else
+  {
+    sigma_a = sigma_s = Spectral3::Zero();
+  }  
+}
+
+
+void TabulatedConstituents::ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent, const Index3& lambda_idx) const
+{
+  double real_index = RealTableIndex(altitude);
+  int idx = real_index;
+  if (idx >= 0 && idx < AltitudeTableSize()-1)
+  {
+    double f = real_index - idx; // The fractional part.
+    for (int constitutent = 0; constitutent<NUM_CONSTITUENTS; ++constitutent)
+      sigma_s_of_constituent[constitutent] = Lerp(this->sigma_s[constitutent][idx], this->sigma_s[constitutent][idx+1], f, lambda_idx);
+  }
+  else if (idx < 0)
+  {
+    for (int constitutent = 0; constitutent<NUM_CONSTITUENTS; ++constitutent)
+      sigma_s_of_constituent[constitutent] = Take(this->sigma_s[constitutent][0], lambda_idx);
+  }
+  else
+  {
+    for (int constitutent = 0; constitutent<NUM_CONSTITUENTS; ++constitutent)
+      sigma_s_of_constituent[constitutent] = Spectral3::Zero();
+  }  
+}
+
+
+double TabulatedConstituents::ComputeSigmaTMajorante(double altitude, const Index3& lambda_idx) const
+{
+  int lambda_idx_primary = LambdaSelectionFactory::PrimaryIndex(lambda_idx);
+  double real_index = RealTableIndex(altitude);
+  int idx = real_index;
+  if (idx >= 0 && idx < AltitudeTableSize()-1)
+  {
+    double f = real_index - idx; // The fractional part.
+    return Lerp(sigma_t_majorante[idx][lambda_idx_primary], 
+                sigma_t_majorante[idx+1][lambda_idx_primary], f);
+  }
+  else if (idx < 0)
+  {
+    return sigma_t_majorante[0][lambda_idx_primary];
+  }
+  else
+  {
+    return 0.;
+  }  
+}
+
+
+
 std::unique_ptr<Simple> MakeSimple(const Double3 &planet_center, double radius, int _priority)
 {
   return std::make_unique<Simple>(SphereGeometry{planet_center, radius}, ExponentialConstituentDistribution{}, _priority);
 }
+
+
+std::unique_ptr<Tabulated> MakeTabulated(const Double3 &planet_center, double radius, const std::string &datafile, int _priority)
+{
+  return std::make_unique<Tabulated>(SphereGeometry{planet_center, radius}, TabulatedConstituents{datafile}, _priority);
+}
+
 
 }

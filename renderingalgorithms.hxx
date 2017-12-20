@@ -1,5 +1,6 @@
 #include "scene.hxx"
 #include "util.hxx"
+#include "shader_util.hxx"
 
 #include <fstream>
 
@@ -330,29 +331,7 @@ class PathTracing : public BaseAlgo
   int max_ray_depth;
   double sufficiently_long_distance_to_go_outside_the_scene_bounds;
   
-  /* Stratified mode: Divide spectrum in N sections, where N is the number of simultaneously traced wavelengths.
-   * Pick one wavelength from each section. In my case I pick the wavelength from the first section at random,
-   * and take the others at a fixed offset equal to the stratum size. */
-  static constexpr int strata_size = Color::NBINS / static_size<Spectral3>();
-  static_assert(Color::NBINS == strata_size * static_size<Spectral3>(), "Bin count must be multiple of number of simultaneously traced wavelengths");
-  
-  struct LambdaSelectionFactory
-  {
-    SpectralN lambda_weights;
-    LambdaSelectionFactory()
-    {
-      // One over the probability, that the wavelength is selected.
-      lambda_weights.setConstant(strata_size);
-    }
-    
-    std::pair<Index3, Spectral3> WithWeights(Sampler &sampler) const
-    {
-      int main_idx = sampler.UniformInt(0, strata_size-1);
-      auto idx     = Index3{main_idx, main_idx+strata_size, main_idx+2*strata_size};
-      auto weights = Take(lambda_weights, idx);
-      return std::make_pair(idx, weights);
-    }
-  } lambda_selection_factory;
+  LambdaSelectionFactory lambda_selection_factory;
   
   
 public:

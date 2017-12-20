@@ -560,6 +560,30 @@ void NFFParser::Parse()
       continue;
     }
 
+    if (!strcmp(token, "tabulatedatmosphere"))
+    {
+      Double3 planet_center;
+      double radius;
+      char name[LINESIZE];
+      char datafile[LINESIZE];
+      int num = std::sscanf(line.c_str(), "tabulatedatmosphere %s %lg %lg %lg %lg %s\n", name, &planet_center[0], &planet_center[1], &planet_center[2], &radius, datafile);
+      if (num==1)
+      {
+        mediums.activate(name);
+      }
+      else if(num == 6)
+      {
+        auto medium = Atmosphere::MakeTabulated(planet_center, radius, datafile, mediums.size());
+        mediums.set_and_activate(
+          name, medium.release());
+      }
+      else
+      {
+        throw MakeException("Error");
+      }
+      continue;
+    }
+    
     
     if (!strcmp(token, "lsun"))
     {

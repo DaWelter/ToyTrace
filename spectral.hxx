@@ -16,6 +16,8 @@ static constexpr Scalar lambda_max = 730;
 // And the number of bins.
 static constexpr int NBINS = 36;
 
+// TODO: Use strong typedef to differentiate between RGB values and spectral triplel in a type safe way.
+// http://www.boost.org/doc/libs/1_61_0/libs/serialization/doc/strong_typedef.html
 using Spectral3 = Eigen::Array<Scalar, 3, 1>;
 using SpectralN = Eigen::Array<Scalar, NBINS, 1>;
 using RGB       = Eigen::Array<Scalar, 3, 1>;  // Alias of Spectral3 which is not ideal because they can be mixed.
