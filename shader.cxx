@@ -12,7 +12,7 @@ inline Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Textur
   {
     Double3 uv = surface_hit.primitive().GetUV(surface_hit.hitid);
     RGB col = tex->GetTexel(uv[0], uv[1]).array();
-    ret *= Take(Color::RGBToSpectrum(col), lambda_idx); // TODO: optimize, I don't have to compute the full spectrum.
+    ret *= Color::RGBToSpectralSelection(col, lambda_idx); // TODO: optimize, I don't have to compute the full spectrum.
   }
   return ret;
 }

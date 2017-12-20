@@ -34,13 +34,13 @@ inline Scalar GetWavelength(int bin)
 // displayed in the chromacity diagram on wikipedia https://en.wikipedia.org/wiki/SRGB
 inline Index3 LambdaIdxClosestToRGBPrimaries()
 {
-  return Index3{6, 5, 2};
+  return Index3{23, 17, 9};
 }
 
-Scalar RGBToSpectrum(int bin, const RGB &rgb);
 SpectralN RGBToSpectrum(const RGB &rgb);
 RGB SpectrumToRGB(const SpectralN &val);
 RGB SpectralSelectionToRGB(const Spectral3 &val, const Index3 &idx);
+Spectral3 RGBToSpectralSelection(const RGB &rgb, const Index3 &idx);
 
 /*
   The spectral intensity emitted per area and steradian.

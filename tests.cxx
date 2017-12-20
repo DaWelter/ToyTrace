@@ -182,11 +182,6 @@ TEST(Spectral, RGBConversion)
     EXPECT_NEAR(trial[0], back[0], 1.3e-2);
     EXPECT_NEAR(trial[1], back[1], 1.3e-2);
     EXPECT_NEAR(trial[2], back[2], 1.3e-2);
-    for (int lambda=0; lambda<Color::NBINS; ++lambda)
-    {
-      Scalar intensity = RGBToSpectrum(lambda, trial);
-      EXPECT_NEAR(intensity, s[lambda], 1.e-6);
-    }
   }
 }
 
@@ -210,6 +205,30 @@ TEST(Spectral, RGBConversionLinearity)
   CheckLinear(spectra[0], spectra[2]);
   CheckLinear(spectra[1], spectra[2]);
 }
+
+
+TEST(Spectral, RGBConversionSelection)
+{
+  /* Back and forth transform using RGBToSpectralSelection and SpectralSelectionToRGB.
+   * Only part of the spectrum is considered by these function, namely the wavelengths
+   * given by the indices. Because of that, the complete reconstruction of the RGB 
+   * original requires summation over parts of the spectrum. It is basically an inner
+   * product of the spectrum with the color matching function, except that on each iteration 
+   * is not one wavelengths but multiple added to the output. */
+  
+  using namespace Color;
+  RGB rgb{0.8, 0.2, 0.6};
+  RGB converted_rgb = RGB::Zero();
+  for (int lambda=0; lambda<Color::NBINS-2; lambda += static_size<Spectral3>())
+  {
+    Index3 idx{lambda, lambda+1, lambda+2};
+    converted_rgb += SpectralSelectionToRGB(RGBToSpectralSelection(rgb, idx), idx);
+  }
+  EXPECT_NEAR(rgb[0], converted_rgb[0], 1.e-2);
+  EXPECT_NEAR(rgb[1], converted_rgb[1], 1.e-2);
+  EXPECT_NEAR(rgb[2], converted_rgb[2], 1.e-2);
+}
+
 
 
 class TestIntersection : public testing::Test
@@ -561,13 +580,15 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
   double cutoff_length = 5.; // Integrate transmission T(x) up to this x.
   double img_dx = img.width() / cutoff_length / 2.;
   img.DrawRect(0, 0, img_dx * cutoff_length, img.height()-1);
-  Spectral3 sigma_s{1./length_scales}, sigma_a{1./length_scales};
+  RGB sigma_s{1./length_scales}, sigma_a{1./length_scales};
+  Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
+  Spectral3 spectral_sigma_t = Color::RGBToSpectralSelection(sigma_s + sigma_a, lambda_idx);
   HomogeneousMedium medium{sigma_s, sigma_a, 0};
   int N = 1000;
   Spectral3 integral{0.};
   for (int i=0; i<N; ++i)
   {
-    PathContext context{Color::LambdaIdxClosestToRGBPrimaries()};
+    PathContext context{lambda_idx};
     Medium::InteractionSample s = medium.SampleInteractionPoint(RaySegment{{{0.,0.,0.}, {0., 0., 1.,}}, cutoff_length}, sampler, context);
     if (s.t  > cutoff_length)
       img.SetColor(255, 0, 0);
@@ -583,7 +604,7 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
     img.DrawLine(imgx, 0, imgx, img.height()-1);
   }
   integral *= 1./N;
-  Spectral3 exact_solution = 1. - (-(sigma_a+sigma_s)*cutoff_length).exp();
+  Spectral3 exact_solution = 1. - (-spectral_sigma_t*cutoff_length).exp();
   for (int k=0; k<static_size<Spectral3>(); ++k)
     EXPECT_NEAR(integral[k], exact_solution[k], 0.1 * integral[k]);
   display.show(img);
@@ -1019,9 +1040,8 @@ v
 from 0 1.2 -1.3
 at 0 0.6 0
 up 0 1 0
-angle 50
-hither 0
 resolution 128 128
+angle 50
 
 l   0 0.75 0  255 255 255
 
@@ -1160,7 +1180,7 @@ m scenes/unitcube.dae
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
   scene.PrintInfo();
-  PathContext context{Color::LambdaIdxClosestToRGBPrimaries()};
+  Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
   PathTracing rt(scene, AlgorithmParameters());
   MediumTracker medium_tracker(scene);
   HitVector hits_temporary_buffer;
@@ -1168,9 +1188,9 @@ m scenes/unitcube.dae
   RaySegment seg{{{ray_offset,0.,-10.}, {0.,0.,1.}}, LargeNumber};
   medium_tracker.initializePosition(seg.ray.org, hits_temporary_buffer);
   ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
-  auto res = rt.TransmittanceEstimate(seg, HitId(), medium_tracker, context);
+  auto res = rt.TransmittanceEstimate(seg, HitId(), medium_tracker, PathContext{lambda_idx});
   
-  auto sigma_e = Spectral3{3.};
+  auto sigma_e = Color::RGBToSpectralSelection(RGB{3.}, lambda_idx);
   Spectral3 expected = (-2.*sigma_e).exp();
   
   for (int i=0; i<static_size<Spectral3>(); ++i)
@@ -1203,13 +1223,13 @@ TEST(SimpleAtmosphereTest, CollisionCoefficients)
   Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
   constituents.ComputeCollisionCoefficients(altitude, sigma_s, sigma_a, lambda_idx);
   double expected_sigma_s =
-      std::exp(-altitude/8.)*0.00781519 +
+      std::exp(-altitude/8.)*0.0076 +
       std::exp(-altitude/1.2)*20.e-3;
   double expected_sigma_a =
       std::exp(-altitude/8.)*0.e-3 +
       std::exp(-altitude/1.2)*2.22e-3;
-  EXPECT_NEAR(sigma_s[0], expected_sigma_s, 1.e-8);
-  EXPECT_NEAR(sigma_a[0], expected_sigma_a, 1.e-8);
+  EXPECT_NEAR(sigma_s[0], expected_sigma_s, expected_sigma_s*1.e-2);
+  EXPECT_NEAR(sigma_a[0], expected_sigma_a, expected_sigma_a*1.e-2);
 }
 
 
@@ -1244,8 +1264,7 @@ TEST(SimpleAtmosphereTest, LowestPoint)
 
 TEST(AtmosphereTest, LoadTabulatedData)
 {
-  const std::string filename = "scenes/earth_atmosphere_collission_coefficients.json";
-  rapidjson::Document d;
+  const std::string filename = "scenes/earth_atmosphere_collision_coefficients.json";
   std::ifstream is(filename.c_str(), std::ios::binary | std::ios::ate);
   std::string data;
   { // Following http://en.cppreference.com/w/cpp/io/basic_istream/read
@@ -1254,6 +1273,7 @@ TEST(AtmosphereTest, LoadTabulatedData)
     is.seekg(0);
     is.read(&data[0], size);
   }
+  rapidjson::Document d;
   d.Parse(data.c_str());
   ASSERT_TRUE(d.IsObject());
   const rapidjson::Value& val = d["H0"];

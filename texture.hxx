@@ -23,7 +23,7 @@ public:
     */
   }
 
-  Spectral3 GetTexel(double u, double v) const
+  RGB GetTexel(double u, double v) const
   {
     double dummy;
     u = modf(u, &dummy);

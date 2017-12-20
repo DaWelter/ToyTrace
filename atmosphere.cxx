@@ -223,7 +223,7 @@ double ExponentialConstituentDistribution::ComputeSigmaTMajorante(double altitud
 {
   Spectral3 sigma_s, sigma_a;
   ComputeCollisionCoefficients(altitude, sigma_s, sigma_a, lambda_idx);
-  return (sigma_a + sigma_a).maxCoeff();
+  return (sigma_s + sigma_a).maxCoeff();
 }
 
 

@@ -33,51 +33,6 @@ static const double mat_spectrum_to_rgb[3][NBINS] = {
 };
 
 
-double RGBToSpectrum(int bin, const RGB &rgb)
-{
-  const double red = rgb[0], green = rgb[1], blue = rgb[2];
-  double ret = 0.;
-  if(red <= green && red <= blue)
-  {
-    ret += red * spectra[WHITE][bin];
-    if(green <= blue) // cyan = green+blue
-    {
-      ret += (green - red) * spectra[CYAN][bin];
-      ret += (blue - green) * spectra[BLUE][bin];
-    } else {
-      ret += (blue - red) * spectra[CYAN][bin];
-      ret += (green - blue) * spectra[GREEN][bin];
-    } 
-  }
-  else if(green <= red && green <= blue)
-  {
-    ret += green * spectra[WHITE][bin];
-    if (red <= blue) // red+blue = magenta
-    {
-      ret += (red  - green) * spectra[MAGENTA][bin];
-      ret += (blue -   red) * spectra[BLUE][bin];
-    } else {
-      ret += (blue - green) * spectra[MAGENTA][bin];
-      ret += (red - blue) * spectra[RED][bin];
-    }       
-  }
-  else // blue < all others
-  {
-    ret += blue * spectra[WHITE][bin];
-    if (red <= green) // red+green = YELLOW
-    {
-      ret += (red - blue) * spectra[YELLOW][bin];
-      ret += (green - red) * spectra[GREEN][bin];
-    }
-    else
-    {
-      ret += (green - blue) * spectra[YELLOW][bin];
-      ret += (red - green) * spectra[RED][bin];
-    }
-  }
-  return ret;
-}
-
 
 RGB SpectrumToRGB(int bin, double intensity)
 {
@@ -87,12 +42,22 @@ RGB SpectrumToRGB(int bin, double intensity)
   return x;
 }
 
+#define RESTRICT __restrict__// Because I can!
 
-inline void LinComb(double *dst, double a, const double *sa, double b, const double *sb, double c, const double *sc)
+inline void LinComb(double *RESTRICT dst, double a, const double *RESTRICT sa, double b, const double *RESTRICT sb, double c, const double *RESTRICT sc)
 {
   for (int i=0; i<NBINS; ++i)
   {
     dst[i] = a*sa[i] + b*sb[i] + c*sc[i];
+  }
+}
+
+
+inline void LinComb(double *RESTRICT dst, double a, const double *RESTRICT sa, double b, const double *RESTRICT sb, double c, const double *RESTRICT sc, const int *RESTRICT idx)
+{
+  for (int i=0; i<Spectral3::RowsAtCompileTime; ++i)
+  {
+    dst[i] = a*sa[idx[i]] + b*sb[idx[i]] + c*sc[idx[i]];
   }
 }
 
@@ -104,45 +69,30 @@ SpectralN RGBToSpectrum(const RGB &rgb)
 
   if(red <= green && red <= blue)
   {
-    //ret += red * spectra[WHITE][bin];
     if(green <= blue) // cyan = green+blue
     {
       LinComb(ret.data(), red, spectra[WHITE], green-red, spectra[CYAN], blue-green, spectra[BLUE]);
-      //ret += (green - red) * spectra[CYAN][bin];
-      //ret += (blue - green) * spectra[BLUE][bin];
     } else {
       LinComb(ret.data(), red, spectra[WHITE], blue - red, spectra[CYAN], green-blue, spectra[GREEN]);
-      //ret += (blue - red) * spectra[CYAN][bin];
-      //ret += (green - blue) * spectra[GREEN][bin];
     } 
   }
   else if(green <= red && green <= blue)
   {
-    //ret += green * spectra[WHITE][bin];
     if (red <= blue) // red+blue = magenta
     {
-      //ret += (red  - green) * spectra[MAGENTA][bin];
-      //ret += (blue -   red) * spectra[BLUE][bin];
       LinComb(ret.data(), green, spectra[WHITE], red-green, spectra[MAGENTA], blue - red, spectra[BLUE]);
     } else {
-      //ret += (blue - green) * spectra[MAGENTA][bin];
-      //ret += (red - blue) * spectra[RED][bin];
       LinComb(ret.data(), green, spectra[WHITE], blue - green, spectra[MAGENTA], red - blue, spectra[RED]);
     }       
   }
   else // blue < all others
   {
-    //ret += blue * spectra[WHITE][bin];
     if (red <= green) // red+green = YELLOW
     {
-      //ret += (red - blue) * spectra[YELLOW][bin];
-      //ret += (green - red) * spectra[GREEN][bin];
       LinComb(ret.data(), blue, spectra[WHITE], red - blue, spectra[YELLOW], green - red, spectra[GREEN]);
     }
     else
     {
-      //ret += (green - blue) * spectra[YELLOW][bin];
-      //ret += (red - green) * spectra[RED][bin];
       LinComb(ret.data(), blue, spectra[WHITE], green - blue, spectra[YELLOW], red - green, spectra[RED]);
     }
   }
@@ -171,6 +121,43 @@ RGB SpectralSelectionToRGB(const Spectral3 &val, const Index3 &idx)
       x[i] += val[j] * mat_spectrum_to_rgb[i][idx[j]];
   }
   return x;
+}
+
+Spectral3 RGBToSpectralSelection(const RGB &rgb, const Index3 &idx)
+{
+  const double red = rgb[0], green = rgb[1], blue = rgb[2];
+  Spectral3 ret;
+
+  if(red <= green && red <= blue)
+  {
+    if(green <= blue)
+    {
+      LinComb(ret.data(), red, spectra[WHITE], green-red, spectra[CYAN], blue-green, spectra[BLUE], idx.data());
+    } else {
+      LinComb(ret.data(), red, spectra[WHITE], blue - red, spectra[CYAN], green-blue, spectra[GREEN], idx.data());
+    } 
+  }
+  else if(green <= red && green <= blue)
+  {
+    if (red <= blue) // red+blue = magenta
+    {
+      LinComb(ret.data(), green, spectra[WHITE], red-green, spectra[MAGENTA], blue - red, spectra[BLUE], idx.data());
+    } else {
+      LinComb(ret.data(), green, spectra[WHITE], blue - green, spectra[MAGENTA], red - blue, spectra[RED], idx.data());
+    }       
+  }
+  else // blue < all others
+  {
+    if (red <= green)
+    {
+      LinComb(ret.data(), blue, spectra[WHITE], red - blue, spectra[YELLOW], green - red, spectra[GREEN], idx.data());
+    }
+    else
+    {
+      LinComb(ret.data(), blue, spectra[WHITE], green - blue, spectra[YELLOW], red - green, spectra[RED], idx.data());
+    }
+  }
+  return ret;
 }
 
 SpectralN MaxwellBoltzmanDistribution(double temp)
