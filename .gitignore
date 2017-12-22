@@ -1,3 +1,5 @@
+private/
+
 # Other stuff
 .svn
 *.kdev4
