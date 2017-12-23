@@ -18,19 +18,27 @@ find_library(ASSIMP_LIBRARY NAMES assimp)
 find_package(GTest REQUIRED)
 find_package(Boost REQUIRED COMPONENTS program_options)
 find_path(CImg_INCLUDE_DIR
-NAMES CImg.h
-PATHS
-  ${CMAKE_INSTALL_PREFIX}/include
-  /usr/include
-  /usr/local/include
+  NAMES CImg.h
+  PATHS
+    ${CMAKE_INSTALL_PREFIX}/include
+    /usr/include
+    /usr/local/include
 )
+message(STATUS "CImg: ${CImg_INCLUDE_DIR}")
+
 find_package(JPEG)
 find_package(PNG)
-if (CImg_INCLUDE_DIR)
-    message(STATUS "CImg: ${CImg_INCLUDE_DIR}")
-endif()
 
-include_directories(${PNG_INCLUDE_DIR} ${JPEG_INCLUDE_DIR} ${CImg_INCLUDE_DIR})
+find_path(Rapidjson_INCLUDE_DIR
+  NAMES rapidjson/rapidjson.h
+  PATHS
+    ${CMAKE_INSTALL_PREFIX}/include
+    /usr/include
+    /usr/local/include
+)
+message(STATUS "Rapidjson: ${Rapidjson_INCLUDE_DIR}")
+
+include_directories(${PNG_INCLUDE_DIR} ${JPEG_INCLUDE_DIR} ${CImg_INCLUDE_DIR} ${Rapidjson_INCLUDE_DIR})
 link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSIMP_LIBRARY} ${X11_LIBRARIES})
 
 set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx bsptree.cxx phasefunctions.cxx atmosphere.cxx spectral.cxx)
