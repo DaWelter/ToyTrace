@@ -44,12 +44,15 @@ link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSI
 set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx bsptree.cxx phasefunctions.cxx atmosphere.cxx spectral.cxx)
 add_executable(toytrace toytrace.cxx ${SOURCES})
 add_executable(tests tests.cxx ${SOURCES})
+add_executable(tests2 tests2.cxx)
 
 target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE})
 
 target_include_directories(tests PUBLIC ${GTEST_INCLUDE_DIRS})
 target_link_libraries(tests ${GTEST_LIBRARIES} pthread)
 
+target_include_directories(tests2 PUBLIC ${GTEST_INCLUDE_DIRS})
+target_link_libraries(tests2 ${GTEST_LIBRARIES} pthread)
 
 # For qtcreator to display all header files. (https://stackoverflow.com/questions/28384935/qtcreator-cmake-project-how-to-show-all-project-files)
 FILE(GLOB THE_HEADERS "*.hxx")

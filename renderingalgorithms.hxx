@@ -224,7 +224,7 @@ void MediumTracker::leaveVolume(const Medium* medium)
 class Spectral3ImageBuffer
 {
   std::vector<int> count;
-  std::vector<Spectral3, boost::alignment::aligned_allocator<Spectral3, 128> >  accumulator;
+  std::vector<RGB, boost::alignment::aligned_allocator<RGB, 128> >  accumulator;
   int xres, yres;
 public:
   Spectral3ImageBuffer(int _xres, int _yres)
@@ -233,10 +233,10 @@ public:
     int sz = _xres * _yres;
     assert(sz > 0);
     count.resize(sz, 0);
-    accumulator.resize(sz, Spectral3{0.});
+    accumulator.resize(sz, RGB::Zero());
   }
   
-  void Insert(int pixel_index, const Spectral3 &value)
+  void Insert(int pixel_index, const RGB &value)
   {
     assert (pixel_index >= 0 && pixel_index < count.size() && pixel_index < accumulator.size());
     ++count[pixel_index];
@@ -250,15 +250,15 @@ public:
     for (int x=0; x<xres; ++x)
     {
       int pixel_index = xres * y + x;
-      Spectral3 average = accumulator[pixel_index]/count[pixel_index];
+      RGB average = accumulator[pixel_index]/Color::RGBScalar(count[pixel_index]);
       Image::uchar rgb[3];
       bool isfinite = average.isFinite().all();
       //bool iszero = (accumulator[pixel_index]==0.).all();
-      average = average.max(0.).min(1.);
+      average = average.max(0._rgb).min(1._rgb);
       if (isfinite)
       {
         for (int i=0; i<3; ++i)
-          rgb[i] = Color::LinearToSRGB(average[i])*255.999;
+          rgb[i] = value(Color::LinearToSRGB(average[i])*255.999_rgb);
         dest.set_pixel(x, dest.height() - 1 - y, rgb[0], rgb[1], rgb[2]);
       }
     }
@@ -288,7 +288,7 @@ public:
     return std::make_tuple(&light, pmf_of_light);
   }
   
-  virtual Spectral3 MakePrettyPixel(int pixel_index) = 0;
+  virtual RGB MakePrettyPixel(int pixel_index) = 0;
 };
 
 
@@ -300,7 +300,7 @@ public:
   {
   }
   
-  Spectral3 MakePrettyPixel(int pixel_index) override
+  RGB MakePrettyPixel(int pixel_index) override
   {
     auto cam_sample = TakeRaySample(
       scene.GetCamera(), pixel_index, sampler,
@@ -312,12 +312,12 @@ public:
     if (hit)
     {
       RaySurfaceIntersection intersection{hit, seg};
-      Spectral3 col = (intersection.normal.array() * 0.5 + 0.5).cast<Color::Scalar>();
+      RGB col = (intersection.normal.array() * 0.5 + 0.5).cast<Color::RGBScalar>();
       return col;
     }
     else
     {
-      return Spectral3{0.};
+      return RGB::Zero();
     }
   };
 };

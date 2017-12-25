@@ -3,7 +3,6 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
-#include <boost/math/special_functions/next.hpp>
 #include <rapidjson/document.h>
 
 #include "ray.hxx"
@@ -161,27 +160,27 @@ TEST(TestMath, TowerSampling)
 TEST(Spectral, RGBConversion)
 {
   using namespace Color;
-  std::array<Spectral3, 10> trials = {{
-    { 0., 0., 0. },
-    { 1., 0., 0. },
-    { 0., 1., 0. },
-    { 0., 0., 1. },
-    { 1., 1., 0. },
-    { 1., 0., 1. },
-    { 0., 1., 1. },
-    { 1., 1., 1. },
-    { 1., 0.5, 0.3 },
-    { 0.5, 0.8, 0.9 },
+  std::array<RGB, 10> trials = {{
+    { 0._rgb, 0._rgb, 0._rgb },
+    { 1._rgb, 0._rgb, 0._rgb },
+    { 0._rgb, 1._rgb, 0._rgb },
+    { 0._rgb, 0._rgb, 1._rgb },
+    { 1._rgb, 1._rgb, 0._rgb },
+    { 1._rgb, 0._rgb, 1._rgb },
+    { 0._rgb, 1._rgb, 1._rgb },
+    { 1._rgb, 1._rgb, 1._rgb },
+    { 1._rgb, 0.5_rgb, 0.3_rgb },
+    { 0.5_rgb, 0.8_rgb, 0.9_rgb },
   }};
-  for (Spectral3 trial : trials)
+  for (RGB trial : trials)
   {
     SpectralN s = RGBToSpectrum(trial);
     for (int i=0; i<s.size(); ++i)
       EXPECT_GE(s[i], 0.);
-    Spectral3 back = SpectrumToRGB(s);
-    EXPECT_NEAR(trial[0], back[0], 1.3e-2);
-    EXPECT_NEAR(trial[1], back[1], 1.3e-2);
-    EXPECT_NEAR(trial[2], back[2], 1.3e-2);
+    RGB back = SpectrumToRGB(s);
+    EXPECT_NEAR(value(trial[0]), value(back[0]), 1.3e-2);
+    EXPECT_NEAR(value(trial[1]), value(back[1]), 1.3e-2);
+    EXPECT_NEAR(value(trial[2]), value(back[2]), 1.3e-2);
   }
 }
 
@@ -199,7 +198,7 @@ TEST(Spectral, RGBConversionLinearity)
     RGB rgb_a = SpectrumToRGB(a);
     RGB rgb_b = SpectrumToRGB(b);
     RGB rgb_ab = SpectrumToRGB(a+b);
-    EXPECT_LE((rgb_ab - rgb_b - rgb_a).abs().maxCoeff(), 1.e-3);
+    EXPECT_LE(value((rgb_ab - rgb_b - rgb_a).abs().maxCoeff()), 1.e-3);
   };
   CheckLinear(spectra[0], spectra[1]);
   CheckLinear(spectra[0], spectra[2]);
@@ -217,16 +216,16 @@ TEST(Spectral, RGBConversionSelection)
    * is not one wavelengths but multiple added to the output. */
   
   using namespace Color;
-  RGB rgb{0.8, 0.2, 0.6};
+  auto rgb = RGB(0.8_rgb, 0.2_rgb, 0.6_rgb);
   RGB converted_rgb = RGB::Zero();
   for (int lambda=0; lambda<Color::NBINS-2; lambda += static_size<Spectral3>())
   {
     Index3 idx{lambda, lambda+1, lambda+2};
     converted_rgb += SpectralSelectionToRGB(RGBToSpectralSelection(rgb, idx), idx);
   }
-  EXPECT_NEAR(rgb[0], converted_rgb[0], 1.e-2);
-  EXPECT_NEAR(rgb[1], converted_rgb[1], 1.e-2);
-  EXPECT_NEAR(rgb[2], converted_rgb[2], 1.e-2);
+  EXPECT_NEAR(value(rgb[0]), value(converted_rgb[0]), 1.e-2);
+  EXPECT_NEAR(value(rgb[1]), value(converted_rgb[1]), 1.e-2);
+  EXPECT_NEAR(value(rgb[2]), value(converted_rgb[2]), 1.e-2);
 }
 
 
@@ -576,14 +575,18 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
   ImageDisplay display;
   Image img{500, 10};
   img.SetColor(64, 64, 64);
-  Spectral3 length_scales{1., 5., 10.};
+  RGB length_scales{1._rgb, 5._rgb, 10._rgb};
   double cutoff_length = 5.; // Integrate transmission T(x) up to this x.
   double img_dx = img.width() / cutoff_length / 2.;
   img.DrawRect(0, 0, img_dx * cutoff_length, img.height()-1);
-  RGB sigma_s{1./length_scales}, sigma_a{1./length_scales};
   Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
-  Spectral3 spectral_sigma_t = Color::RGBToSpectralSelection(sigma_s + sigma_a, lambda_idx);
-  HomogeneousMedium medium{sigma_s, sigma_a, 0};
+  SpectralN sigma_s = Color::RGBToSpectrum(1._rgb/length_scales);
+  SpectralN sigma_a = Color::RGBToSpectrum(1._rgb/length_scales);
+  SpectralN sigma_t = sigma_s + sigma_a;
+  HomogeneousMedium medium{
+    sigma_s, 
+    sigma_a, 
+    0};
   int N = 1000;
   Spectral3 integral{0.};
   for (int i=0; i<N; ++i)
@@ -598,13 +601,14 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
       // Estimate transmission by integrating sigma_e*T(x).
       // Divide out sigma_s which is baked into the weight.
       // Multiply by sigma_e.
-      integral += s.weight * (sigma_a + sigma_s) / sigma_s;
+      SpectralN integrand = (sigma_a + sigma_s) / sigma_s;
+      integral += s.weight * Take(integrand, lambda_idx);
     }
     int imgx = std::min<int>(img.width()-1, s.t * img_dx);
     img.DrawLine(imgx, 0, imgx, img.height()-1);
   }
   integral *= 1./N;
-  Spectral3 exact_solution = 1. - (-spectral_sigma_t*cutoff_length).exp();
+  Spectral3 exact_solution = Take((1. - (-sigma_t*cutoff_length).exp()).eval(), lambda_idx);
   for (int k=0; k<static_size<Spectral3>(); ++k)
     EXPECT_NEAR(integral[k], exact_solution[k], 0.1 * integral[k]);
   display.show(img);
@@ -1190,18 +1194,13 @@ m scenes/unitcube.dae
   ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
   auto res = rt.TransmittanceEstimate(seg, HitId(), medium_tracker, PathContext{lambda_idx});
   
-  auto sigma_e = Color::RGBToSpectralSelection(RGB{3.}, lambda_idx);
+  auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, lambda_idx);
   Spectral3 expected = (-2.*sigma_e).exp();
   
   for (int i=0; i<static_size<Spectral3>(); ++i)
     ASSERT_NEAR(res[i], expected[i], 1.e-3);
 }
 
-
-int main(int argc, char **argv) {
-    testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}
 
 namespace Atmosphere
 {
@@ -1287,4 +1286,11 @@ TEST(AtmosphereTest, LoadTabulatedData)
 }
 
 
+}
+
+
+
+int main(int argc, char **argv) {
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }

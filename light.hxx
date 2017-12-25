@@ -53,11 +53,11 @@ public:
 
 class PointLight : public Light
 {
-  Spectral3 col; // Total power distributed uniformely over the unit sphere.
+  SpectralN col; // Total power distributed uniformely over the unit sphere.
   Double3 pos;
 public:
-  PointLight(const Spectral3 &col,const Double3 &pos)
-    : col(col),pos(pos)
+  PointLight(const SpectralN &col,const Double3 &pos)
+    : col{col},pos(pos)
   {}
 
   Sample TakePositionSample(Sampler &sampler, const LightPathContext &context) const override
@@ -65,7 +65,7 @@ public:
     Sample s {
       pos,
       1.,
-      col,
+      Take(col, context.lambda_idx),
       false };
     return s;
   }
@@ -76,7 +76,7 @@ public:
     DirectionalSample s{
       { pos, SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare()) },
       one_over_unit_sphere_surface_area,
-      Spectral3{1.}
+      Spectral3{1._sp}
     };
     return s;
   }
@@ -85,7 +85,7 @@ public:
   {
     assert (Length(pos - this->pos) <= Epsilon);
     if (pdf) *pdf = 1.;
-    return col;
+    return Take(col, context.lambda_idx);
   }
   
   Spectral3 EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, const LightPathContext &context, double *pdf) const override
@@ -99,11 +99,11 @@ public:
 
 class DistantDirectionalLight : public Light
 {
-  Spectral3 col;
+  SpectralN col;
   Double3 dir_out;
 public:
-  DistantDirectionalLight(const Spectral3 &_col,const Double3 &_dir_out)
-    : col(_col),dir_out(_dir_out)
+  DistantDirectionalLight(const SpectralN &_col,const Double3 &_dir_out)
+    : col{_col},dir_out(_dir_out)
     {}
 
   Sample TakePositionSample(Sampler &sampler, const LightPathContext &context) const override
@@ -111,7 +111,7 @@ public:
     Sample s {
       dir_out,
       1.,
-      col,
+      Take(col, context.lambda_idx),
       true };
     return s;
   }
@@ -126,7 +126,7 @@ public:
   {
     assert (Length(pos - this->dir_out) <= Epsilon);
     if (pdf) *pdf = 1.;
-    return col;
+    return Take(col, context.lambda_idx);
   }
   
   Spectral3 EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, const LightPathContext &context, double *pdf) const override
@@ -139,12 +139,12 @@ public:
 
 class DistantDomeLight : public Light
 {
-  Spectral3 col;
+  SpectralN col;
   Double3 down_dir;
   Eigen::Matrix3d frame;
 public:
-  DistantDomeLight(const Spectral3 &_col, const Double3 &_up_dir)
-    : col(_col), down_dir(-_up_dir)
+  DistantDomeLight(const SpectralN &_col, const Double3 &_up_dir)
+    : col{_col}, down_dir(-_up_dir)
   {
     frame = OrthogonalSystemZAligned(down_dir);
   }
@@ -158,7 +158,7 @@ public:
     Sample s {
       dir_out,
       pdf,
-      col,
+      Take(col, context.lambda_idx),
       true };
     return s;
   }
@@ -175,7 +175,7 @@ public:
     // Similar rationale as above: light comes from the top hemisphere if
     // the direction vector (here pos) points down.
     auto above = Dot(pos, down_dir);
-    return above > 0 ? col : Spectral3{0.};
+    return above > 0 ? Take(col, context.lambda_idx) : Spectral3{0.};
   }
   
   Spectral3 EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, const LightPathContext &context, double *pdf) const override

@@ -11,7 +11,7 @@ inline Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Textur
   if (tex)
   {
     Double3 uv = surface_hit.primitive().GetUV(surface_hit.hitid);
-    RGB col = tex->GetTexel(uv[0], uv[1]).array();
+    RGB col = tex->GetTexel(uv[0], uv[1]);
     ret *= Color::RGBToSpectralSelection(col, lambda_idx); // TODO: optimize, I don't have to compute the full spectrum.
   }
   return ret;
@@ -20,9 +20,9 @@ inline Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Textur
 
 
 
-DiffuseShader::DiffuseShader(const RGB &_reflectance, std::unique_ptr<Texture> _diffuse_texture)
+DiffuseShader::DiffuseShader(const SpectralN &_reflectance, std::unique_ptr<Texture> _diffuse_texture)
   : Shader(IS_REFLECTIVE),
-    kr_d(Color::RGBToSpectrum(_reflectance)),
+    kr_d(_reflectance),
     diffuse_texture(std::move(_diffuse_texture))
 {
   // Wtf? kr_d is the (constant) Lambertian BRDF. Energy conservation
@@ -61,9 +61,9 @@ BSDFSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfa
 
 
 
-SpecularReflectiveShader::SpecularReflectiveShader(const Spectral3& reflectance)
+SpecularReflectiveShader::SpecularReflectiveShader(const SpectralN& reflectance)
   : Shader(REFLECTION_IS_SPECULAR|IS_REFLECTIVE),
-    kr_s(Color::RGBToSpectrum(reflectance))
+    kr_s(reflectance)
 {
 }
 
@@ -110,10 +110,10 @@ double G1(double cos_v_m, double cos_v_n, double alpha)
 
 
 MicrofacetShader::MicrofacetShader(
-  const Spectral3 &_glossy_reflectance, std::unique_ptr<Texture> _glossy_texture,
+  const SpectralN &_glossy_reflectance, std::unique_ptr<Texture> _glossy_texture,
   double _glossy_exponent)
   : Shader(0),
-    kr_s(Color::RGBToSpectrum(_glossy_reflectance)), 
+    kr_s(_glossy_reflectance), 
     alpha(_glossy_exponent),
     glossy_texture(std::move(_glossy_texture))
 {
@@ -272,8 +272,8 @@ Spectral3 VacuumMedium::EvaluateTransmission(const RaySegment& segment, Sampler 
 
 
 
-HomogeneousMedium::HomogeneousMedium(const RGB& _sigma_s, const RGB& _sigma_a, int priority)
-  : Medium(priority), sigma_s{Color::RGBToSpectrum(_sigma_s)}, sigma_a{Color::RGBToSpectrum(_sigma_a)}, sigma_ext{sigma_s + sigma_a},
+HomogeneousMedium::HomogeneousMedium(const SpectralN& _sigma_s, const SpectralN& _sigma_a, int priority)
+  : Medium(priority), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{sigma_s + sigma_a},
     phasefunction{new PhaseFunctions::Uniform()}
 {
 }

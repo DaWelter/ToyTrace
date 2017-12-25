@@ -141,7 +141,7 @@ private:
       const int nsmpl = samples_per_pixel;
       for(int i=0;i<nsmpl;i++)
       {
-        Spectral3 smpl = algo.MakePrettyPixel(pixel_index);
+        auto smpl = algo.MakePrettyPixel(pixel_index);
         buffer.Insert(pixel_index, smpl);
       }
     }
@@ -315,7 +315,7 @@ int main(int argc, char *argv[])
             int pixel_index = scene.GetCamera().PixelToUnit({x, y});
             for (int s = 0; s < samples_per_pixel_per_iteration; ++s)
             {
-              Spectral3 smpl = algo.MakePrettyPixel(pixel_index);
+              auto smpl = algo.MakePrettyPixel(pixel_index);
               buffer.Insert(pixel_index, smpl);
             }
           }
@@ -331,7 +331,7 @@ int main(int argc, char *argv[])
     {
       int pixel_index = scene.GetCamera().PixelToUnit(
         {render_params.pixel_x, render_params.pixel_y});
-      Spectral3 smpl = algo.MakePrettyPixel(pixel_index);
+      auto smpl = algo.MakePrettyPixel(pixel_index);
       buffer.Insert(pixel_index, smpl);
       buffer.ToImage(bm, render_params.pixel_y, render_params.pixel_y+1);
       display.show(bm);

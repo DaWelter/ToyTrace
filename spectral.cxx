@@ -34,11 +34,11 @@ static const double mat_spectrum_to_rgb[3][NBINS] = {
 
 
 
-RGB SpectrumToRGB(int bin, double intensity)
+RGB SpectrumToRGB(int bin, Scalar intensity)
 {
-  Spectral3 x;
+  RGB x;
   for (int i=0; i<3; ++i)
-    x[i] = intensity * mat_spectrum_to_rgb[i][bin];
+    x[i] = RGBScalar(intensity * mat_spectrum_to_rgb[i][bin]);
   return x;
 }
 
@@ -64,7 +64,7 @@ inline void LinComb(double *RESTRICT dst, double a, const double *RESTRICT sa, d
 
 SpectralN RGBToSpectrum(const RGB &rgb)
 {
-  const double red = rgb[0], green = rgb[1], blue = rgb[2];
+  const double red = value(rgb[0]), green = value(rgb[1]), blue = value(rgb[2]);
   SpectralN ret;
 
   if(red <= green && red <= blue)
@@ -104,9 +104,9 @@ RGB SpectrumToRGB(const SpectralN &val)
   RGB x;
   for (int i=0; i<3; ++i)
   {
-    x[i] = 0.;
+    x[i] = 0._rgb;
     for (int bin=0; bin<NBINS; ++bin)
-      x[i] += val[bin] * mat_spectrum_to_rgb[i][bin];
+      x[i] += RGBScalar(val[bin] * mat_spectrum_to_rgb[i][bin]);
   }
   return x;
 }
@@ -116,16 +116,16 @@ RGB SpectralSelectionToRGB(const Spectral3 &val, const Index3 &idx)
   RGB x;
   for (int i=0; i<3; ++i)
   {
-    x[i] = 0.;
+    x[i] = 0._rgb;
     for (int j=0; j<idx.size(); ++j)
-      x[i] += val[j] * mat_spectrum_to_rgb[i][idx[j]];
+      x[i] += RGBScalar(val[j] * mat_spectrum_to_rgb[i][idx[j]]);
   }
   return x;
 }
 
 Spectral3 RGBToSpectralSelection(const RGB &rgb, const Index3 &idx)
 {
-  const double red = rgb[0], green = rgb[1], blue = rgb[2];
+  const double red = value(rgb[0]), green = value(rgb[1]), blue = value(rgb[2]);
   Spectral3 ret;
 
   if(red <= green && red <= blue)

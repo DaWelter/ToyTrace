@@ -62,7 +62,7 @@ class DiffuseShader : public Shader
   SpectralN kr_d; // between zero and 1/Pi.
   std::unique_ptr<Texture> diffuse_texture; // TODO: Share textures among shaders?
 public:
-  DiffuseShader(const RGB &reflectance, std::unique_ptr<Texture> _diffuse_texture);
+  DiffuseShader(const SpectralN &reflectance, std::unique_ptr<Texture> _diffuse_texture);
   BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
   Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
@@ -73,7 +73,7 @@ class SpecularReflectiveShader : public Shader
 {
   SpectralN kr_s;
 public:
-  SpecularReflectiveShader(const RGB &reflectance);
+  SpecularReflectiveShader(const SpectralN &reflectance);
   BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
   Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
@@ -86,7 +86,7 @@ class MicrofacetShader : public Shader
   std::unique_ptr<Texture> glossy_texture;
 public:
   MicrofacetShader(
-    const RGB &_glossy_reflectance, std::unique_ptr<Texture> _glossy_texture,
+    const SpectralN &_glossy_reflectance, std::unique_ptr<Texture> _glossy_texture,
     double _glossy_exponent
   );
   BSDFSample SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
@@ -146,7 +146,7 @@ class HomogeneousMedium : public Medium
 public:
   std::unique_ptr<PhaseFunctions::PhaseFunction> phasefunction; // filled by parser
 public:
-  HomogeneousMedium(const RGB &_sigma_s, const RGB &_sigma_a, int _priority); 
+  HomogeneousMedium(const SpectralN &_sigma_s, const SpectralN &_sigma_a, int _priority); 
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const;
   virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;

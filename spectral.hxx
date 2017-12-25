@@ -1,14 +1,24 @@
 #pragma once
 
+#include "very_strong_typedef.hxx"
 #include "vec3f.hxx"
 
 namespace Color
 {
 
 using Scalar = double; // TODO: Use float?
+struct tag_RGBScalar {};
+using RGBScalar = very_strong_typedef<Scalar, tag_RGBScalar>;
 
+//https://codereview.stackexchange.com/questions/49502/user-defined-string-literals-and-namespace-use
+namespace Literals
+{
 constexpr Scalar operator"" _sp (long double d) { return Scalar(d); }
 constexpr Scalar operator"" _sp (unsigned long long int d) { return Scalar(d); }
+constexpr RGBScalar operator"" _rgb(long double d) { return RGBScalar(d); }
+}
+
+using namespace Literals;
 
 // Left and right bounds of the binned range.
 static constexpr Scalar lambda_min = 370;
@@ -20,7 +30,8 @@ static constexpr int NBINS = 36;
 // http://www.boost.org/doc/libs/1_61_0/libs/serialization/doc/strong_typedef.html
 using Spectral3 = Eigen::Array<Scalar, 3, 1>;
 using SpectralN = Eigen::Array<Scalar, NBINS, 1>;
-using RGB       = Eigen::Array<Scalar, 3, 1>;  // Alias of Spectral3 which is not ideal because they can be mixed.
+using RGB       = Eigen::Array<RGBScalar, 3, 1>;  // Alias of Spectral3 which is not ideal because they can be mixed.
+
 
 inline Scalar GetWavelength(int bin)
 {
@@ -53,20 +64,20 @@ SpectralN MaxwellBoltzmanDistribution(double temp);
 
 
 // Applies gamma correction. See https://en.wikipedia.org/wiki/SRGB
-inline Scalar SRGBToLinear(Scalar x)
+inline RGBScalar SRGBToLinear(RGBScalar x)
 {
-  return (x <= 0.04045_sp) ? 
-         (x/12.92_sp) : 
-         (std::pow((x+0.055_sp)/1.055_sp, 2.4_sp));
+  return (x <= 0.04045_rgb) ? 
+         (x/12.92_rgb) : 
+         (pow((x+0.055_rgb)/1.055_rgb, 2.4_rgb));
 }
 
 
 // Applies gamma correction. See https://en.wikipedia.org/wiki/SRGB
-inline Scalar LinearToSRGB(Scalar x)
+inline RGBScalar LinearToSRGB(RGBScalar x)
 {    
-  return   (x <= 0.0031308_sp) ? 
-           (12.92_sp*x) : 
-           (1.055_sp*std::pow(x, 1.0_sp/2.4_sp) - 0.055_sp);
+  return   (x <= 0.0031308_rgb) ? 
+           (12.92_rgb*x) : 
+           (1.055_rgb*pow(x, 1.0_rgb/2.4_rgb) - 0.055_rgb);
 }
 
 }
@@ -74,9 +85,34 @@ inline Scalar LinearToSRGB(Scalar x)
 using RGB = Color::RGB;
 using Spectral3 = Color::Spectral3;
 using SpectralN = Color::SpectralN;
+using RGBScalar = Color::RGBScalar;
+
+using namespace Color::Literals;
 
 template<>
 constexpr int static_size<Spectral3>()
 {
   return Spectral3::RowsAtCompileTime;
+}
+
+
+
+namespace Eigen 
+{
+template<> 
+struct NumTraits<Color::RGBScalar>  : GenericNumTraits<Color::RGBScalar> // permits to get the epsilon, dummy_precision, lowest, highest functions
+{
+  typedef Color::RGBScalar Real;
+  typedef Color::RGBScalar NonInteger;
+  typedef Color::RGBScalar Nested;
+  enum {
+    IsComplex = 0,
+    IsInteger = 0,
+    IsSigned = 1,
+    RequireInitialization = 0,
+    ReadCost = 1,
+    AddCost = 3,
+    MulCost = 3
+  };
+};
 }
