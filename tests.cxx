@@ -56,6 +56,13 @@ TEST(BasicAssumptions, TakeFromVectorByIndices)
 }
 
 
+TEST(BasicAssumptions, NewMax)
+{
+  constexpr int a = std::max({1, 2, 3, 4, 3, 2, 1});
+  static_assert(a == 4, "Must be the maximum");
+}
+
+
 // Throw a one with probability p and zero with probability 1-p.
 // Let this be reflected by random variable X \in {0, 1}.
 // What is the expectation E[X] and std deviation sqrt(Var[X])?
@@ -1089,6 +1096,35 @@ void RenderingMediaTransmission1Helper(const Scene &scene, const Ray &ray, const
 }
 
 
+TEST(Rendering, VertexAllocation)
+{
+  class TestVertex : public Vertex
+  {
+  public:
+    TestVertex(int a_) : a{a_} {}
+    int a;
+  };
+  
+  std::vector<TestVertex*> v;
+  static constexpr int N = 10;
+  VertexStorage storage(N);
+  for (int iter = 0; iter < 10; ++iter)
+  {
+    v.clear();
+    for (int i=0; i<N; ++i)
+    {
+      v.push_back(
+        storage.allocate<TestVertex>(iter * N + i));
+    }
+    for (int i=0; i<N; ++i)
+    {
+      EXPECT_EQ(v[i]->a, iter * N + i);
+    }
+    storage.clear();
+  }
+}
+
+
 TEST(Rendering, MediaTransmission1)
 {
   const std::string scenestr {R"""(
@@ -1193,7 +1229,7 @@ m scenes/unitcube.dae
   RaySegment seg{{{ray_offset,0.,-10.}, {0.,0.,1.}}, LargeNumber};
   medium_tracker.initializePosition(seg.ray.org, hits_temporary_buffer);
   ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
-  auto res = rt.TransmittanceEstimate(seg, HitId(), medium_tracker, PathContext{lambda_idx});
+  auto res = rt.TransmittanceEstimate(seg, medium_tracker, PathContext{lambda_idx});
   
   auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, lambda_idx);
   Spectral3 expected = (-2.*sigma_e).exp();

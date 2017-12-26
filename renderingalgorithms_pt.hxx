@@ -1,6 +1,89 @@
 #pragma once
 
+#include <boost/pool/simple_segregated_storage.hpp>
+
 #include "renderingalgorithms.hxx"
+
+
+class Vertex
+{
+public:
+  virtual ~Vertex() {}
+  
+};
+
+
+class Scattering
+{
+public:
+  virtual BSDFSample Sample(const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const = 0;
+  virtual Spectral3 Evaluate(const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
+};
+
+
+class Surface : public Vertex
+{
+  RaySurfaceIntersection intersection;
+  Double3 reverse_incident_dir;
+};
+
+
+class Volume : public Vertex
+{
+  Double3 pos;
+  Double3 reverse_incident_dir;
+  Medium& medium;
+};
+
+
+class VertexStorage
+{
+  static constexpr std::size_t chunk_size = std::max({
+    sizeof(void*), // Ensure sufficient space for the next-free-chunk pointer.
+    sizeof(Vertex),
+    sizeof(Surface),
+    sizeof(Volume)
+  });
+  
+  std::vector<char> memory;
+  using MemoryManager = boost::simple_segregated_storage<std::size_t>;
+  MemoryManager manager;
+
+  void _init_manager()
+  {
+    manager.add_block(&memory.front(), memory.size(), chunk_size);
+  }
+  
+public:
+  VertexStorage(std::size_t max_num_items)
+  {
+    std::size_t some_reserve_for_inter_block_links = 128; // Which is chosen completely arbitrary in good faith.
+    memory.resize(
+      chunk_size * max_num_items + 
+      some_reserve_for_inter_block_links);
+    _init_manager();
+  }
+  
+  template<class T, typename... Args>
+  T* allocate(Args&&... args)
+  {
+    static_assert(sizeof(T) <= chunk_size, "Must fit in the chunks");
+    void *p = manager.malloc();
+    assert(p != nullptr);
+    return new(p) T(std::forward<Args>(args)...);
+  }
+  
+  // Clear the memory. WARNING: currently no d'tors are called!!!
+  void clear()
+  {
+    manager.~MemoryManager();
+#ifndef NDEBUG
+    std::fill(memory.begin(), memory.end(), std::numeric_limits<char>::max());
+#endif
+    new (&manager) MemoryManager();
+    _init_manager();
+  }
+};
 
 
 class PathTracing : public BaseAlgo
@@ -58,7 +141,7 @@ public:
   }
   
   
-  Spectral3 TransmittanceEstimate(RaySegment seg, HitId last_hit, MediumTracker medium_tracker, const PathContext &context)
+  Spectral3 TransmittanceEstimate(RaySegment seg, MediumTracker medium_tracker, const PathContext &context)
   {
     // TODO: Russian roulette.
     Spectral3 result{1.};
@@ -115,7 +198,7 @@ public:
     if (d_factor <= 0.)
       return Spectral3{0.};
 
-    auto transmittance = TransmittanceEstimate(segment_to_light, (intersection ? intersection->hitid : HitId()), medium_tracker_parent, context);
+    auto transmittance = TransmittanceEstimate(segment_to_light, medium_tracker_parent, context);
 
     auto sample_value = (transmittance * light_sample.measurement_contribution * scatter_factor)
                         * d_factor / (light_sample.pdf * (light_sample.is_direction ? 1. : Sqr(segment_to_light.length)) * pmf_of_light);
