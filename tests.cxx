@@ -12,6 +12,7 @@
 #include "sampler.hxx"
 #include "scene.hxx"
 #include "renderingalgorithms.hxx"
+#include "renderingalgorithms_pt.hxx"
 #include "sphere.hxx"
 #include "triangle.hxx"
 #include "atmosphere.hxx"

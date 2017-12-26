@@ -1,6 +1,8 @@
 #include "image.hxx"
 #include "scene.hxx"
 #include "renderingalgorithms.hxx"
+#include "renderingalgorithms_pt.hxx"
+
 #include <chrono>
 #include <atomic>
 #include <thread>
