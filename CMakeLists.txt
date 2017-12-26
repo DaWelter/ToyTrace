@@ -8,7 +8,9 @@ add_compile_options ("$<$<CONFIG:RELEASE>:-march=native>")
 add_compile_options ("$<$<CONFIG:RELEASE>:-O3>")
 add_compile_options ("$<$<CONFIG:RELEASE>:-msse2>")
 add_compile_options ("$<$<CONFIG:RELEASE>:-mfpmath=sse>")
-
+# Eliminate link error caused by boost/pool/simple_segregated_storage.hpp
+# https://stackoverflow.com/questions/9723793/undefined-reference-to-boostsystemsystem-category-when-compiling
+add_definitions("-DBOOST_SYSTEM_NO_DEPRECATED")
 
 if(NOT WIN32)
   find_package(X11)
@@ -43,16 +45,17 @@ link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSI
 
 set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx bsptree.cxx phasefunctions.cxx atmosphere.cxx spectral.cxx)
 add_executable(toytrace toytrace.cxx ${SOURCES})
-add_executable(tests tests.cxx ${SOURCES})
-add_executable(tests2 tests2.cxx)
-
 target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE})
 
-target_include_directories(tests PUBLIC ${GTEST_INCLUDE_DIRS})
-target_link_libraries(tests ${GTEST_LIBRARIES} pthread)
+add_executable(tests tests.cxx ${SOURCES})
+add_executable(tests2 tests2.cxx)
+#add_executable(tests3 tests3.cxx)
 
-target_include_directories(tests2 PUBLIC ${GTEST_INCLUDE_DIRS})
-target_link_libraries(tests2 ${GTEST_LIBRARIES} pthread)
+foreach(EXE tests tests2)
+  target_include_directories(${EXE} PUBLIC ${GTEST_INCLUDE_DIRS})
+  target_link_libraries(${EXE} ${GTEST_LIBRARIES} pthread)
+endforeach()
+
 
 # For qtcreator to display all header files. (https://stackoverflow.com/questions/28384935/qtcreator-cmake-project-how-to-show-all-project-files)
 FILE(GLOB THE_HEADERS "*.hxx")
