@@ -1,7 +1,5 @@
 #pragma once
-
-#include"vec3f.hxx"
-#include"spectral.hxx"
+// DO NOT INCLUDE DIRECTLY.
 
 class Sampler;
 
@@ -9,19 +7,11 @@ void WeightsToCombinationProbabilities(Spectral3 &prob_lambda, Spectral3 *prob_c
 
 namespace PhaseFunctions
 {
-
-struct Sample
-{
-  Double3 dir;
-  Spectral3 value;
-  double pdf;
-};
-  
   
 class PhaseFunction
 {
   public:
-    virtual Sample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const = 0;
+    virtual ScatterSample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const = 0;
     virtual Spectral3 Evaluate(const Double3 &reverse_indcident_dir, const Double3 &out_direction, double *pdf) const = 0;
 };
 
@@ -29,7 +19,7 @@ class PhaseFunction
 class Uniform : public PhaseFunction
 {
   public:
-    Sample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const override;
+    ScatterSample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const override;
     Spectral3 Evaluate(const Double3 &reverse_indcident_dir, const Double3 &out_direction, double *pdf) const override;
 };
 
@@ -38,7 +28,7 @@ class Uniform : public PhaseFunction
 class Rayleigh : public PhaseFunction
 {
   public:
-    Sample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const override;
+    ScatterSample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const override;
     Spectral3 Evaluate(const Double3 &reverse_indcident_dir, const Double3 &out_direction, double *pdf) const override;
 };
 
@@ -51,7 +41,7 @@ class HenleyGreenstein : public PhaseFunction
     HenleyGreenstein(double _g)
       : g(_g) 
       {}
-    Sample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const override;
+    ScatterSample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const override;
     Spectral3 Evaluate(const Double3 &reverse_indcident_dir, const Double3 &out_direction, double *pdf) const override;
 };
 
@@ -65,7 +55,7 @@ class Combined : public PhaseFunction
   public:
     Combined(const Spectral3 &lambda_weight, const Spectral3 &weight1, const PhaseFunction &pf1, const Spectral3 &weight2, const PhaseFunction &pf2);
     
-    Sample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const override;
+    ScatterSample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const override;
     Spectral3 Evaluate(const Double3 &reverse_indcident_dir, const Double3 &out_direction, double *pdf) const override;
 };
 

@@ -6,13 +6,23 @@
 #include"vec3f.hxx"
 #include"spectral.hxx"
 #include"texture.hxx"
-#include"phasefunctions.hxx"
 
 class Sampler;
 struct Ray;
 struct RaySegment;
 class Scene;
 struct RaySurfaceIntersection;
+
+struct ScatterSample
+{
+  Double3 dir;
+  Spectral3 value;
+  double pdf;
+};
+  
+
+// Included here because it uses ScatterSample.
+#include"phasefunctions.hxx"
 
 
 struct PathContext
@@ -23,14 +33,6 @@ struct PathContext
   {}
   Spectral3 beta;
   Index3 lambda_idx;
-};
-
-
-struct BSDFSample
-{
-  Double3 dir;
-  Spectral3 scatter_function;
-  double pdf;
 };
 
 
@@ -50,7 +52,7 @@ class Shader
 public:
   Shader(int _flags = 0) : flags(_flags) {}
   virtual ~Shader() {}
-  virtual BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const = 0;
+  virtual ScatterSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const = 0;
   virtual Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
   bool IsReflectionSpecular() const { return flags & REFLECTION_IS_SPECULAR; }
   bool IsPassthrough() const { return flags & IS_PASSTHROUGH; }
@@ -63,7 +65,7 @@ class DiffuseShader : public Shader
   std::unique_ptr<Texture> diffuse_texture; // TODO: Share textures among shaders?
 public:
   DiffuseShader(const SpectralN &reflectance, std::unique_ptr<Texture> _diffuse_texture);
-  BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  ScatterSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
   Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
 
@@ -74,7 +76,7 @@ class SpecularReflectiveShader : public Shader
   SpectralN kr_s;
 public:
   SpecularReflectiveShader(const SpectralN &reflectance);
-  BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  ScatterSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
   Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
 
@@ -89,7 +91,7 @@ public:
     const SpectralN &_glossy_reflectance, std::unique_ptr<Texture> _glossy_texture,
     double _glossy_exponent
   );
-  BSDFSample SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
   Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
 
@@ -99,7 +101,7 @@ class InvisibleShader : public Shader
 {
 public:
   InvisibleShader() : Shader(IS_PASSTHROUGH|REFLECTION_IS_SPECULAR|TRANSMISSION_IS_SPECULAR) {}
-  BSDFSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  ScatterSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
   Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
 
@@ -116,7 +118,7 @@ public:
     // beta_med = sigma_s(t) T(t) / p(t) 
     Spectral3 weight;
   };
-  using PhaseSample = PhaseFunctions::Sample;
+  using PhaseSample = ScatterSample;
   
   const int priority;
   Medium(int _priority) : priority(_priority) {}

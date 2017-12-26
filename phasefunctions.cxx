@@ -1,5 +1,6 @@
-#include "phasefunctions.hxx"
+#include "shader.hxx"
 #include "sampler.hxx"
+
 
 namespace PhaseFunctions 
 {
@@ -19,9 +20,9 @@ Double3 mu_to_direction(double mu, double r2)
 
 
 
-Sample Uniform::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
+ScatterSample Uniform::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
 {
-  return Sample{
+  return ScatterSample{
     SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare()),
     Spectral3{1./UnitSphereSurfaceArea},
     1./UnitSphereSurfaceArea
@@ -55,14 +56,14 @@ double value(double mu)
 }
 
 
-Sample Rayleigh::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
+ScatterSample Rayleigh::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
 {
   auto m = OrthogonalSystemZAligned(-reverse_incident_dir);
   Double2 r = sampler.UniformUnitSquare();
   auto mu = RayleighDetail::sample_mu(r[0]);
   auto dir = mu_to_direction(mu, r[1]);
   auto value = RayleighDetail::value(mu);
-  return Sample{
+  return ScatterSample{
     m * dir,
     Spectral3{value},
     value // is also a valid probability density since energy conservation demands normalization to one over the unit sphere.
@@ -113,14 +114,14 @@ double value(double mu, double g)
 }
 
 
-Sample HenleyGreenstein::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
+ScatterSample HenleyGreenstein::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
 {
   auto m = OrthogonalSystemZAligned(-reverse_incident_dir);
   Double2 r = sampler.UniformUnitSquare();
   auto mu = HenleyGreensteinDetail::sample_mu(r[0], g);
   auto dir = mu_to_direction(mu, r[1]);
   auto value = HenleyGreensteinDetail::value(mu, g);
-  return Sample{
+  return ScatterSample{
     m * dir,
     Spectral3{value},
     value
@@ -137,7 +138,7 @@ Spectral3 HenleyGreenstein::Evaluate(const Double3& reverse_incident_dir, const 
 }
 
 
-PhaseFunctions::Sample Combined::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
+ScatterSample Combined::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
 {
   constexpr int NL = static_size<Spectral3>();
   constexpr int NC = NUM_CONSTITUENTS;

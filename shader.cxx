@@ -49,14 +49,14 @@ Spectral3 DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurf
 }
 
 
-BSDFSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
+ScatterSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
 {
   auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
   Double3 v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
   double pdf = v[2]/Pi;
   Double3 out_direction = m * v;
   Spectral3 value = Dot(out_direction, surface_hit.normal)>0 ? Take(kr_d, context.lambda_idx) : Spectral3{0.};
-  return BSDFSample{out_direction, value, pdf};
+  return ScatterSample{out_direction, value, pdf};
 }
 
 
@@ -76,17 +76,17 @@ Spectral3 SpecularReflectiveShader::EvaluateBSDF(const Double3& incident_dir, co
 }
 
 
-BSDFSample SpecularReflectiveShader::SampleBSDF(const Double3& incident_dir, const RaySurfaceIntersection& surface_hit, Sampler& sampler, const PathContext &context) const
+ScatterSample SpecularReflectiveShader::SampleBSDF(const Double3& incident_dir, const RaySurfaceIntersection& surface_hit, Sampler& sampler, const PathContext &context) const
 {
   Double3 r = Reflected(incident_dir, surface_hit.shading_normal);
   double cos_rn = Dot(surface_hit.normal, r);
   if (cos_rn < 0.)
-    return BSDFSample{r, Spectral3{0.}, 1.};
+    return ScatterSample{r, Spectral3{0.}, 1.};
   else
   {
     double cos_rsdn = Dot(surface_hit.shading_normal, r);
     auto kr_s_taken = Take(kr_s, context.lambda_idx);
-    return BSDFSample{r, kr_s_taken/cos_rsdn, 1.};
+    return ScatterSample{r, kr_s_taken/cos_rsdn, 1.};
   }
 }
 
@@ -201,16 +201,16 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
 }
 
 
-BSDFSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
+ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
 {
   auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
   Double3 h_r_local = SampleTrafo::ToBeckmanHemisphere(sampler.UniformUnitSquare(), alpha);
   Double3 h_r = m*h_r_local;
   // The following is the inversion of the half-vector formula. It is like reflection except for the abs. But the abs is needed.
   Double3 out_direction = 2.*std::abs(Dot(reverse_incident_dir, h_r))*h_r - reverse_incident_dir;
-  BSDFSample smpl; 
+  ScatterSample smpl; 
   smpl.dir = out_direction;
-  smpl.scatter_function = this->EvaluateBSDF(reverse_incident_dir, surface_hit, out_direction, context, &smpl.pdf);
+  smpl.value = this->EvaluateBSDF(reverse_incident_dir, surface_hit, out_direction, context, &smpl.pdf);
   return smpl;
 }
 
@@ -228,9 +228,9 @@ Spectral3 InvisibleShader::EvaluateBSDF(const Double3 &incident_dir, const RaySu
 }
 
 
-BSDFSample InvisibleShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
+ScatterSample InvisibleShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
 {
-  return BSDFSample{-incident_dir, Spectral3{1.}, 1.};
+  return ScatterSample{-incident_dir, Spectral3{1.}, 1.};
 }
 
 
@@ -254,9 +254,9 @@ Medium::InteractionSample VacuumMedium::SampleInteractionPoint(const RaySegment&
 }
 
 
-PhaseFunctions::Sample VacuumMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
+ScatterSample VacuumMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
 {
-  return PhaseFunctions::Sample{
+  return ScatterSample{
     -incident_dir,
     Spectral3{1.},
     1.
@@ -285,7 +285,7 @@ Spectral3 HomogeneousMedium::EvaluatePhaseFunction(const Double3& incident_dir, 
 }
 
 
-PhaseFunctions::Sample HomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
+ScatterSample HomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
 {
   return phasefunction->SampleDirection(incident_dir, sampler);
 }

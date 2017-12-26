@@ -16,7 +16,7 @@ public:
 class Scattering
 {
 public:
-  virtual BSDFSample Sample(const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const = 0;
+  virtual ScatterSample Sample(const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const = 0;
   virtual Spectral3 Evaluate(const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
 };
 
@@ -300,7 +300,7 @@ public:
         if (gogogo)
         {
           auto surface_sample  = intersection.shader().SampleBSDF(-segment.ray.dir, intersection, sampler, context);
-          gogogo = !surface_sample.scatter_function.isZero();
+          gogogo = !surface_sample.value.isZero();
           if (gogogo)
           {
             // By definition, intersection.normal points to where the intersection ray is comming from.
@@ -315,7 +315,7 @@ public:
             {
               d_factor = std::max(0., Dot(surface_sample.dir, intersection.shading_normal));
             }
-            context.beta *= d_factor / surface_sample.pdf * surface_sample.scatter_function;
+            context.beta *= d_factor / surface_sample.pdf * surface_sample.value;
             PATH_LOGGING(path_logger.AddScatterEvent(intersection.pos, surface_sample.dir, context.beta, PathLogger::SCATTER_SURFACE);)
 
             segment.ray.org = intersection.pos+AntiSelfIntersectionOffset(intersection, RAY_EPSILON, surface_sample.dir);
