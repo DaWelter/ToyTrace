@@ -1,6 +1,7 @@
 #include <iostream>
 #include <boost/serialization/strong_typedef.hpp>
 #include <boost/pool/simple_segregated_storage.hpp>
+#include <boost/variant.hpp>
 
 #include "gtest/gtest.h"
 #include "spectral.hxx"
@@ -150,6 +151,20 @@ TEST(SmallObjectStorage, PolymorphicClasses)
   cout << "2 = "; derived2->print(cout); cout << endl;
   cout << "3 = "; derived1b->print(cout); cout << endl;
   EXPECT_EQ(((std::size_t)&derived1) % sizeof(double), 0); // Alignment
+}
+
+
+TEST(Boost, Variant)
+{
+  boost::variant<int, double> test = 2.;
+  boost::get<double>(test) = 3.;
+  ASSERT_EQ(test.which(), 1);
+  ASSERT_ANY_THROW(int &a = boost::get<int>(test));
+  test = 1;
+  int &a = boost::get<int>(test);
+  a = 5;
+  ASSERT_EQ(test.which(), 0);
+  std::cout << test << std::endl;
 }
 
 

@@ -4,20 +4,34 @@
 
 #include "renderingalgorithms.hxx"
 
+namespace RandomWalk
+{
 
 class Vertex
 {
 public:
   virtual ~Vertex() {}
-  
-};
-
-
-class Scattering
-{
 public:
-  virtual ScatterSample Sample(const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const = 0;
-  virtual Spectral3 Evaluate(const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
+  virtual ScatterSample Sample(Sampler& sampler, const PathContext &context) const = 0;
+  virtual Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
+//   virtual void UpdateThingsAndMakeExitantRay(Ray &ray, ScatterSample &smpl, MediumTracker &medium_tracker, PathContext &context) const = 0;
+  virtual void ApplyAntiSelfIntersectionTransform(Ray &ray) const {}
+  
+  virtual Double3 Position() const { return Double3{}; }
+  
+  virtual void InitRayAndMaybeHandlePassageThroughSurface(Ray &ray, const Double3 &exitant_dir, MediumTracker &medium_tracker) const
+  {
+    ray.org = Position();
+    ray.dir = exitant_dir;
+  }
+  
+//   virtual double Dfactor(const Double3 &exitant_dir) const { return 1.; }
+#if 0 // TODO Anti self intersection transform
+    
+    if (intersection) 
+      seg.ray.org += AntiSelfIntersectionOffset(*intersection, RAY_EPSILON, seg.ray.dir);
+
+#endif
 };
 
 
@@ -25,6 +39,49 @@ class Surface : public Vertex
 {
   RaySurfaceIntersection intersection;
   Double3 reverse_incident_dir;
+public:
+  Surface(const HitId &_hitid, const RaySegment &_incident_segment)
+    : intersection(_hitid, _incident_segment), reverse_incident_dir{-_incident_segment.ray.dir}
+  {
+  }
+
+  ScatterSample Sample(Sampler& sampler, const PathContext &context) const override
+  {
+    const auto &shader = intersection.shader();
+    auto smpl = shader.SampleBSDF(reverse_incident_dir, intersection, sampler, context);
+    double d_factor = std::max(0., Dot(intersection.shading_normal, smpl.dir));
+    smpl.value *= d_factor;
+    return smpl;
+  }
+  
+  Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) const override
+  {
+    double d_factor = std::max(0., Dot(intersection.shading_normal, out_direction));
+    const auto &shader = intersection.shader();
+    Spectral3 scatter_factor = shader.EvaluateBSDF(reverse_incident_dir, intersection, out_direction, context, pdf);
+    return d_factor*scatter_factor;
+  }
+  
+  virtual void InitRayAndMaybeHandlePassageThroughSurface(Ray &ray, const Double3 &exitant_dir, MediumTracker &medium_tracker) const
+  {
+    if (Dot(exitant_dir, intersection.normal) < 0.)
+    {
+      // By definition, intersection.normal points to where the intersection ray is comming from.
+      // Thus we can determine if the sampled direction goes through the surface by looking
+      // if the direction goes in the opposite direction of the normal.
+      medium_tracker.goingThroughSurface(exitant_dir, intersection);
+    }
+    ray.org = intersection.pos;
+    ray.dir = exitant_dir;
+    ray.org += AntiSelfIntersectionOffset(intersection, RAY_EPSILON, ray.dir);
+  }
+  
+  void ApplyAntiSelfIntersectionTransform(Ray &ray) const 
+  {
+    ray.org += AntiSelfIntersectionOffset(intersection, RAY_EPSILON, ray.dir);
+  }
+  
+  Double3 Position() const { return intersection.pos; }
 };
 
 
@@ -32,8 +89,53 @@ class Volume : public Vertex
 {
   Double3 pos;
   Double3 reverse_incident_dir;
-  Medium& medium;
+  const Medium& medium;
+  // Sigma_s factor is accounted for in the medium interaction sample weight.
+public:
+  Volume(const Medium::InteractionSample &_medium_smpl, const Medium &_medium, const RaySegment &_incident_segment)
+    : pos{_incident_segment.ray.PointAt(_medium_smpl.t)},
+      reverse_incident_dir{-_incident_segment.ray.dir},
+      medium{_medium}
+  {
+  }
+
+  ScatterSample Sample(Sampler& sampler, const PathContext &context) const override
+  {
+    return medium.SamplePhaseFunction(reverse_incident_dir, pos, sampler, context);
+  }
+  
+  Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) const override
+  {
+    return medium.EvaluatePhaseFunction(reverse_incident_dir, pos, out_direction, context, pdf);
+  }
+  
+  Double3 Position() const { return pos; }
 };
+
+
+
+// class Distant : public Vertex 
+// {
+//   const Scene* scene;
+// public:
+//   Distant(const Scene* _scene, const Double3 &_incident_dir)
+//     : scene(_scene)
+//   {
+//   }
+// };
+// 
+// 
+// class LightOrSensor : public Vertex
+// {
+//   RadianceOrImportance::EmitterSensorArray* emitter;
+// public:
+//   Sensor(RadianceOrImportance::EmitterSensorArray* _emitter)
+//     : emitter(_emitter)
+//   {
+//   }
+// };
+
+
 
 
 class VertexStorage
@@ -86,30 +188,37 @@ public:
 };
 
 
+} // RandomWalk
+
+
+namespace RW = RandomWalk;
+
 class PathTracing : public BaseAlgo
-{
-  int max_ray_depth;
+{ 
+  int max_number_of_interactions;
   double sufficiently_long_distance_to_go_outside_the_scene_bounds;
   
+  RW::VertexStorage vertex_storage;
   LambdaSelectionFactory lambda_selection_factory;
   
 public:
   PathTracing(const Scene &_scene, const AlgorithmParameters &algo_params) 
-  : BaseAlgo(_scene), max_ray_depth(algo_params.max_ray_depth) 
+  : BaseAlgo(_scene), 
+    max_number_of_interactions(algo_params.max_ray_depth),
+    vertex_storage(algo_params.max_ray_depth)
   {
     Box bb = _scene.GetBoundingBox();
     sufficiently_long_distance_to_go_outside_the_scene_bounds = 10.*(bb.max - bb.min).maxCoeff();
-
   }
   
   
-  bool RouletteSurvival(Spectral3 &beta, int level)
+  bool RouletteSurvival(Spectral3 &beta, int number_of_interactions)
   {
     static constexpr int MIN_LEVEL = 3;
     static constexpr double LOW_CONTRIBUTION = 0.5;
-    if (level >= max_ray_depth || beta.isZero())
+    if (number_of_interactions >= max_number_of_interactions || beta.isZero())
       return false;
-    if (level < MIN_LEVEL)
+    if (number_of_interactions < MIN_LEVEL)
       return true;
     double p_survive = std::min(0.9, beta.maxCoeff() / LOW_CONTRIBUTION);
     if (sampler.Uniform01() > p_survive)
@@ -119,7 +228,7 @@ public:
   }
   
   
-  RaySegment MakeSegmentToLight(const Double3 &pos_to_be_lit, const RadianceOrImportance::Sample &light_sample, const RaySurfaceIntersection *intersection)
+  RaySegment MakeSegmentToLight(const Double3 &pos_to_be_lit, const RadianceOrImportance::Sample &light_sample, const RW::Vertex &vertex)
   {
     RaySegment seg;
     if (!light_sample.is_direction)
@@ -135,41 +244,12 @@ public:
       seg = RaySegment{{pos_to_be_lit, -light_sample.pos},
         sufficiently_long_distance_to_go_outside_the_scene_bounds};
     }
-    if (intersection) seg.ray.org += AntiSelfIntersectionOffset(*intersection, RAY_EPSILON, seg.ray.dir);
     seg.length -= 2.*RAY_EPSILON;
     return seg;
   }
   
-  
-  Spectral3 TransmittanceEstimate(RaySegment seg, MediumTracker medium_tracker, const PathContext &context)
-  {
-    // TODO: Russian roulette.
-    Spectral3 result{1.};
-    auto SegmentContribution = [&seg, &medium_tracker, &context, this](double t1, double t2) -> Spectral3
-    {
-      RaySegment subseg{{seg.ray.PointAt(t1), seg.ray.dir}, t2-t1};
-      return medium_tracker.getCurrentMedium().EvaluateTransmission(subseg, sampler, context);
-    };
 
-    hits.clear();
-    scene.IntersectAll(seg.ray, seg.length, hits);
-    double t = 0;
-    for (const auto &hit : hits)
-    {
-      RaySurfaceIntersection intersection{hit, seg};
-      result *= intersection.shader().EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, context, nullptr);
-      if (result.isZero())
-        return result;
-      result *= SegmentContribution(t, hit.t);
-      medium_tracker.goingThroughSurface(seg.ray.dir, intersection);
-      t = hit.t;
-    }
-    result *= SegmentContribution(t, seg.length);
-    return result;
-  }
-  
-  
-  Spectral3 LightConnection(const Double3 &pos, const Double3 &incident_dir, const RaySurfaceIntersection *intersection, const MediumTracker &medium_tracker_parent, const PathContext &context)
+  Spectral3 LightConnection(const RW::Vertex &vertex, const MediumTracker &_medium_tracker_parent, const PathContext &context)
   {
     if (scene.GetNumLights() <= 0)
       return Spectral3{0.};
@@ -179,29 +259,21 @@ public:
     RadianceOrImportance::Sample light_sample = light->TakePositionSample(
       sampler, 
       RadianceOrImportance::LightPathContext(context.lambda_idx));
-    RaySegment segment_to_light = MakeSegmentToLight(pos, light_sample, intersection);
+    
+    RaySegment segment_to_light = MakeSegmentToLight(vertex.Position(), light_sample, vertex);
 
-    double d_factor = 1.;
-    Spectral3 scatter_factor;
-    if (intersection)
-    {
-      d_factor = std::max(0., Dot(intersection->shading_normal, segment_to_light.ray.dir));
-      const auto &shader = intersection->shader();
-      scatter_factor = shader.EvaluateBSDF(-incident_dir, *intersection, segment_to_light.ray.dir, context, nullptr);
-    }
-    else
-    {
-      const auto &medium = medium_tracker_parent.getCurrentMedium();
-      scatter_factor = medium.EvaluatePhaseFunction(-incident_dir, pos, segment_to_light.ray.dir, context, nullptr);
-    }
+    Spectral3 scatter_factor = vertex.Evaluate(segment_to_light.ray.dir, context, nullptr);
 
-    if (d_factor <= 0.)
+    if (scatter_factor.isZero())
       return Spectral3{0.};
 
-    auto transmittance = TransmittanceEstimate(segment_to_light, medium_tracker_parent, context);
+    MediumTracker medium_tracker = _medium_tracker_parent;
+    vertex.InitRayAndMaybeHandlePassageThroughSurface(segment_to_light.ray, segment_to_light.ray.dir, medium_tracker);
+    
+    auto transmittance = TransmittanceEstimate(segment_to_light, medium_tracker, context);
 
     auto sample_value = (transmittance * light_sample.measurement_contribution * scatter_factor)
-                        * d_factor / (light_sample.pdf * (light_sample.is_direction ? 1. : Sqr(segment_to_light.length)) * pmf_of_light);
+                         / (light_sample.pdf * (light_sample.is_direction ? 1. : Sqr(segment_to_light.length)) * pmf_of_light);
 
     PATH_LOGGING(
     if (!sample_value.isZero())
@@ -210,137 +282,102 @@ public:
 
     return sample_value;
   }
-  
-  Spectral3 EvaluateEnvironmentalRadianceField(const Double3 &viewing_dir, const RadianceOrImportance::LightPathContext &context)
+    
+
+  RW::Vertex* TrackAndAllocateNextInteractionPoint(
+    const Ray &ray, 
+    MediumTracker &medium_tracker, 
+    PathContext &context)
   {
-    Spectral3 environmental_radiance{0.};
-    for (int i=0; i<scene.GetNumLights(); ++i)
+    CollisionData collision{ray};
+    
+    TrackToNextInteraction(collision, medium_tracker, context);
+    
+    context.beta *= collision.smpl.weight;
+    
+    if (collision.smpl.t < collision.segment.length)
     {
-      const auto &light = scene.GetLight(i);
-      if (light.is_environmental_radiance_distribution) // What an aweful hack. Should there not be an env map class or similar?
-      {
-        environmental_radiance += light.EvaluatePositionComponent(
-          -viewing_dir,
-          context,
-          nullptr);
-      }
+      return vertex_storage.allocate<RW::Volume>(collision.smpl, medium_tracker.getCurrentMedium(), collision.segment);
     }
-    return environmental_radiance;
+    else if (collision.hit)
+    {
+      return vertex_storage.allocate<RW::Surface>(collision.hit, collision.segment);
+    }
+    else
+    {
+      return nullptr; // vertex_storage.allocate<Distant>(ray.dir);
+    }
   }
+  
+  
+  void InitializeWalkFromCamera(int pixel_index, Ray &ray, PathContext &context)
+  {
+    auto cam_sample = RadianceOrImportance::TakeRaySample(
+      scene.GetCamera(), pixel_index, sampler, 
+      RadianceOrImportance::LightPathContext{context.lambda_idx});
+    
+    context.beta *= cam_sample.measurement_contribution / cam_sample.pdf;
+    
+    ray = cam_sample.ray_out;
+  }
+  
   
   RGB MakePrettyPixel(int pixel_index) override
   {
     auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
     PathContext context{lambda_selection.first};
-    auto cam_sample = TakeRaySample(
-      scene.GetCamera(), pixel_index, sampler, 
-      RadianceOrImportance::LightPathContext{lambda_selection.first});
+    
+    Ray ray;
+    Spectral3 path_sample_value{0.};
+    
+    InitializeWalkFromCamera(pixel_index, ray, context);
 
-    if (cam_sample.measurement_contribution.isZero())
+    if (context.beta.isZero())
       return RGB::Zero();
     
-    MediumTracker medium_tracker = this->medium_tracker_root;
-    medium_tracker.initializePosition(cam_sample.ray_out.org, hits);
+    MediumTracker medium_tracker{scene};
+    medium_tracker.initializePosition(ray.org, hits);
     
-    context.beta *= cam_sample.measurement_contribution / cam_sample.pdf;
-    PATH_LOGGING(
-      path_logger.NewTrace(context.beta);)
-
-    Spectral3 path_sample_value{0.};
-    RaySegment segment{cam_sample.ray_out, LargeNumber};
+    RW::Vertex* vertex = nullptr;
     int number_of_interactions = 0;
-
-    bool gogogo = true;
-    while (gogogo)
+    
+    while (true)
     {
-      auto hit = scene.Intersect(segment.ray, segment.length);
+      vertex = TrackAndAllocateNextInteractionPoint(ray, medium_tracker, context);
+      
+      if (!vertex)
+        break;
+      
+      ++number_of_interactions;
+      
+      // TODO: MIS?
+      path_sample_value += context.beta *
+        LightConnection(*vertex, medium_tracker, context);
+      
+      bool survive = RouletteSurvival(context.beta, number_of_interactions);
+      if (!survive)
+        break;
 
-      const Medium& medium = medium_tracker.getCurrentMedium();
-      auto medium_smpl = medium.SampleInteractionPoint(segment, sampler, context);
+      auto scatter_smpl = vertex->Sample(sampler, context);
+      context.beta *= scatter_smpl.value / scatter_smpl.pdf;
+      
+      vertex->InitRayAndMaybeHandlePassageThroughSurface(ray, scatter_smpl.dir, medium_tracker);
+      
+      if (context.beta.isZero())
+        break;
 
-      context.beta *= medium_smpl.weight;
-
-      if (medium_smpl.t < segment.length)
-      {
-        Double3 interaction_location = segment.ray.PointAt(medium_smpl.t);
-        PATH_LOGGING(path_logger.AddSegment(segment.ray.org, interaction_location, context.beta, PathLogger::EYE_SEGMENT);)
-
-        ++number_of_interactions;
-        
-        path_sample_value += context.beta *
-          LightConnection(interaction_location, segment.ray.dir, nullptr, medium_tracker, context);
-
-        gogogo = RouletteSurvival(context.beta, number_of_interactions);
-        if (gogogo)
-        {
-          auto scatter_smpl = medium.SamplePhaseFunction(-segment.ray.dir, interaction_location, sampler, context);
-          context.beta *= scatter_smpl.value / scatter_smpl.pdf;
-
-          PATH_LOGGING(path_logger.AddScatterEvent(segment.ray.org, scatter_smpl.dir, context.beta, PathLogger::SCATTER_VOLUME);)
-
-          segment.ray.org = interaction_location;
-          segment.ray.dir = scatter_smpl.dir;
-          segment.length  = LargeNumber;
-        }
-      }
-      else if (hit)
-      {
-        RaySurfaceIntersection intersection{hit, segment};
-        PATH_LOGGING(path_logger.AddSegment(segment.ray.org, intersection.pos, context.beta, PathLogger::EYE_SEGMENT);)
-
-        number_of_interactions = intersection.shader().IsPassthrough() ? number_of_interactions : number_of_interactions+1;
-        
-        if (!intersection.shader().IsReflectionSpecular())
-        {
-          auto lc = LightConnection(intersection.pos, segment.ray.dir, &intersection, medium_tracker, context);
-          path_sample_value += context.beta * lc;
-        }
-
-        gogogo = RouletteSurvival(context.beta, number_of_interactions);
-        if (gogogo)
-        {
-          auto surface_sample  = intersection.shader().SampleBSDF(-segment.ray.dir, intersection, sampler, context);
-          gogogo = !surface_sample.value.isZero();
-          if (gogogo)
-          {
-            // By definition, intersection.normal points to where the intersection ray is comming from.
-            // Thus we can determine if the sampled direction goes through the surface by looking
-            // if the direction goes in the opposite direction of the normal.
-            double d_factor = 1.;
-            if (Dot(surface_sample.dir, intersection.normal) < 0.)
-            {
-              medium_tracker.goingThroughSurface(surface_sample.dir, intersection);
-            }
-            else
-            {
-              d_factor = std::max(0., Dot(surface_sample.dir, intersection.shading_normal));
-            }
-            context.beta *= d_factor / surface_sample.pdf * surface_sample.value;
-            PATH_LOGGING(path_logger.AddScatterEvent(intersection.pos, surface_sample.dir, context.beta, PathLogger::SCATTER_SURFACE);)
-
-            segment.ray.org = intersection.pos+AntiSelfIntersectionOffset(intersection, RAY_EPSILON, surface_sample.dir);
-            segment.ray.dir = surface_sample.dir;
-            segment.length  = LargeNumber;
-          }
-        }
-      }
-      else
-      {
-        gogogo = false;
-      }
       assert(context.beta.allFinite());
     }
 
-    if (number_of_interactions == 0)
+    if (vertex == nullptr && !context.beta.isZero() && number_of_interactions == 0) // Escaped!
     {
-      // I should actually do this whenever there was no deterministic light connection.
-      // And that would be of course here, if the primary ray hit nothing, or if the last interaction
-      // was perfectly specular.
-      path_sample_value += 1./cam_sample.pdf * cam_sample.measurement_contribution * EvaluateEnvironmentalRadianceField(
-        segment.ray.dir,
+      // TODO: MIS?
+      path_sample_value += context.beta * EvaluateEnvironmentalRadianceField(
+        ray.dir,
         RadianceOrImportance::LightPathContext(lambda_selection.first));
     }
     
+    vertex_storage.clear();
     return Color::SpectralSelectionToRGB(lambda_selection.second*path_sample_value, lambda_selection.first);
   }
 };

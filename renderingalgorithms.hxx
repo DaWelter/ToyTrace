@@ -145,7 +145,6 @@ void MediumTracker::initializePosition(const Double3& pos, HitVector &hits)
       Double3 start = pos;
       start[0] += distance_to_go;
       RaySegment seg{{start, {-1., 0., 0.}}, distance_to_go};
-      hits.clear();
       scene.IntersectAll(seg.ray, seg.length, hits);
       for (const auto &hit : hits)
       {
@@ -268,21 +267,21 @@ public:
 };
 
 
-class BaseAlgo
+
+class RadianceEstimatorBase
 {
 protected:
   const Scene &scene;
   Sampler sampler;
-  MediumTracker medium_tracker_root;
   HitVector hits;
-  PATH_LOGGING(
-      PathLogger path_logger;)
+
 public:
-  BaseAlgo(const Scene &_scene)
-    : scene{_scene},
-      medium_tracker_root{_scene}
+  RadianceEstimatorBase(const Scene &_scene)
+    : scene{_scene}
     {}
-    
+
+  virtual ~RadianceEstimatorBase() {}
+
   std::tuple<const Light*, double> PickLightUniform()
   {
     const auto &light = scene.GetLight(sampler.UniformInt(0, scene.GetNumLights()-1));
@@ -290,6 +289,104 @@ public:
     return std::make_tuple(&light, pmf_of_light);
   }
   
+  
+  Spectral3 EvaluateEnvironmentalRadianceField(const Double3 &viewing_dir, const RadianceOrImportance::LightPathContext &context)
+  {
+    Spectral3 environmental_radiance{0.};
+    for (int i=0; i<scene.GetNumLights(); ++i)
+    {
+      const auto &light = scene.GetLight(i);
+      if (light.is_environmental_radiance_distribution) // What an aweful hack. Should there not be an env map class or similar?
+      {
+        environmental_radiance += light.EvaluatePositionComponent(
+          -viewing_dir,
+          context,
+          nullptr);
+      }
+    }
+    return environmental_radiance;
+  }
+  
+  
+  Spectral3 TransmittanceEstimate(RaySegment seg, MediumTracker &medium_tracker, const PathContext &context)
+  {
+    // TODO: Russian roulette.
+    Spectral3 result{1.};
+    auto SegmentContribution = [&seg, &medium_tracker, &context, this](double t1, double t2) -> Spectral3
+    {
+      RaySegment subseg{{seg.ray.PointAt(t1), seg.ray.dir}, t2-t1};
+      return medium_tracker.getCurrentMedium().EvaluateTransmission(subseg, sampler, context);
+    };
+
+    hits.clear();
+    scene.IntersectAll(seg.ray, seg.length, hits);
+    double t = 0;
+    for (const auto &hit : hits)
+    {
+      RaySurfaceIntersection intersection{hit, seg};
+      result *= intersection.shader().EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, context, nullptr);
+      if (result.isZero())
+        return result;
+      result *= SegmentContribution(t, hit.t);
+      medium_tracker.goingThroughSurface(seg.ray.dir, intersection);
+      t = hit.t;
+    }
+    result *= SegmentContribution(t, seg.length);
+    return result;
+  }
+
+  
+  struct CollisionData
+  {
+    CollisionData (const Ray &ray) :
+      segment{ray, LargeNumber},
+      hit{},
+      smpl{}
+    {}
+    RaySegment segment;
+    Medium::InteractionSample smpl;
+    HitId hit;
+  };
+  
+
+  void TrackToNextInteraction(
+    CollisionData &collision,
+    MediumTracker &medium_tracker,
+    const PathContext &context)
+  {
+    Spectral3 total_weight{1.};
+    auto &segment = collision.segment;
+    while (true)
+    {
+      const Medium& medium = medium_tracker.getCurrentMedium();
+      
+      const auto &hit = collision.hit = scene.Intersect(segment.ray, segment.length);
+      const auto &medium_smpl = collision.smpl = medium.SampleInteractionPoint(segment, sampler, context);
+      total_weight *= medium_smpl.weight;
+      
+      if (medium_smpl.t >= segment.length && hit && hit.primitive->shader->IsPassthrough())
+      {
+        RaySurfaceIntersection intersection{hit, segment};
+        medium_tracker.goingThroughSurface(segment.ray.dir, intersection);
+        segment.ray.org = intersection.pos;
+        segment.ray.org += AntiSelfIntersectionOffset(intersection, RAY_EPSILON, segment.ray.dir);
+        segment.length = LargeNumber;
+      }
+      else
+      {
+        collision.smpl.weight = total_weight;
+        return;
+      }
+    }
+  }
+};
+
+
+
+class BaseAlgo : public RadianceEstimatorBase
+{
+public:
+  BaseAlgo(const Scene &scene) : RadianceEstimatorBase{scene} {}
   virtual RGB MakePrettyPixel(int pixel_index) = 0;
 };
 

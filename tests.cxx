@@ -1075,7 +1075,44 @@ m scenes/cornelbox2.dae
 }
 
 
-void RenderingMediaTransmission1Helper(const Scene &scene, const Ray &ray, const Medium **media_after_intersect, const double *intersect_pos, int NHITS)
+TEST(Rendering, VertexAllocation)
+{
+  class TestVertex : public RW::Vertex
+  {
+  public:
+    TestVertex(int a_) : a{a_} {}
+    int a;
+      
+    virtual ScatterSample Sample(Sampler& sampler, const PathContext &context) const override { return ScatterSample{}; }
+    virtual Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) const { return Spectral3{}; }
+  };
+  
+  std::vector<TestVertex*> v;
+  static constexpr int N = 10;
+  RW::VertexStorage storage(N);
+  for (int iter = 0; iter < 10; ++iter)
+  {
+    v.clear();
+    for (int i=0; i<N; ++i)
+    {
+      v.push_back(
+        storage.allocate<TestVertex>(iter * N + i));
+    }
+    for (int i=0; i<N; ++i)
+    {
+      EXPECT_EQ(v[i]->a, iter * N + i);
+    }
+    storage.clear();
+  }
+}
+
+
+void RenderingMediaTransmission1Helper(
+  const Scene &scene, 
+  const Ray &ray, 
+  const Medium **media_after_intersect, 
+  const double *intersect_pos, 
+  int NHITS)
 {
   MediumTracker mt(scene);
   HitVector hits;
@@ -1095,34 +1132,6 @@ void RenderingMediaTransmission1Helper(const Scene &scene, const Ray &ray, const
   }
 }
 
-
-TEST(Rendering, VertexAllocation)
-{
-  class TestVertex : public Vertex
-  {
-  public:
-    TestVertex(int a_) : a{a_} {}
-    int a;
-  };
-  
-  std::vector<TestVertex*> v;
-  static constexpr int N = 10;
-  VertexStorage storage(N);
-  for (int iter = 0; iter < 10; ++iter)
-  {
-    v.clear();
-    for (int i=0; i<N; ++i)
-    {
-      v.push_back(
-        storage.allocate<TestVertex>(iter * N + i));
-    }
-    for (int i=0; i<N; ++i)
-    {
-      EXPECT_EQ(v[i]->a, iter * N + i);
-    }
-    storage.clear();
-  }
-}
 
 
 TEST(Rendering, MediaTransmission1)
@@ -1206,7 +1215,7 @@ m scenes/unitcube.dae
 }
 
 
-TEST(Rendering, MediaTransmission3)
+TEST(Rendering, TransmittanceEstimate)
 {
   Scene scene;
   const char* scenestr = R"""(
@@ -1220,9 +1229,8 @@ m scenes/unitcube.dae
 )""";
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
-  scene.PrintInfo();
   Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
-  PathTracing rt(scene, AlgorithmParameters());
+  RadianceEstimatorBase rt(scene);
   MediumTracker medium_tracker(scene);
   HitVector hits_temporary_buffer;
   double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
@@ -1236,6 +1244,65 @@ m scenes/unitcube.dae
   
   for (int i=0; i<static_size<Spectral3>(); ++i)
     ASSERT_NEAR(res[i], expected[i], 1.e-3);
+}
+
+
+TEST(Rendering, NextInteractionEstimation)
+{
+  Scene scene;
+  const char* scenestr = R"""(
+shader invisible
+medium med1 3 3 3 0 0 0
+
+m scenes/unitcube.dae
+
+transform 0 0 2 0 0 0
+m scenes/unitcube.dae
+)""";
+  scene.ParseNFFString(scenestr);
+  scene.BuildAccelStructure();
+  
+  Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
+  RadianceEstimatorBase rt(scene);
+  MediumTracker medium_tracker(scene);
+  HitVector hits_temporary_buffer;
+  double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
+  Ray ray{{ray_offset,0.,-10.}, {0.,0.,1.}};
+  medium_tracker.initializePosition(ray.org, hits_temporary_buffer);
+  ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
+  
+  int num_escaped = 0;
+  Spectral3 weight_sum_interacted{0.};
+  Spectral3 weight_sum_escaped{0.};
+  
+  constexpr int NUM_SAMPLES = 1000;
+  for (int sample_num = 0; sample_num < NUM_SAMPLES; ++sample_num)
+  {
+    RadianceEstimatorBase::CollisionData collision(ray);
+    medium_tracker.initializePosition(ray.org, hits_temporary_buffer);
+    ASSERT_EQ(hits_temporary_buffer.size(), 0);
+    rt.TrackToNextInteraction(collision, medium_tracker, PathContext{lambda_idx});
+    if (collision.smpl.t < collision.segment.length)
+    {
+      weight_sum_interacted += collision.smpl.weight;
+    }
+    else
+    {
+      weight_sum_escaped += collision.smpl.weight;
+      num_escaped++;
+    }
+  }
+  weight_sum_escaped *= 1./(NUM_SAMPLES);
+  weight_sum_interacted *= 1./(NUM_SAMPLES);
+  
+  auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, lambda_idx);
+  Spectral3 expected_transmissions = (-2.*sigma_e).exp();
+  // No idea what the variance is. So I determine the acceptance threshold experimentally.
+  for (int i=0; i<static_size<Spectral3>(); ++i)
+  {
+    ASSERT_NEAR(weight_sum_escaped[i], expected_transmissions[i], 1.e-2);
+    ASSERT_NEAR(weight_sum_interacted[i], 1.-expected_transmissions[i], 1.e-2);
+  }
 }
 
 

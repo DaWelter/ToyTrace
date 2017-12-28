@@ -2,12 +2,12 @@
 #include "primitive.hxx"
 
 
-RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySegment& _inbound)
+RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySegment &_incident_segment)
   : hitid(_hitid)
 {
   assert(hitid.primitive);
   hitid.primitive->GetLocalGeometry(hitid, this->pos, this->normal, this->shading_normal);
-  double sign = Dot(-_inbound.ray.dir, normal) > 0. ? 1. : -1;
+  double sign = Dot(-_incident_segment.ray.dir, normal) > 0. ? 1. : -1;
   volume_normal = normal;
   normal *= sign;
   shading_normal *= sign;

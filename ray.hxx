@@ -73,7 +73,7 @@ struct RaySurfaceIntersection
 
   const Primitive& primitive() const;
   const Shader& shader() const;
-  RaySurfaceIntersection(const HitId &hitid, const RaySegment &inbound);
+  RaySurfaceIntersection(const HitId &hitid, const RaySegment &_incident_segment);
   RaySurfaceIntersection() = default;
 };
 

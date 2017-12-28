@@ -117,6 +117,7 @@ public:
 
   void IntersectAll(const Ray &ray, double ray_length, HitVector &all_hits) const
   {
+    all_hits.clear();
     IntersectionRecorder intersectionChecker {ray_length, all_hits};
     root.Intersect(ray, 0, ray_length, intersectionChecker);
     using RecordType = std::remove_reference<decltype(all_hits[0])>::type;
