@@ -185,6 +185,13 @@ public:
     new (&manager) MemoryManager();
     _init_manager();
   }
+  
+  template<class T>
+  void free(T *p)
+  {
+    p->~T();
+    manager.free(p);
+  }
 };
 
 
@@ -367,6 +374,7 @@ public:
         break;
 
       assert(context.beta.allFinite());
+      vertex_storage.free<RW::Vertex>(vertex);
     }
 
     if (vertex == nullptr && !context.beta.isZero() && number_of_interactions == 0) // Escaped!
