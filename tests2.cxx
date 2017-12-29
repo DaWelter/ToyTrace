@@ -9,6 +9,24 @@
 #include "vec3f.hxx"
 
 
+TEST(BasicAssumptions, FloatType)
+{
+  double nan = NaN;
+  double inf = Infinity;
+  EXPECT_FALSE(nan == nan);
+  EXPECT_TRUE(nan != nan);
+  EXPECT_TRUE(std::isnan(nan));
+  EXPECT_FALSE(nan < 0.);
+  EXPECT_FALSE(nan >= 0.);
+  EXPECT_TRUE(inf > 1.);
+  EXPECT_TRUE(-inf < -1.);
+  EXPECT_TRUE(inf == inf);
+  EXPECT_FALSE(inf > inf);
+  EXPECT_TRUE(inf >= inf);
+  EXPECT_FALSE(inf == -inf);
+  EXPECT_TRUE(-inf == -inf);
+}
+
 
 TEST(BasicAssumptions, EigenTypes)
 {
