@@ -18,49 +18,8 @@
 #include "atmosphere.hxx"
 
 
-TEST(BasicAssumptions, EigenTypes)
-{
-  // Spectral3 is currently an Eigen::Array type. It is still a row vector/array.
-  EXPECT_EQ(Spectral3::ColsAtCompileTime, 1);
-  EXPECT_EQ(Spectral3::RowsAtCompileTime, 3);
-  // Vectors in eigen are Eigen::Matrix row vectors.
-  EXPECT_EQ(Double3::ColsAtCompileTime, 1);
-  EXPECT_EQ(Double3::RowsAtCompileTime, 3);
-};
 
 
-TEST(BasicAssumptions, AlignmentAllocator)
-{
-  std::vector<double, boost::alignment::aligned_allocator<double, 128>> v{1., 2., 3.};
-  EXPECT_EQ(((std::size_t)&v[0]) % 128, 0);
-}
-
-
-TEST(BasicAssumptions, UniqueAlgo)
-{
-  std::vector<int> elems{1, 2, 2, 3, 3, 4};
-  auto it = std::unique(elems.begin(), elems.end());
-  elems.resize(it - elems.begin());
-  EXPECT_GE(elems.capacity(), 6);
-  EXPECT_EQ(elems.size(), 4);
-}
-
-
-TEST(BasicAssumptions, TakeFromVectorByIndices)
-{
-  Eigen::Array<double, 10, 1> m; m << 0, 1, 2, 3, 4, 5, 6, 7, 8, 9;
-  Eigen::Array<double, 3, 1> v = Take(m, Index3{3,4,9});
-  ASSERT_EQ(v[0], 3);
-  ASSERT_EQ(v[1], 4);
-  ASSERT_EQ(v[2], 9);
-}
-
-
-TEST(BasicAssumptions, NewMax)
-{
-  constexpr int a = std::max({1, 2, 3, 4, 3, 2, 1});
-  static_assert(a == 4, "Must be the maximum");
-}
 
 
 // Throw a one with probability p and zero with probability 1-p.
@@ -113,6 +72,16 @@ TEST(TestRaySegment, EndPointNormal)
   ASSERT_EQ(p[2], 0.);
 }
 
+
+
+TEST(TestMath, TakeFromVectorByIndices)
+{
+  Eigen::Array<double, 10, 1> m; m << 0, 1, 2, 3, 4, 5, 6, 7, 8, 9;
+  Eigen::Array<double, 3, 1> v = Take(m, Index3{3,4,9});
+  ASSERT_EQ(v[0], 3);
+  ASSERT_EQ(v[1], 4);
+  ASSERT_EQ(v[2], 9);
+}
 
 
 TEST(TestMath, OrthogonalSystemZAligned)
