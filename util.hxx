@@ -60,6 +60,16 @@ inline bool startswith(const std::string &a, const std::string &b)
 }
 
 
+// Copy & Paste Fu! https://stackoverflow.com/questions/27140778/range-based-for-with-pairiterator-iterator
+template <typename I>
+struct iter_pair : std::pair<I, I>
+{ 
+    using std::pair<I, I>::pair;
+
+    I begin() { return this->first; }
+    I end() { return this->second; }
+};
+
 #if 0 // if using c++11
 namespace std {
 template<typename T, typename... Args>
