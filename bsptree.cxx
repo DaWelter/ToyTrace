@@ -117,3 +117,40 @@ bool TreeNode::Intersect<IntersectionRecorder>(const Ray &ray, double min, doubl
 
 template
 bool TreeNode::Intersect<FirstIntersection>(const Ray &ray, double min, double max, FirstIntersection &intersectionChecker) const;
+
+
+std::unique_ptr<TreeNode> BuildBspTree(const std::vector<Primitive *> &list, const Box &box)
+{
+  std::cout << "building bsp tree ..." << std::endl;
+  auto root = std::make_unique<TreeNode>();
+  root->Split(0, list, box);
+  std::cout << std::endl;
+  std::cout << "bsp tree finished" << std::endl;
+  return std::move(root);
+}
+
+
+HitId IntersectionCalculator::First(const Ray &ray, double &ray_length)
+{
+  HitId hit;
+  FirstIntersection intersectionChecker {ray_length, hit};
+  root.Intersect(ray, 0, ray_length, intersectionChecker);
+  return hit;
+}
+
+
+void IntersectionCalculator::All(const Ray &ray, double ray_length)
+{
+  temporary_hit_storage.clear();
+  IntersectionRecorder intersectionChecker {ray_length, temporary_hit_storage};
+  root.Intersect(ray, 0, ray_length, intersectionChecker);
+  using RecordType = std::remove_reference<decltype(temporary_hit_storage[0])>::type;
+  std::sort(temporary_hit_storage.begin(), temporary_hit_storage.end(),
+    [](const RecordType &a, const RecordType &b) -> bool { return a.t < b.t; }
+  );
+  // Reject hits occuring within Eps of the previous hit.
+  auto it = std::unique(temporary_hit_storage.begin(), temporary_hit_storage.end(),
+    [](const RecordType &a, const RecordType &b) -> bool { assert(a.t <= b.t); return b.t-a.t < RAY_EPSILON; }
+  );
+  temporary_hit_storage.resize(it - temporary_hit_storage.begin());
+}

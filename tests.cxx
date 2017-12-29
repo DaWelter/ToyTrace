@@ -433,7 +433,7 @@ TEST(TestMath, SphereIntersectionMadness3)
   const int N = 100;
   for (int num = 0; num < N; ++num)
   {
-    hit = scene.Intersect(rs.ray, rs.length);
+    hit = scene.MakeIntersectionCalculator().First(rs.ray, rs.length);
     ASSERT_TRUE((bool)hit);
     RaySurfaceIntersection intersect{hit, rs};
     double rho = Length(intersect.pos);
@@ -1115,16 +1115,16 @@ void RenderingMediaTransmission1Helper(
   int NHITS)
 {
   MediumTracker mt(scene);
-  HitVector hits;
-  mt.initializePosition({0, 0, -10}, hits);
+  IntersectionCalculator intersector = scene.MakeIntersectionCalculator();
+  mt.initializePosition({0, 0, -10}, intersector);
   ASSERT_EQ(&mt.getCurrentMedium(), &scene.GetEmptySpaceMedium());
   RaySegment seg{ray, LargeNumber};
   std::printf("Media Trace:\n");
-  scene.IntersectAll(seg.ray, seg.length, hits);
-  EXPECT_EQ(hits.size(), NHITS);
+  intersector.All(seg.ray, seg.length);
+  EXPECT_EQ(intersector.Hits().end()-intersector.Hits().begin(), NHITS);
   for (int i=0; i<NHITS; ++i)
   {
-    RaySurfaceIntersection intersection{hits[i], seg};
+    RaySurfaceIntersection intersection{*(intersector.Hits().begin()+i), seg};
     mt.goingThroughSurface(seg.ray.dir, intersection);
     std::printf("IS[%i]: pos=%f, med_expect=%p, got=%p\n", i, intersection.pos[2], media_after_intersect[i], &mt.getCurrentMedium());
     EXPECT_NEAR(intersection.pos[2], intersect_pos[i], 1.e-6);
@@ -1232,10 +1232,9 @@ m scenes/unitcube.dae
   Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
   RadianceEstimatorBase rt(scene);
   MediumTracker medium_tracker(scene);
-  HitVector hits_temporary_buffer;
   double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
   RaySegment seg{{{ray_offset,0.,-10.}, {0.,0.,1.}}, LargeNumber};
-  medium_tracker.initializePosition(seg.ray.org, hits_temporary_buffer);
+  medium_tracker.initializePosition(seg.ray.org, scene.MakeIntersectionCalculator());
   ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
   auto res = rt.TransmittanceEstimate(seg, medium_tracker, PathContext{lambda_idx});
   
@@ -1265,10 +1264,9 @@ m scenes/unitcube.dae
   Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
   RadianceEstimatorBase rt(scene);
   MediumTracker medium_tracker(scene);
-  HitVector hits_temporary_buffer;
   double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
   Ray ray{{ray_offset,0.,-10.}, {0.,0.,1.}};
-  medium_tracker.initializePosition(ray.org, hits_temporary_buffer);
+  medium_tracker.initializePosition(ray.org, scene.MakeIntersectionCalculator());
   ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
   
   int num_escaped = 0;
@@ -1279,8 +1277,7 @@ m scenes/unitcube.dae
   for (int sample_num = 0; sample_num < NUM_SAMPLES; ++sample_num)
   {
     RadianceEstimatorBase::CollisionData collision(ray);
-    medium_tracker.initializePosition(ray.org, hits_temporary_buffer);
-    ASSERT_EQ(hits_temporary_buffer.size(), 0);
+    medium_tracker.initializePosition(ray.org, scene.MakeIntersectionCalculator());
     rt.TrackToNextInteraction(collision, medium_tracker, PathContext{lambda_idx});
     if (collision.smpl.t < collision.segment.length)
     {

@@ -29,7 +29,7 @@ class Scene
   //void ParseMesh(char *filename);
   friend class NFFParser;
 
-  BSPTree bsptree;
+  std::unique_ptr<TreeNode> bsptree;
   // TODO: Manage memory ...
   std::vector<Primitive*> primitives;
   std::vector<Light *> lights;
@@ -110,17 +110,22 @@ public:
     return primitives.size();
   }
   
-  HitId Intersect(const Ray &ray, double &ray_length) const
+  IntersectionCalculator MakeIntersectionCalculator() const
   {
-    HitId hit;
-    bsptree.Intersect(ray, ray_length, hit);
-    return hit;
+    return IntersectionCalculator(*bsptree);
   }
-
-  void IntersectAll(const Ray &ray, double ray_length, HitVector &all_hits) const
-  {
-    bsptree.IntersectAll(ray, ray_length, all_hits);
-  }
+  
+//   HitId Intersect(const Ray &ray, double &ray_length) const
+//   {
+//     HitId hit;
+//     bsptree.Intersect(ray, ray_length, hit);
+//     return hit;
+//   }
+// 
+//   void IntersectAll(const Ray &ray, double ray_length, HitVector &all_hits) const
+//   {
+//     bsptree.IntersectAll(ray, ray_length, all_hits);
+//   }
 
 //   bool Occluded(const Ray &ray, double ray_length, HitVector &all_hits) const
 //   { 
@@ -130,8 +135,8 @@ public:
   
   void BuildAccelStructure()
   {   
-	  this->boundingBox = CalcBounds();
-	  bsptree.Build(primitives, boundingBox);
+    this->boundingBox = CalcBounds();
+    bsptree = BuildBspTree(primitives, boundingBox);
   }
   
   void PrintInfo() const

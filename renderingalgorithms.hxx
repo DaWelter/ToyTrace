@@ -112,7 +112,13 @@ class MediumTracker
 public:
   explicit MediumTracker(const Scene &_scene);
   MediumTracker(const MediumTracker &_other) = default;
-  void initializePosition(const Double3 &pos, HitVector &hits);
+  void initializePosition(const Double3 &pos, IntersectionCalculator &intersector);
+  void initializePosition(const Double3 &pos, IntersectionCalculator &&intersector)
+  { // Take control of the temporary that was passed in here. Now it has a name and
+    // therefore repeated calling of initializePosition will invoke the one with the
+    // lvalue in the parameter list.
+    initializePosition(pos, intersector);
+  }
   void goingThroughSurface(const Double3 &dir_of_travel, const RaySurfaceIntersection &intersection);
   const Medium& getCurrentMedium() const;
 };
@@ -132,7 +138,7 @@ const Medium& MediumTracker::getCurrentMedium() const
 }
 
 
-void MediumTracker::initializePosition(const Double3& pos, HitVector &hits)
+void MediumTracker::initializePosition(const Double3& pos, IntersectionCalculator &intersector)
 {
   std::fill(media.begin(), media.end(), nullptr);
   current = &scene.GetEmptySpaceMedium();
@@ -145,8 +151,8 @@ void MediumTracker::initializePosition(const Double3& pos, HitVector &hits)
       Double3 start = pos;
       start[0] += distance_to_go;
       RaySegment seg{{start, {-1., 0., 0.}}, distance_to_go};
-      scene.IntersectAll(seg.ray, seg.length, hits);
-      for (const auto &hit : hits)
+      intersector.All(seg.ray, seg.length);
+      for (const auto &hit : intersector.Hits())
       {
         RaySurfaceIntersection intersection(hit, seg);
         goingThroughSurface(seg.ray.dir, intersection);        
@@ -272,12 +278,12 @@ class RadianceEstimatorBase
 {
 protected:
   const Scene &scene;
+  IntersectionCalculator intersector;
   Sampler sampler;
-  HitVector hits;
 
 public:
   RadianceEstimatorBase(const Scene &_scene)
-    : scene{_scene}
+    : scene{_scene}, intersector{scene.MakeIntersectionCalculator()}
     {}
 
   virtual ~RadianceEstimatorBase() {}
@@ -318,10 +324,9 @@ public:
       return medium_tracker.getCurrentMedium().EvaluateTransmission(subseg, sampler, context);
     };
 
-    hits.clear();
-    scene.IntersectAll(seg.ray, seg.length, hits);
+    intersector.All(seg.ray, seg.length);
     double t = 0;
-    for (const auto &hit : hits)
+    for (const auto &hit : intersector.Hits())
     {
       RaySurfaceIntersection intersection{hit, seg};
       result *= intersection.shader().EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, context, nullptr);
@@ -360,7 +365,7 @@ public:
     {
       const Medium& medium = medium_tracker.getCurrentMedium();
       
-      const auto &hit = collision.hit = scene.Intersect(segment.ray, segment.length);
+      const auto &hit = collision.hit = intersector.First(segment.ray, segment.length);
       const auto &medium_smpl = collision.smpl = medium.SampleInteractionPoint(segment, sampler, context);
       total_weight *= medium_smpl.weight;
       
@@ -407,7 +412,7 @@ public:
     );
     
     RaySegment seg{cam_sample.ray_out, LargeNumber};
-    HitId hit = scene.Intersect(seg.ray, seg.length);
+    HitId hit = intersector.First(seg.ray, seg.length);
     if (hit)
     {
       RaySurfaceIntersection intersection{hit, seg};

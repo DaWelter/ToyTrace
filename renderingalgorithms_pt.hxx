@@ -62,7 +62,7 @@ public:
     return d_factor*scatter_factor;
   }
   
-  virtual void InitRayAndMaybeHandlePassageThroughSurface(Ray &ray, const Double3 &exitant_dir, MediumTracker &medium_tracker) const
+  virtual void InitRayAndMaybeHandlePassageThroughSurface(Ray &ray, const Double3 &exitant_dir, MediumTracker &medium_tracker) const override
   {
     if (Dot(exitant_dir, intersection.normal) < 0.)
     {
@@ -76,12 +76,12 @@ public:
     ray.org += AntiSelfIntersectionOffset(intersection, RAY_EPSILON, ray.dir);
   }
   
-  void ApplyAntiSelfIntersectionTransform(Ray &ray) const 
+  void ApplyAntiSelfIntersectionTransform(Ray &ray) const override
   {
     ray.org += AntiSelfIntersectionOffset(intersection, RAY_EPSILON, ray.dir);
   }
   
-  Double3 Position() const { return intersection.pos; }
+  Double3 Position() const override { return intersection.pos; }
 };
 
 
@@ -109,9 +109,51 @@ public:
     return medium.EvaluatePhaseFunction(reverse_incident_dir, pos, out_direction, context, pdf);
   }
   
-  Double3 Position() const { return pos; }
+  Double3 Position() const override { return pos; }
 };
 
+
+class Camera : public Vertex
+{
+  int unit_index;
+  const RadianceOrImportance::EmitterSensorArray &emitter;
+  Double3 pos;
+  IntersectionCalculator &intersector;
+public:
+  // TODO: Get rid of the intersector!
+  Camera(const RadianceOrImportance::EmitterSensorArray &_emitter, int _unit_index, IntersectionCalculator &_intersector)
+    : unit_index{_unit_index}, emitter{_emitter}, intersector{_intersector}
+  {}
+  
+  RadianceOrImportance::Sample PositionSample(Sampler& sampler, const PathContext &context)
+  {
+    RadianceOrImportance::LightPathContext light_context{context.lambda_idx};
+    auto smpl = emitter.TakePositionSample(unit_index, sampler, light_context);
+    pos = smpl.pos;
+    return smpl;
+  }
+  
+  ScatterSample Sample(Sampler& sampler, const PathContext &context) const override
+  {
+    RadianceOrImportance::LightPathContext light_context{context.lambda_idx};
+    auto smpl_dir = emitter.TakeDirectionSampleFrom(unit_index, pos, sampler, light_context);
+    return ScatterSample{smpl_dir.ray_out.dir, smpl_dir.measurement_contribution, smpl_dir.pdf};
+  }
+  
+  Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) const override
+  {
+    //return emitter.Evaluate(pos, out_direction, //  FUUUU
+    return Spectral3{0.};
+  }
+  
+  void InitRayAndMaybeHandlePassageThroughSurface(Ray &ray, const Double3 &exitant_dir, MediumTracker &medium_tracker) const
+  {
+    medium_tracker.initializePosition(pos, intersector);
+    Vertex::InitRayAndMaybeHandlePassageThroughSurface(ray, exitant_dir, medium_tracker);
+  }
+
+  Double3 Position() const override { return pos; }
+};
 
 
 // class Distant : public Vertex 
@@ -317,35 +359,33 @@ public:
   }
   
   
-  void InitializeWalkFromCamera(int pixel_index, Ray &ray, PathContext &context)
-  {
-    auto cam_sample = RadianceOrImportance::TakeRaySample(
-      scene.GetCamera(), pixel_index, sampler, 
-      RadianceOrImportance::LightPathContext{context.lambda_idx});
-    
-    context.beta *= cam_sample.measurement_contribution / cam_sample.pdf;
-    
-    ray = cam_sample.ray_out;
-  }
-  
-  
   RGB MakePrettyPixel(int pixel_index) override
   {
     auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
     PathContext context{lambda_selection.first};
+    MediumTracker medium_tracker{scene};
     
-    Ray ray;
     Spectral3 path_sample_value{0.};
     
-    InitializeWalkFromCamera(pixel_index, ray, context);
+    RW::Camera start_vertex(scene.GetCamera(), pixel_index, intersector);
+    {
+      auto pos_smpl = start_vertex.PositionSample(sampler, context);
+      context.beta *= (1./pos_smpl.pdf);
+    }
+  
+    RW::Vertex* vertex = &start_vertex;
+    
+    Ray ray;
+    {
+      auto scatter_smpl = vertex->Sample(sampler, context);
+      context.beta *= scatter_smpl.value / scatter_smpl.pdf;
+     
+      if (context.beta.isZero())
+        return RGB::Zero();
+      
+      vertex->InitRayAndMaybeHandlePassageThroughSurface(ray, scatter_smpl.dir, medium_tracker);
+    }
 
-    if (context.beta.isZero())
-      return RGB::Zero();
-    
-    MediumTracker medium_tracker{scene};
-    medium_tracker.initializePosition(ray.org, hits);
-    
-    RW::Vertex* vertex = nullptr;
     int number_of_interactions = 0;
     
     while (true)
@@ -368,10 +408,10 @@ public:
       auto scatter_smpl = vertex->Sample(sampler, context);
       context.beta *= scatter_smpl.value / scatter_smpl.pdf;
       
-      vertex->InitRayAndMaybeHandlePassageThroughSurface(ray, scatter_smpl.dir, medium_tracker);
-      
       if (context.beta.isZero())
         break;
+      
+      vertex->InitRayAndMaybeHandlePassageThroughSurface(ray, scatter_smpl.dir, medium_tracker);
 
       assert(context.beta.allFinite());
       vertex_storage.free<RW::Vertex>(vertex);

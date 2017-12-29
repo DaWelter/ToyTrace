@@ -4,6 +4,7 @@
 #include<iterator>
 
 #include "primitive.hxx"
+#include "util.hxx"
 
 
 class IntersectionRecorder
@@ -67,6 +68,9 @@ class TreeNode
   char splitaxis;
   double splitpos;
 public:
+  TreeNode(const TreeNode &) = delete;
+  TreeNode& operator=(const TreeNode &other) = delete;
+  
   ~TreeNode()
   {
     if (child[0]) delete child[0];
@@ -92,43 +96,33 @@ public:
 };
 
 
+std::unique_ptr<TreeNode> BuildBspTree(const std::vector<Primitive *> &list, const Box &box);
 
-class BSPTree
+
+/* Stateful scene intersection calculations.
+ * 
+ * This class is intended to be used in the rendering threads. One instance per thread.
+ * Internal storage is used to hold things like all intersections along a ray.
+ * The class itself is ofc. not thread safe. Hence one instance per thread.
+ */
+class IntersectionCalculator
 {
-  TreeNode root;
-  Box boundingBox;
+  const TreeNode &root;
+  HitVector temporary_hit_storage;
 public:
-  BSPTree() {}
-
-  void Build(const std::vector<Primitive *> &list, const Box &box)
+  IntersectionCalculator(const TreeNode &_root)
+    : root(_root)
   {
-    std::cout << "building bsp tree ..." << std::endl;
-    boundingBox = box;
-    root.Split(0, list, box);
-    std::cout << std::endl;
-    std::cout << "bsp tree finished" << std::endl;
   }
+  
+  HitId First(const Ray &ray, double &ray_length);
 
-  bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const
+  void All(const Ray &ray, double ray_length);
+  
+  auto Hits() const 
   {
-    FirstIntersection intersectionChecker {ray_length, hit};
-    return root.Intersect(ray, 0, ray_length, intersectionChecker);
-  }
-
-  void IntersectAll(const Ray &ray, double ray_length, HitVector &all_hits) const
-  {
-    all_hits.clear();
-    IntersectionRecorder intersectionChecker {ray_length, all_hits};
-    root.Intersect(ray, 0, ray_length, intersectionChecker);
-    using RecordType = std::remove_reference<decltype(all_hits[0])>::type;
-    std::sort(all_hits.begin(), all_hits.end(),
-      [](const RecordType &a, const RecordType &b) -> bool { return a.t < b.t; }
-    );
-    // Reject hits occuring within Eps of the previous hit.
-    auto it = std::unique(all_hits.begin(), all_hits.end(),
-      [](const RecordType &a, const RecordType &b) -> bool { assert(a.t <= b.t); return b.t-a.t < RAY_EPSILON; }
-    );
-    all_hits.resize(it - all_hits.begin());
+    return iter_pair<decltype(temporary_hit_storage.cbegin())>(
+      temporary_hit_storage.cbegin(),
+      temporary_hit_storage.cend());
   }
 };
-
