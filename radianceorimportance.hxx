@@ -60,14 +60,5 @@ public:
 };
 
 
-inline DirectionalSample TakeRaySample(const EmitterSensorArray &thing, int unit_index, Sampler &sampler, const LightPathContext &context)
-{
-  auto smpl_pos = thing.TakePositionSample(unit_index, sampler, context);
-  auto smpl_dir = thing.TakeDirectionSampleFrom(unit_index, smpl_pos.pos, sampler, context);
-  smpl_dir.pdf *= smpl_pos.pdf;
-  smpl_dir.measurement_contribution *= smpl_pos.measurement_contribution;
-  return smpl_dir;
-}
-
 
 }

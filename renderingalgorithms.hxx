@@ -406,12 +406,14 @@ public:
   
   RGB MakePrettyPixel(int pixel_index) override
   {
-    auto cam_sample = TakeRaySample(
-      scene.GetCamera(), pixel_index, sampler,
-      RadianceOrImportance::LightPathContext(Color::LambdaIdxClosestToRGBPrimaries())
-    );
+    auto light_context = RadianceOrImportance::LightPathContext(Color::LambdaIdxClosestToRGBPrimaries());
+    const auto &camera = scene.GetCamera();
+    auto smpl_pos = camera.TakePositionSample(pixel_index, sampler, light_context);
+    auto smpl_dir = camera.TakeDirectionSampleFrom(pixel_index, smpl_pos.pos, sampler, light_context);
+    smpl_dir.pdf *= smpl_pos.pdf;
+    smpl_dir.measurement_contribution *= smpl_pos.measurement_contribution;
     
-    RaySegment seg{cam_sample.ray_out, LargeNumber};
+    RaySegment seg{smpl_dir.ray_out, LargeNumber};
     HitId hit = intersector.First(seg.ray, seg.length);
     if (hit)
     {
