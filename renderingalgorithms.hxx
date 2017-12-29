@@ -6,6 +6,8 @@
 #include "util.hxx"
 #include "shader_util.hxx"
 
+namespace ROI = RadianceOrImportance;
+
 // WARNING: THIS IS NOT THREAD SAFE. DON'T WRITE TO THE SAME FILE FROM MULTIPLE THREADS!
 class PathLogger
 {
@@ -125,8 +127,9 @@ public:
 
 
 MediumTracker::MediumTracker(const Scene& _scene)
-  : scene{_scene}, current{nullptr},
-    media{} // Note: Ctor zero-initializes the media array.
+  : current{nullptr},
+    media{}, // Note: Ctor zero-initializes the media array.
+    scene{_scene}
 {
 }
 
@@ -164,7 +167,7 @@ void MediumTracker::initializePosition(const Double3& pos, IntersectionCalculato
 
 void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const RaySurfaceIntersection& intersection)
 {
-  if (Dot(dir_of_travel, intersection.volume_normal) < 0)
+  if (Dot(dir_of_travel, intersection.geometry_normal) < 0)
     enterVolume(intersection.primitive().medium);
   else
     leaveVolume(intersection.primitive().medium);
@@ -273,46 +276,141 @@ public:
 };
 
 
+namespace RadianceOrImportance
+{
+
+class TotalEnvironmentalRadianceField : public EnvironmentalRadianceField
+{
+  inline const EnvironmentalRadianceField& get(int i) const { return scene.GetEnvLight(i); }
+  inline int size() const { return scene.GetNumEnvLights(); }
+  const Scene& scene;
+public:
+  
+  
+  TotalEnvironmentalRadianceField(const Scene& _scene) : scene(_scene) {}
+  
+  
+  DirectionalSample TakeDirectionSample(Sampler &sampler, const LightPathContext &context) const
+  {
+    assert(size()>0);
+    int idx_sample = sampler.UniformInt(0, size()-1);
+    const double selection_probability = 1./size();
+    ROI::DirectionalSample smpl = get(idx_sample).TakeDirectionSample(sampler, context);
+    if (IsFromPmf(smpl))
+    {
+      smpl.pdf_or_pmf *= selection_probability;
+      return smpl;
+    }
+    else
+    {
+      for (int i=0; i<size(); ++i)
+      {
+        if (i == idx_sample) continue;
+        double pdf;
+        auto value = get(i).Evaluate(smpl.coordinates, context, &pdf);
+        smpl.value += value;
+        smpl.pdf_or_pmf += pdf;
+      }
+      smpl.pdf_or_pmf *= selection_probability;
+    }
+    return smpl;
+  }
+  
+  
+  /* Evalutate sum of all env maps. But only continuous parts.
+   * Pdf returned is the pdf wrt. solid angle, that the importance sampling strategy would use.
+   */
+  Spectral3 Evaluate(const Double3 &emission_dir, const LightPathContext &context, double *pdf_dir) const
+  {
+    const double selection_probability = size()>0 ? 1./size() : 1.;
+    double pdf_sum = 0.;
+    Spectral3 environmental_radiance{0.};
+    for (int i=0; i<size(); ++i)
+    {
+      const auto &light = get(i);
+      environmental_radiance += light.Evaluate(
+        emission_dir,
+        context,
+        pdf_dir);
+      pdf_sum += pdf_dir ? *pdf_dir : 0.;
+    }
+    if (pdf_dir)
+      *pdf_dir = pdf_sum * selection_probability;
+    return environmental_radiance;
+  }
+};
+
+}
+
 
 class RadianceEstimatorBase
 {
 protected:
-  const Scene &scene;
-  IntersectionCalculator intersector;
   Sampler sampler;
+  IntersectionCalculator intersector;
+  const Scene &scene;
 
+  static constexpr int IDX_PROB_ENV = 0;
+  static constexpr int IDX_PROB_AREA = 1;
+  static constexpr int IDX_PROB_POINT = 2;
+  std::array<double, 3> emitter_type_selection_probabilities;
+  ROI::TotalEnvironmentalRadianceField envlight;
 public:
   RadianceEstimatorBase(const Scene &_scene)
-    : scene{_scene}, intersector{scene.MakeIntersectionCalculator()}
-    {}
+    : intersector{_scene.MakeIntersectionCalculator()}, scene{_scene}, envlight{_scene}
+  {
+    const double nl = scene.GetNumLights();
+    const double ne = scene.GetNumEnvLights();
+    const double na = scene.GetNumAreaLights();
+    const double prob_pick_env_light = ne/(nl+ne+na);
+    const double prob_pick_area_light = na/(nl+ne+na);
+//     std::copy(
+//       emitter_type_selection_probabilities.begin(),
+//       emitter_type_selection_probabilities.end(),
+//               {{ prob_pick_env_light, prob_pick_area_light, 1.-prob_pick_area_light-prob_pick_env_light }};
+    emitter_type_selection_probabilities = { prob_pick_env_light, prob_pick_area_light, 1.-prob_pick_area_light-prob_pick_env_light };
+  }
 
   virtual ~RadianceEstimatorBase() {}
+  
+  const ROI::EnvironmentalRadianceField& GetEnvLight() const
+  {
+    return envlight;
+  }
+  
+  using LightPick = std::tuple<const ROI::PointEmitter*, double>;
+  using AreaLightPick = std::tuple<const Primitive*, const ROI::AreaEmitter*, double>;
+  
+  LightPick PickLight()
+  {
+    const int nl = scene.GetNumLights();
+    assert(nl > 0);
+    int idx = sampler.UniformInt(0, nl-1);
+    const ROI::PointEmitter *light = &scene.GetLight(idx);
+    double pmf_of_light = 1./nl;
+    return LightPick{light, pmf_of_light};
+  }
+  
+  double PmfOfLight(const ROI::PointEmitter &light)
+  {
+    return 1./scene.GetNumLights();
+  }
+  
+  AreaLightPick PickAreaLight()
+  {
+    const int na = scene.GetNumAreaLights();
+    assert (na > 0);
+    const Primitive* prim;
+    const ROI::AreaEmitter* emitter;
+    std::tie(prim, emitter) = scene.GetAreaLight(sampler.UniformInt(0, na-1));
+    double pmf_of_light = 1./na;
+    return AreaLightPick{prim, emitter, pmf_of_light}; 
+  }
 
-  std::tuple<const Light*, double> PickLightUniform()
+  double PmfOfLight(const ROI::AreaEmitter &light)
   {
-    const auto &light = scene.GetLight(sampler.UniformInt(0, scene.GetNumLights()-1));
-    double pmf_of_light = 1./scene.GetNumLights();
-    return std::make_tuple(&light, pmf_of_light);
+    return 1./scene.GetNumAreaLights();
   }
-  
-  
-  Spectral3 EvaluateEnvironmentalRadianceField(const Double3 &viewing_dir, const RadianceOrImportance::LightPathContext &context)
-  {
-    Spectral3 environmental_radiance{0.};
-    for (int i=0; i<scene.GetNumLights(); ++i)
-    {
-      const auto &light = scene.GetLight(i);
-      if (light.is_environmental_radiance_distribution) // What an aweful hack. Should there not be an env map class or similar?
-      {
-        environmental_radiance += light.EvaluatePositionComponent(
-          -viewing_dir,
-          context,
-          nullptr);
-      }
-    }
-    return environmental_radiance;
-  }
-  
   
   Spectral3 TransmittanceEstimate(RaySegment seg, MediumTracker &medium_tracker, const PathContext &context)
   {
@@ -344,12 +442,12 @@ public:
   struct CollisionData
   {
     CollisionData (const Ray &ray) :
+      smpl{},
       segment{ray, LargeNumber},
-      hit{},
-      smpl{}
+      hit{}
     {}
-    RaySegment segment;
     Medium::InteractionSample smpl;
+    RaySegment segment;
     HitId hit;
   };
   
@@ -406,14 +504,14 @@ public:
   
   RGB MakePrettyPixel(int pixel_index) override
   {
-    auto light_context = RadianceOrImportance::LightPathContext(Color::LambdaIdxClosestToRGBPrimaries());
+    auto light_context = ROI::LightPathContext(Color::LambdaIdxClosestToRGBPrimaries());
     const auto &camera = scene.GetCamera();
     auto smpl_pos = camera.TakePositionSample(pixel_index, sampler, light_context);
-    auto smpl_dir = camera.TakeDirectionSampleFrom(pixel_index, smpl_pos.pos, sampler, light_context);
-    smpl_dir.pdf *= smpl_pos.pdf;
-    smpl_dir.measurement_contribution *= smpl_pos.measurement_contribution;
+    auto smpl_dir = camera.TakeDirectionSampleFrom(pixel_index, smpl_pos.coordinates, sampler, light_context);
+    smpl_dir.pdf_or_pmf *= smpl_pos.pdf_or_pmf;
+    smpl_dir.value *= smpl_pos.value;
     
-    RaySegment seg{smpl_dir.ray_out, LargeNumber};
+    RaySegment seg{{smpl_pos.coordinates, smpl_dir.coordinates}, LargeNumber};
     HitId hit = intersector.First(seg.ray, seg.length);
     if (hit)
     {
@@ -430,394 +528,3 @@ public:
 
 
 using  AlgorithmParameters = RenderingParameters;
-
-
-
-#if 0
-// TODO: Turn this abomination into a polymorphic type with custom allocator??
-//       Use factory to hide allocation in some given buffer (stack or heap).
-//       Something like this https://stackoverflow.com/questions/13340664/polymorphism-without-new
-//       
-struct PathNode
-{
-  using DirectionalSample = RadianceOrImportance::DirectionalSample;
-
-  enum PathNodeType : char 
-  {
-    VOLUME,
-    NODE1,
-    SURFACE,
-    NODE1_DIRECTIONAL,
-    ESCAPED,
-  };
-  
-  PathNodeType type;
-  char index;
-  
-  // TODO: Use proper variant type. But I don't want boost yet. Don't have c++17 either which has a variant type.
-  struct Surface
-  {
-    RaySurfaceIntersection intersection;
-    Double3 inbound_dir;
-  };
-  struct One
-  {
-    const RadianceOrImportance::EmitterSensor *emitter;
-    Double3 pos_or_dir_to;
-    //One() : emitter{nullptr} {}
-  };
-  struct Volume
-  {
-    Double3 pos;
-    Double3 inbound_dir;
-  };
-  static auto constexpr BUFFER_SIZE = std::max({sizeof(Surface), sizeof(One), sizeof(Volume)});
-  char buffer[BUFFER_SIZE];
-  Surface& surface() 
-  { 
-    assert(type==SURFACE); 
-    return *reinterpret_cast<Surface*>(buffer); 
-  }
-  Volume& volume()
-  { 
-    assert(type==VOLUME); 
-    return *reinterpret_cast<Volume*>(buffer); 
-  }
-  One& one() 
-  { 
-    assert(type==NODE1 || type == NODE1_DIRECTIONAL); 
-    return *reinterpret_cast<One*>(buffer); 
-  }
-  const Surface& surface() const { return const_cast<PathNode*>(this)->surface(); }
-  const Volume& volume() const { return const_cast<PathNode*>(this)->volume(); }
-  const One& one() const { return const_cast<PathNode*>(this)->one(); }
-  
-  PathNode(PathNodeType _type, char _index) : type{_type}, index{_index} {}
-  PathNode(const PathNode &);
-  PathNode& operator=(const PathNode &);
-//   PathNode(PathNode &&);
-//   PathNode& operator=(const PathNode &&);
-  DirectionalSample SampleDirection(Sampler &sampler) const;
-  Spectral3 EvaluateDirection(const Double3 &outbound_dir) const;
-  Double3 Position() const;
-  Double3 DirectionToEmitter() const;
-  Double3 InboundDir() const;
-  HitId hitId() const;
-
-  static PathNode MakeTypeOne(
-    const RadianceOrImportance::EmitterSensor &emitter, 
-    const RadianceOrImportance::Sample &sample);
-  static PathNode MakeSurface(
-        char index, const Double3& inbound_dir, const RaySurfaceIntersection& intersection);
-  static PathNode MakeEscaped(char index);
-};
-
-
-Double3 PathNode::Position() const
-{
-  const auto &node = *this;
-  assert (node.type != NODE1_DIRECTIONAL);
-  return node.type == NODE1 ? 
-    node.one().pos_or_dir_to : 
-      (node.type == VOLUME ? 
-        node.volume().pos : node.surface().intersection.pos);
-}
-
-
-Double3 PathNode::DirectionToEmitter() const
-{
-  const auto &node = *this;
-  assert (node.type == NODE1_DIRECTIONAL);
-  return node.one().pos_or_dir_to;
-}
-
-
-Double3 PathNode::InboundDir() const
-{
-  const auto &node = *this;
-  assert (node.type == SURFACE || node.type == VOLUME);
-  return node.type == SURFACE ? 
-    node.surface().inbound_dir : 
-    node.volume().inbound_dir;
-}
-
-
-HitId PathNode::hitId() const
-{
-  return (type == SURFACE) ? surface().intersection.hitid : HitId{};
-}
-
-
-PathNode::PathNode(const PathNode& other) :
-  type{other.type},
-  index{other.index}
-{
-  switch(type)
-  {
-    case NODE1:
-    case NODE1_DIRECTIONAL:
-      new (buffer) One(other.one());
-      break;
-    case SURFACE:
-      new (buffer) Surface(other.surface());
-      break;
-    case VOLUME:
-      new (buffer) Volume(other.volume());
-      break;
-  }
-}
-
-
-PathNode& PathNode::operator=(const PathNode& other)
-{
-  this->~PathNode();
-  new (this) PathNode(other);
-  return *this;
-}
-
-
-Spectral3 PathNode::EvaluateDirection(const Double3& outbound_dir) const
-{
-  const auto &node = *this;
-  if (node.type ==NODE1 || node.type == NODE1_DIRECTIONAL)
-  {
-    return node.one().emitter->EvaluateDirectionComponent(node.one().pos_or_dir_to, outbound_dir, nullptr);
-  }
-  else if (node.type == SURFACE)
-  {
-    return node.surface().intersection.shader().EvaluateBSDF(-node.surface().inbound_dir, node.surface().intersection, outbound_dir, nullptr);
-  }
-  assert(false && "Not implemented");
-}
-
-
-PathNode::DirectionalSample PathNode::SampleDirection(Sampler &sampler) const
-{
-  const auto &node = *this;
-  if (node.type == NODE1 || node.type == NODE1_DIRECTIONAL)
-  {
-    return node.one().emitter->TakeDirectionSampleFrom(node.one().pos_or_dir_to, sampler);
-  }
-  else if (node.type == SURFACE)
-  {
-    auto sample = node.surface().intersection.shader().SampleBSDF(-node.surface().inbound_dir, node.surface().intersection, sampler);
-    double d_factor = Dot(node.surface().intersection.normal, sample.dir);
-    return RadianceOrImportance::DirectionalSample{
-      {node.surface().intersection.pos, sample.dir}, 
-      sample.pdf, 
-      d_factor * sample.scatter_function};
-  }
-  assert(false && "Not implemented");
-}
-
-
-PathNode PathNode::MakeSurface(char index, const Double3& inbound_dir, const RaySurfaceIntersection& intersection)
-{
-  PathNode result{SURFACE, index};
-  new (result.buffer) Surface{intersection, inbound_dir};
-  return result;
-}
-
-
-PathNode PathNode::MakeTypeOne(const RadianceOrImportance::EmitterSensor& emitter, const RadianceOrImportance::Sample& sample)
-{
-  PathNode result{sample.is_direction ? NODE1_DIRECTIONAL : NODE1, 1};
-  new (result.buffer) One{&emitter, sample.pos};
-  return result;
-}
-
-
-PathNode PathNode::MakeEscaped(char index)
-{
-  return PathNode{ESCAPED, index};
-}
-
-
-
-
-class Bdpt : public BaseAlgo
-{
-  static constexpr int MAX_SUBPATH_LENGH = 5;
-  static constexpr int MAX_PATH_LENGTH = MAX_SUBPATH_LENGH*2 + 2; 
-  
-  struct BdptHistory
-  {
-    Spectral3 measurement_contribution[MAX_PATH_LENGTH];
-    double  pdf_product_up_to_node[MAX_PATH_LENGTH];
-    BdptHistory()
-    {
-      pdf_product_up_to_node[0] = 1.;
-      measurement_contribution[0] = Spectral3{1.};
-      for (int i=1; i<MAX_PATH_LENGTH; ++i)
-      {
-        pdf_product_up_to_node[i] = NaN;
-        measurement_contribution[i] = Spectral3{NaN};
-      }
-    }
-    void Copy(int src, int dst)
-    {
-      measurement_contribution[dst] = measurement_contribution[src];
-      pdf_product_up_to_node[dst] = pdf_product_up_to_node[src];
-    }
-    void MultiplyNodeValues(int idx, double pdf_factor, const Spectral3 &contrib_factor)
-    {
-      measurement_contribution[idx] *= contrib_factor;
-      pdf_product_up_to_node[idx] *= pdf_factor;
-    }
-  };
-  
-public:  
-  Bdpt(const Scene &_scene) : BaseAlgo(_scene)
-  {
-  }
-  
-
-  Spectral3 MakePrettyPixel() override
-  {
-    Spectral3 ret{0.};
-    ret += BiDirectionPathTraceOfLength(2, 1);
-    ret += BiDirectionPathTraceOfLength(2, 2);
-    ret += BiDirectionPathTraceOfLength(2, 3);
-    ret += BiDirectionPathTraceOfLength(3, 1);
-    //ret += BiDirectionPathTraceOfLength(4, 1);
-    return ret;
-  }
-  
-  
-  Spectral3 BiDirectionPathTraceOfLength(int eye_path_length, int light_path_length)
-  {
-    BdptHistory history_from_eye;
-    BdptHistory history_from_light;
-
-    if (eye_path_length <= 0)
-      return Spectral3(0.);
-    if (light_path_length <= 0)
-      return Spectral3(0.);
-    
-    auto eye_node = TracePath(scene.GetCamera(), eye_path_length, history_from_eye);
-    if (eye_node.type == PathNode::ESCAPED) return Spectral3{0};
-    
-    const Light* the_light; double pmf_of_light; 
-    std::tie(the_light, pmf_of_light) = PickLightUniform();
-    auto light_node = TracePath(*the_light, light_path_length, history_from_light);
-    if (light_node.type == PathNode::ESCAPED) return Spectral3{0};
-    
-    Spectral3 measurement_contribution = 
-      GeometryTermAndScattering(light_node, eye_node) *
-      history_from_eye.measurement_contribution[eye_node.index] *
-      history_from_light.measurement_contribution[light_node.index];
-    double  path_pdf = history_from_eye.pdf_product_up_to_node[eye_node.index] *
-                       history_from_light.pdf_product_up_to_node[light_node.index];
-    Spectral3 path_sample_value = measurement_contribution / path_pdf;
-    return path_sample_value;
-  };
-    
-  
-  PathNode TracePath(const RadianceOrImportance::EmitterSensor &emitter, int length, BdptHistory &history)
-  {
-      PathNode lastnode = InitNodeOne(
-        emitter,
-        history);
-      while(lastnode.index < length && lastnode.type != PathNode::ESCAPED)
-      {
-        MakeNextNode(
-          lastnode,
-          history);
-      }
-      return lastnode;
-  }
-  
-  
-  PathNode InitNodeOne(
-    const RadianceOrImportance::EmitterSensor &emitter,
-    BdptHistory &history)
-  {
-    RadianceOrImportance::Sample sample = emitter.TakePositionSample(sampler);
-    history.MultiplyNodeValues(0, 
-                               sample.pdf, 
-                               sample.measurement_contribution);
-    history.Copy(0, 1);
-    // Return value optimization???
-    return PathNode::MakeTypeOne(emitter, sample);
-  }
-  
-  
-  void MakeNextNode(
-    PathNode &node, // updated
-    BdptHistory &history)
-  {
-    auto dir_sample = node.SampleDirection(sampler);
-    history.MultiplyNodeValues(
-      node.index,
-      dir_sample.pdf,
-      dir_sample.measurement_contribution);
-    history.Copy(node.index, node.index+1); // It's the same value since we have not sampled at the node we are going to add now yet.
-    auto segment = RaySegment{dir_sample.ray_out, LargeNumber};
-    auto last_hit = node.hitId();
-    HitId hit = scene.Intersect(segment.ray, segment.length, last_hit);
-    if (hit)
-    {
-      auto intersection = RaySurfaceIntersection{hit, segment};
-      node = PathNode::MakeSurface(node.index+1, dir_sample.ray_out.dir, intersection);
-    }
-    else
-    {
-      node = PathNode::MakeEscaped(node.index+1);
-    }
-  }
-
-
-  double DFactor(const PathNode &node, const Double3 &outgoing_dir)
-  {
-    assert(node.type == PathNode::SURFACE);
-    return std::max(0., Dot(node.surface().intersection.normal, outgoing_dir));
-  }
-  
-  
-  Spectral3 GeometryTermAndScattering(
-    const PathNode &node1,
-    const PathNode &node2
-  )
-  {
-    // We sampled for each of the nodes a random direction,
-    // reflecting light or importance arriving from an infinitely 
-    // distance source. Only if both direction coincided would there
-    // be a contribution (unlikely). Such paths are better handled
-    // by s=0,t=2 or s=2,t=0 paths.
-    if (node1.type == PathNode::NODE1_DIRECTIONAL && 
-        node2.type == PathNode::NODE1_DIRECTIONAL)
-      return Spectral3{0.};
-    
-    RaySegment segment;
-    HitId hits_ignored[2];
-    if (node1.type == PathNode::NODE1_DIRECTIONAL)
-    {
-      segment = RaySegment{{node2.Position(), node1.DirectionToEmitter()}, LargeNumber};
-      hits_ignored[0] = node2.hitId();
-    }
-    else if (node2.type == PathNode::NODE1_DIRECTIONAL)
-    {
-      segment = RaySegment{{node1.Position(), node2.DirectionToEmitter()}, LargeNumber};
-      hits_ignored[0] = node1.hitId();
-    }
-    else
-    {
-      segment = RaySegment::FromTo(node1.Position(), node2.Position());
-      hits_ignored[0] = node1.hitId();
-      hits_ignored[1] = node2.hitId();
-    }
-    if (scene.Occluded(segment.ray, segment.length, hits_ignored[0], hits_ignored[1]))
-      return Spectral3{0.};
-    bool isAreaMeasure = segment.length<LargeNumber; // i.e. nodes are not directional.
-    double geom_term = isAreaMeasure ? Sqr(1./segment.length) : 1.;
-    if (node1.type == PathNode::SURFACE)
-      geom_term *= DFactor(node1, segment.ray.dir);
-    if (node2.type == PathNode::SURFACE)
-      geom_term *= DFactor(node2, -segment.ray.dir);    
-
-    Spectral3 scatter1 = node1.EvaluateDirection(segment.ray.dir);
-    Spectral3 scatter2 = node2.EvaluateDirection(-segment.ray.dir);
-    return geom_term * scatter1 * scatter2;
-  }
-};
-#endif

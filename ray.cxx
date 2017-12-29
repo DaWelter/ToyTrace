@@ -8,10 +8,10 @@ RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySeg
   assert(hitid.primitive);
   hitid.primitive->GetLocalGeometry(hitid, this->pos, this->normal, this->shading_normal);
   double sign = Dot(-_incident_segment.ray.dir, normal) > 0. ? 1. : -1;
-  volume_normal = normal;
+  geometry_normal = normal;
   normal *= sign;
   shading_normal *= sign;
-  assert(LengthSqr(volume_normal)>0.9);
+  assert(LengthSqr(geometry_normal)>0.9);
   assert(LengthSqr(shading_normal)>0.9);
 }
 

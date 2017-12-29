@@ -142,6 +142,7 @@ TEST(StrongTypedef, EigenSupport)
   RGB b{4._rgb, 5._rgb, 6._rgb};
   RGB c = a * b;
   RGB d = a / c;
+  ASSERT_TRUE(d.isFinite().all()); // Only here to silence unused variable warning.
 }
 
 

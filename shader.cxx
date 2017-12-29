@@ -209,8 +209,8 @@ ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, 
   // The following is the inversion of the half-vector formula. It is like reflection except for the abs. But the abs is needed.
   Double3 out_direction = 2.*std::abs(Dot(reverse_incident_dir, h_r))*h_r - reverse_incident_dir;
   ScatterSample smpl; 
-  smpl.dir = out_direction;
-  smpl.value = this->EvaluateBSDF(reverse_incident_dir, surface_hit, out_direction, context, &smpl.pdf);
+  smpl.coordinates = out_direction;
+  smpl.value = this->EvaluateBSDF(reverse_incident_dir, surface_hit, out_direction, context, &smpl.pdf_or_pmf);
   return smpl;
 }
 

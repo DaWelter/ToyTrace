@@ -38,12 +38,12 @@ public:
   };
   
   Worker(std::atomic_int &_shared_pixel_index, Spectral3ImageBuffer &_buffer, const Scene &_scene, RenderingParameters &render_params) :
+    scene(_scene),
+    buffer(_buffer),
+    algo(_scene, render_params),
+    shared_pixel_index(_shared_pixel_index),
     shared_request(REQUEST_NONE),
     shared_state(THREAD_WAITING),
-    shared_pixel_index(_shared_pixel_index),
-    buffer(_buffer),
-    scene(_scene),
-    algo(_scene, render_params),
     samples_per_pixel(16)
   {
     num_pixels = scene.GetCamera().xres * scene.GetCamera().yres;
@@ -218,6 +218,14 @@ int main(int argc, char *argv[])
   if (!scene.HasCamera())
   {
     std::cout << "There is no camera. Aborting." << std::endl;
+    return -1;
+  }
+  
+  if (scene.GetNumAreaLights() <= 0 &&
+      scene.GetNumEnvLights() <= 0 &&
+      scene.GetNumLights() <= 0)
+  {
+    std::cout << "There are no lights. Aborting." << std::endl;
     return -1;
   }
 

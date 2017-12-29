@@ -68,7 +68,7 @@ struct RaySurfaceIntersection
   HitId hitid;
   Double3 normal;        // Used for shading and tracing. Oriented toward the incomming ray.
   Double3 shading_normal;
-  Double3 volume_normal; // Used to determine if entering or leaving a medium.
+  Double3 geometry_normal;
   Double3 pos;
 
   const Primitive& primitive() const;

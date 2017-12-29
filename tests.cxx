@@ -351,7 +351,7 @@ TEST(TestMath, SphereIntersectionMadness)
     
     // Put the origina at at the intersection and shoot a ray to the outside
     // in a random direction. Expect no further hit.
-    auto m  = OrthogonalSystemZAligned(intersect1.volume_normal);
+    auto m  = OrthogonalSystemZAligned(intersect1.geometry_normal);
     auto new_dir = m * SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare());
     rs = MakeSegmentAt(intersect1, new_dir);
     bhit = s.Intersect(rs.ray, rs.length, hit1);
@@ -593,6 +593,42 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
 }
 
 
+TEST_F(RandomSamplingFixture, TriangleSampling)
+{
+  Eigen::Matrix3d m;
+  auto X = m.col(0);
+  auto Y = m.col(1);
+  auto Z = m.col(2);
+  X = Double3{0.4, 0.2, 0.};
+  Y = Double3{0.1, 0.8, 0.};
+  Z = Double3{0. , 0. , 1.};
+  Eigen::Matrix3d minv = m.inverse();
+  Double3 offset{0.1, 0.1, 0.1};
+  Triangle t(
+    offset,
+    offset+X,
+    offset+Y);
+  static constexpr int NUM_SAMPLES = 100;
+  for (int i=0; i<NUM_SAMPLES; ++i)
+  {
+    {
+      Double3 barry = SampleTrafo::ToTriangleBarycentricCoords(sampler.UniformUnitSquare());
+      EXPECT_NEAR(barry[0]+barry[1]+barry[2], 1., 1.e-3);
+      EXPECT_GE(barry[0], 0.); EXPECT_LE(barry[0], 1.);
+      EXPECT_GE(barry[1], 0.); EXPECT_LE(barry[1], 1.);
+      EXPECT_GE(barry[2], 0.); EXPECT_LE(barry[2], 1.);
+    }
+    HitId hit = t.SampleUniformPosition(sampler);
+    Double3 pos, normal, shading_normal;
+    t.GetLocalGeometry(hit, pos, normal, shading_normal);
+    Double3 local = minv * (pos - offset);
+    EXPECT_NEAR(local[2], 0., 1.e-3);
+    EXPECT_GE(local[0], 0.); EXPECT_LE(local[0], 1.);
+    EXPECT_GE(local[1], 0.); EXPECT_LE(local[1], 1.);
+    EXPECT_LE(local[0] + local[1], 1.);
+  }
+}
+
 
 class PhasefunctionTests : public testing::Test
 {
@@ -616,13 +652,13 @@ public:
     {
       auto smpl = pf.SampleDirection(reverse_incident_dir, sampler);
       int side, i, j;
-      CalcCubeIndices(smpl.dir, side, i, j);
+      CalcCubeIndices(smpl.coordinates, side, i, j);
       i = std::max(0, std::min(i, Nbins-1));
       j = std::max(0, std::min(j, Nbins-1));
       bin_sample_count[side][i][j] += 1.;
-      integral += smpl.value / smpl.pdf;
+      integral += smpl.value / smpl.pdf_or_pmf;
       if (output.is_open())
-        output << smpl.dir[0] << " " << smpl.dir[1] << " " << smpl.dir[2] << " " << smpl.pdf << std::endl;
+        output << smpl.coordinates[0] << " " << smpl.coordinates[1] << " " << smpl.coordinates[2] << " " << smpl.pdf_or_pmf << std::endl;
     }
     integral /= num_samples; // Due to the normalization contraint, this integral should equal 1.
     EXPECT_NEAR(integral[0], 1., 0.01);
@@ -939,9 +975,9 @@ public:
         RadianceOrImportance::LightPathContext{Color::LambdaIdxClosestToRGBPrimaries()});
       HitId hit;
       double length = 100.;
-      bool is_hit = imageplane.Intersect(s.ray_out, length, hit);
+      bool is_hit = imageplane.Intersect({pos, s.coordinates}, length, hit);
       ASSERT_TRUE(is_hit);
-      Double3 endpos = s.ray_out.org + length * s.ray_out.dir;
+      Double3 endpos = pos + length * s.coordinates;
       possum += endpos;
       possqr += Product(endpos, endpos);
       box.Extend(endpos);
@@ -1358,6 +1394,23 @@ TEST(AtmosphereTest, LoadTabulatedData)
 
 }
 
+
+TEST(Misc, Sample)
+{
+  struct Testing {};
+  Sample<double, double, Testing> smpl_pdf{1., 1., 42.};
+  Sample<double, double, Testing> smpl_pmf{1., 1., 42.};
+  Sample<double, double, Testing> zero_pmf{1., 1., 0.};
+  Sample<double, double, Testing> zero_pdf{1., 1., 0.};
+  SetPmfFlag(zero_pmf);
+  SetPmfFlag(smpl_pmf);
+  ASSERT_TRUE(IsFromPdf(smpl_pdf));
+  ASSERT_TRUE(IsFromPdf(zero_pdf));
+  ASSERT_FALSE(IsFromPdf(smpl_pmf));
+  ASSERT_FALSE(IsFromPdf(zero_pmf));
+  ASSERT_EQ(PdfValue(smpl_pdf),42.);
+  ASSERT_EQ(PmfValue(smpl_pmf),42.);
+}
 
 
 int main(int argc, char **argv) {

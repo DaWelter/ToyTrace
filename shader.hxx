@@ -6,6 +6,7 @@
 #include"vec3f.hxx"
 #include"spectral.hxx"
 #include"texture.hxx"
+#include "sampler.hxx"
 
 class Sampler;
 struct Ray;
@@ -13,12 +14,8 @@ struct RaySegment;
 class Scene;
 struct RaySurfaceIntersection;
 
-struct ScatterSample
-{
-  Double3 dir;
-  Spectral3 value;
-  double pdf;
-};
+struct TagScatterSample {};
+using ScatterSample = Sample<Double3, Spectral3, TagScatterSample>;
   
 
 // Included here because it uses ScatterSample.

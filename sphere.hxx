@@ -9,7 +9,7 @@ class Sphere : public Primitive
   double radius;
 public:
 	Sphere(Double3 _center,double _radius)
-	: center(_center),radius(_radius),Primitive()
+	: Primitive(), center(_center),radius(_radius)
   {}
 
   inline bool PotentialDistances(const Ray &ray, double ray_length, double &t1, double &t2) const
@@ -122,13 +122,17 @@ public:
     shading_normal = normal = Normalized(hit.barry-center);
   }
 
-	virtual Box CalcBounds() const
+	virtual Box CalcBounds() const override
 	{
 		Box box;
 		box.min = center - Double3(radius+Epsilon);
 		box.max = center + Double3(radius+Epsilon);
 		return box;
 	}
+	
+  virtual HitId SampleUniformPosition(Sampler &sampler) const override;
+  
+  virtual double Area() const override;
 };
 
 #endif

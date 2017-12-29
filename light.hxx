@@ -1,82 +1,42 @@
-#ifndef LIGHT_HXX
-#define LIGHT_HXX
+#pragma once
 
 #include "vec3f.hxx"
 #include "ray.hxx"
 #include "sampler.hxx"
 #include "radianceorimportance.hxx"
+#include "primitive.hxx"
 
-
-
-class Light : public RadianceOrImportance::EmitterSensor
+namespace RadianceOrImportance
 {
-public:
-  bool is_environmental_radiance_distribution = false;
-  using Sample = RadianceOrImportance::Sample;
-  using DirectionalSample = RadianceOrImportance::DirectionalSample;
-  using LightPathContext = RadianceOrImportance::LightPathContext;
-};
 
-// class DirectionalLight : public Light
-// {
-// 	Double3 dir;
-// 	Double3 col;
-// public:
-// 	DirectionalLight(const Double3 &col,const Double3 &dir) 
-// 		: dir(dir) , col(col)
-// 	{}
-// 
-//   LightSample TakePositionSampleTo(const Double3 &org) const override
-//   {
-//     LightSample s;
-//     // We evaluate Le(x0->dir) = col * delta[dir * (org-x0)] by importance sampling, where
-//     // x0 is on the light source, delta is the dirac delta distribution.
-//     // Taking the position as below importance samples the delta distribution, i.e. we take
-//     // the sample deterministically.
-//     s.pos_on_light = org - LargeNumber * dir;
-//     s.radiance = col;
-//     // This should be the delta function. However it cannot be represented by a regular float number.
-//     // Fortunately the calling code should only ever use the quotient of radiance and pdf. Thus
-//     // the deltas cancel out and I can set this to one.
-//     s.pdf_of_pos = 1.;
-//     s.is_extremely_far_away = true;
-//   }
-//   
-//   Light::DirectionalSample TakeDirectionalSample() const override
-//   {
-//     // I need a random position where the ray with direction this->dir has a chance to hit the world. 
-//     // TODO: implement
-//   }
-// };
-
-
-
-class PointLight : public Light
+class PointLight : public PointEmitter
 {
   SpectralN col; // Total power distributed uniformely over the unit sphere.
   Double3 pos;
 public:
-  PointLight(const SpectralN &col,const Double3 &pos)
-    : col{col},pos(pos)
-  {}
-
-  Sample TakePositionSample(Sampler &sampler, const LightPathContext &context) const override
+  PointLight(const SpectralN &_col,const Double3 &pos)
+    : col{_col},pos(pos)
   {
-    Sample s {
+    col *= 1./UnitSphereSurfaceArea;
+  }
+
+  PositionSample TakePositionSample(Sampler &sampler, const LightPathContext &context) const override
+  {
+    PositionSample s {
       pos,
-      1.,
       Take(col, context.lambda_idx),
-      false };
+      1.
+    };
+    SetPmfFlag(s);
     return s;
   }
   
   DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler, const LightPathContext &context) const override
   {
-    constexpr double one_over_unit_sphere_surface_area = 1./(4.*Pi);
     DirectionalSample s{
-      { pos, SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare()) },
-      one_over_unit_sphere_surface_area,
-      Spectral3{1._sp}
+      SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare()),
+      Spectral3{1._sp},
+      1./(UnitSphereSurfaceArea)
     };
     return s;
   }
@@ -84,61 +44,88 @@ public:
   Spectral3 EvaluatePositionComponent(const Double3 &pos, const LightPathContext &context, double *pdf) const override
   {
     assert (Length(pos - this->pos) <= Epsilon);
-    if (pdf) *pdf = 1.;
-    return Take(col, context.lambda_idx);
+    if (pdf) *pdf = 0.;
+    return Spectral3{0.};
   }
   
   Spectral3 EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, const LightPathContext &context, double *pdf) const override
   {
-    constexpr double one_over_unit_sphere_surface_area = 1./(4.*Pi);
-    if (pdf) *pdf = one_over_unit_sphere_surface_area;
+    assert (Length(pos - this->pos) <= Epsilon);
+    if (pdf) *pdf = 1./(UnitSphereSurfaceArea);
     return Spectral3{1.};
   }
 };
 
 
-class DistantDirectionalLight : public Light
+class UniformAreaLight : public AreaEmitter
 {
+  SpectralN spectrum;
+public:
+  UniformAreaLight(const SpectralN &_spectrum) : spectrum(_spectrum) 
+  {
+    spectrum *= (1./UnitHalfSphereSurfaceArea); // Convert from area power density to exitant radiance.
+  }
+  
+  virtual AreaSample TakeAreaSample(const Primitive& primitive, Sampler &sampler, const LightPathContext &context) const override
+  {
+    AreaSample smpl;
+    smpl.coordinates.hit = primitive.SampleUniformPosition(sampler);
+    smpl.pdf_or_pmf = 1./primitive.Area();
+    Double3 unused_shading_normal;
+    primitive.GetLocalGeometry(smpl.coordinates.hit, smpl.coordinates.pos, smpl.coordinates.normal, unused_shading_normal);
+    smpl.value = Spectral3{1.};
+    return smpl;
+  }
+  
+  inline Spectral3 Evaluate(const AreaSampleCoordinates &area, const Double3 &dir_out, const LightPathContext &context, double *pdf_pos, double *pdf_dir) const
+  {
+    const auto* primitive = area.hit.primitive;
+    if (pdf_pos)
+      *pdf_pos = 1./primitive->Area();
+    if (pdf_dir)
+      *pdf_dir = 1./UnitHalfSphereSurfaceArea;
+    // Cos of angle between exitant dir and normal is dealt with elsewhere.
+    return Take(spectrum, context.lambda_idx);
+  }
+};
+
+
+///////////////////////////////////////////////////////////////////
+/// Env maps here
+///////////////////////////////////////////////////////////////////
+class DistantDirectionalLight : public EnvironmentalRadianceField
+{
+  
   SpectralN col;
   Double3 dir_out;
 public:
   DistantDirectionalLight(const SpectralN &_col,const Double3 &_dir_out)
     : col{_col},dir_out(_dir_out)
     {}
-
-  Sample TakePositionSample(Sampler &sampler, const LightPathContext &context) const override
+  
+  DirectionalSample TakeDirectionSample(Sampler &sampler, const LightPathContext &context) const override
   {
-    Sample s {
+    DirectionalSample s {
       dir_out,
-      1.,
       Take(col, context.lambda_idx),
-      true };
+      1.
+    };
+    SetPmfFlag(s);
     return s;
   }
   
-  DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler, const LightPathContext &context) const override
+  Spectral3 Evaluate(const Double3 &dir_out, const LightPathContext &context, double *pdf) const override
   {
-    assert(false && !"not implemented");
-    return DirectionalSample{};
-  }
-  
-  Spectral3 EvaluatePositionComponent(const Double3 &pos, const LightPathContext &context, double *pdf) const override
-  {
-    assert (Length(pos - this->dir_out) <= Epsilon);
-    if (pdf) *pdf = 1.;
-    return Take(col, context.lambda_idx);
-  }
-  
-  Spectral3 EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, const LightPathContext &context, double *pdf) const override
-  {
-    if (pdf) *pdf = 1.;
-    return Spectral3{1.};
+    assert (Length(dir_out - this->dir_out) <= Epsilon);
+    if (pdf) *pdf = 0.;
+    return Spectral3{0.};
   }
 };
 
 
-class DistantDomeLight : public Light
+class DistantDomeLight : public EnvironmentalRadianceField
 {
+  
   SpectralN col;
   Double3 down_dir;
   Eigen::Matrix3d frame;
@@ -148,46 +135,33 @@ public:
   {
     frame = OrthogonalSystemZAligned(down_dir);
   }
-
-  Sample TakePositionSample(Sampler &sampler, const LightPathContext &context) const override
+  
+  DirectionalSample TakeDirectionSample(Sampler &sampler, const LightPathContext &context) const override
   {
     // Generate directions pointing away from the light by
     // sampling the opposite hemisphere!
     auto dir_out = frame * SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare());
     double pdf = 1./UnitHalfSphereSurfaceArea;
-    Sample s {
+    DirectionalSample s {
       dir_out,
-      pdf,
       Take(col, context.lambda_idx),
-      true };
+      pdf };
     return s;
   }
   
-  DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler, const LightPathContext &context) const override
-  {
-    assert(false && !"not implemented");
-    return DirectionalSample{};
-  }
-  
-  Spectral3 EvaluatePositionComponent(const Double3 &pos, const LightPathContext &context, double *pdf) const override
+  Spectral3 Evaluate(const Double3 &dir_out, const LightPathContext &context, double *pdf) const override
   {
     if (pdf) *pdf = 1./UnitHalfSphereSurfaceArea;
     // Similar rationale as above: light comes from the top hemisphere if
-    // the direction vector (here pos) points down.
-    auto above = Dot(pos, down_dir);
+    // the direction vector points down.
+    auto above = Dot(dir_out, down_dir);
     return above > 0 ? Take(col, context.lambda_idx) : Spectral3{0.};
-  }
-  
-  Spectral3 EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, const LightPathContext &context, double *pdf) const override
-  {
-    if (pdf) *pdf = 1.;
-    return Spectral3{1.};
   }
 };
 
 
 // It is super large and super far away so it is best modeled as angular distribution of radiance.
-class Sun : public Light
+class Sun : public EnvironmentalRadianceField
 {
   SpectralN emission_spectrum;
   Eigen::Matrix3d frame;
@@ -198,7 +172,6 @@ class Sun : public Light
 public:
   Sun(double _total_power, const Double3 &_dir_out, double opening_angle)
   {
-    Light::is_environmental_radiance_distribution = true;
     cos_opening_angle = std::cos(Pi/180.*opening_angle);
     pdf_val = 1./(2.*Pi*(1.-cos_opening_angle));
     frame = OrthogonalSystemZAligned(_dir_out);
@@ -207,41 +180,26 @@ public:
     emission_spectrum *= _total_power;
     emission_spectrum *= pdf_val; // I need it per solid angle.
   }
-
-  Sample TakePositionSample(Sampler &sampler, const LightPathContext &context) const override
+  
+  DirectionalSample TakeDirectionSample(Sampler &sampler, const LightPathContext &context) const override
   {
     auto dir_out = SampleTrafo::ToUniformSphereSection(cos_opening_angle, sampler.UniformUnitSquare());
-    Sample s {
+    DirectionalSample s {
       frame * dir_out,
-      pdf_val,
       Take(emission_spectrum, context.lambda_idx),
-      true };
+      pdf_val };
     return s;
   }
-  
-  DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler, const LightPathContext &context) const override
+
+  Spectral3 Evaluate(const Double3 &dir_out, const LightPathContext &context, double *pdf) const override
   {
-    assert(false && !"not implemented");
-    return DirectionalSample{};
-  }
-  
-  Spectral3 EvaluatePositionComponent(const Double3 &dir_out_eval, const LightPathContext &context, double *pdf) const override
-  {
-    ASSERT_NORMALIZED(dir_out_eval);
+    ASSERT_NORMALIZED(dir_out);
     Double3 dir_out_center = frame.col(2);
-    bool is_in_cone = Dot(dir_out_eval, dir_out_center) > cos_opening_angle;
+    bool is_in_cone = Dot(dir_out, dir_out_center) > cos_opening_angle;
     if (pdf) 
       *pdf = is_in_cone ? pdf_val : 0.;
-    return is_in_cone ? 
-           Take(emission_spectrum, context.lambda_idx) :
-           Spectral3::Constant(0.);
-  }
-  
-  Spectral3 EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, const LightPathContext &context, double *pdf) const override
-  {
-    if (pdf) *pdf = 1.;
-    return Spectral3{1.};
+    return is_in_cone ? Take(emission_spectrum, context.lambda_idx) : Spectral3{0.};
   }
 };
 
-#endif
+} // namespace

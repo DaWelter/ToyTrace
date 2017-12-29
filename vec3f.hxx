@@ -203,23 +203,6 @@ inline OrthogonalSystemZAligned(const Eigen::MatrixBase<Derived> &_Z)
 }
 
 
-template<int n_, class T>
-inline int TowerSampling(const T *probs, T r)
-{
-  // |- p0 -|- p1 -|- p2 -|- p3 -|
-  //            r <--------------| // r falls in one of those bins.
-  // Linear search. Measure r from the "rear".
-  int n = n_-1;
-  while (r >= probs[n] && n>0)
-  {
-    // Shed the last bin.
-    r -= probs[n];
-    --n;
-  }
-  return n;
-}
-
-
 template<class T, int N, int M>
 inline Eigen::Array<T,M,1> Take(const Eigen::Array<T,N,1>& u, const Eigen::Array<int, M, 1> &indices)
 {

@@ -73,6 +73,18 @@ Double3 ToBeckmanHemisphere(Double2 r, double alpha)
   return Double3{cs*rho, sn*rho, z};
 }
 
+
+/* Ref: Total Compendium pg. 12 */
+Double3 ToTriangleBarycentricCoords(Double2 r)
+{
+  double sqrtr0 = std::sqrt(r[0]);
+  double alpha = 1. - sqrtr0;
+  double beta  = (1.-r[1])*sqrtr0;
+  double gamma = r[1]*sqrtr0;
+  return Double3{alpha, beta, gamma};
+}
+
+
 }
 
 

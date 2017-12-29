@@ -4,6 +4,10 @@
 
 class Shader;
 class Medium;
+namespace RadianceOrImportance {
+class AreaEmitter;
+}
+class Sampler;
 
 #include<vector>
 #include"ray.hxx"
@@ -13,12 +17,13 @@ class Primitive
 {
 public:
   Primitive() 
-	  : shader(nullptr), medium(nullptr)
+	  : shader(nullptr), medium(nullptr), emitter{nullptr}
   {}
   virtual ~Primitive() {}
   
   Shader *shader;
   Medium *medium;
+  RadianceOrImportance::AreaEmitter *emitter;
   
   virtual bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const = 0;
   
@@ -52,6 +57,18 @@ public:
   {
     Box boundingbox = CalcBounds();
     return boundingbox.Intersect(box);
+  }
+  
+  virtual HitId SampleUniformPosition(Sampler &sampler) const
+  {
+    assert(!"Not Implemented");
+    return HitId{};
+  };
+  
+  virtual double Area() const
+  {
+    assert(!"Not Implemented");
+    return 0;
   }
 };
 

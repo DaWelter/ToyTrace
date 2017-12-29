@@ -20,6 +20,8 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 
+using namespace RadianceOrImportance;
+
 // TODO: Rename this
 template<class Thing>
 class CurrentThing
@@ -29,7 +31,7 @@ class CurrentThing
   std::string name;
 public:
   CurrentThing(const std::string &_name, const std::string &default_name, Thing* default_thing) :
-    name(_name), currentThing(default_thing)
+    currentThing(default_thing), name(_name)
   {
     things[default_name] = default_thing;
   }
@@ -73,6 +75,7 @@ class NFFParser
   Scene* scene;
   CurrentThing<Shader> shaders;
   CurrentThing<Medium> mediums;
+  CurrentThing<AreaEmitter> areaemitters;
   Eigen::Transform<double,3,Eigen::Affine> currentTransform;
   std::string directory;
   std::string filename;
@@ -94,10 +97,11 @@ public:
     scene(_scene),
     shaders("Shader", "invisible", new InvisibleShader()),
     mediums("Medium", "default", new VacuumMedium()),
-    render_params(_render_params),
+    areaemitters("AreaEmitter", "none", nullptr),
+    filename(_path_hint),
     input{_is},
     lineno{0},
-    filename(_path_hint)
+    render_params(_render_params)
   {
     shaders.set_and_activate("default", new DiffuseShader(Color::RGBToSpectrum({0.8_rgb, 0.8_rgb, 0.8_rgb}), nullptr));
     currentTransform = decltype(currentTransform)::Identity();
@@ -134,7 +138,7 @@ Double3 NFFParser::ApplyTransform(const Double3 &p) const
 
 Double3 NFFParser::ApplyTransformNormal(const Double3 &v) const
 {
-  return Normalized(currentTransform.linear() * v);
+  return Normalized(currentTransform.linear().inverse().transpose() * v);
 }
 
 
@@ -143,6 +147,10 @@ void NFFParser::AssignCurrentMaterialParams(Primitive& primitive)
   primitive.shader = shaders();
   primitive.medium = mediums();
   assert(primitive.shader && primitive.medium);
+  if (areaemitters())
+  {
+    scene->MakePrimitiveEmissive(primitive, *areaemitters());
+  }
 }
 
 
@@ -215,11 +223,21 @@ void NFFParser::Parse()
     if (!strcmp(token, "transform"))
     {
       Double3 t, r, s;
-      int n = std::sscanf(line.c_str(),"transform %lg %lg %lg %lg %lg %lg %lg %lg %lg\n",&t[0], &t[1], &t[2], &r[0], &r[1], &r[2], &s[0], &s[1], &s[2]);
-      if (n != 3 && n != 6 && n != 9)
+      int n;
+      n = std::sscanf(line.c_str(),"transform %lg %lg %lg %lg %lg %lg %lg %lg %lg\n",&t[0], &t[1], &t[2], &r[0], &r[1], &r[2], &s[0], &s[1], &s[2]);
+      if (n == EOF) n = 0; // Number of arguments is actually zero.
+      else if (n == 0) n = -1; // Failure.
+      if (n !=0 && n != 3 && n != 6 && n != 9)
         throw std::runtime_error(strconcat("error in ", filename, " : ", line));
       decltype(currentTransform) trafo;
-      trafo = Eigen::Translation3d(t);
+      if (n == 0)
+      {
+        trafo = decltype(trafo)::Identity();
+      }
+      if (n >= 3)
+      {
+        trafo = Eigen::Translation3d(t);
+      }
       if (n >= 6)
       {
         // The heading, pitch, bank convention assuming Y is up and Z is forward!
@@ -611,7 +629,7 @@ void NFFParser::Parse()
       }
       if (num == 5)
       {
-        scene->AddLight(std::make_unique<Sun>(total_power, dir_out, opening_angle));
+        scene->envlights.push_back(std::make_unique<Sun>(total_power, dir_out, opening_angle));
       }
       else
       {
@@ -631,7 +649,7 @@ void NFFParser::Parse()
       Normalize(dir_out);
       if (num == 6)
       {
-        scene->AddLight(std::make_unique<DistantDirectionalLight>(
+        scene->envlights.push_back(std::make_unique<DistantDirectionalLight>(
           Color::RGBToSpectrum(col), 
           dir_out
         ));
@@ -654,7 +672,7 @@ void NFFParser::Parse()
       Normalize(dir_up);
       if (num == 6)
       {
-        scene->AddLight(std::make_unique<DistantDomeLight>(
+        scene->envlights.push_back(std::make_unique<DistantDomeLight>(
           Color::RGBToSpectrum(col), 
           dir_up
         ));
@@ -667,26 +685,64 @@ void NFFParser::Parse()
     }
   
   
+  if (!strcmp(token, "larea"))
+  {
+    char name[LINESIZE];
+    char type[LINESIZE];
+    int num = std::sscanf(line.c_str(), "larea %s %s", name, type);
+    if (num == 1)
+    {
+      areaemitters.activate(name);
+    }
+    else if (num == 2)
+    {
+      if (!strcmp(type, "uniform"))
+      {
+        RGB col;
+        double area_power_density;
+        char name[LINESIZE];
+        int num = std::sscanf(line.c_str(), "larea %s uniform %lg %lg %lg %lg",
+                              name, &col[0], &col[1], &col[2], &area_power_density);
+        if (num == 5)
+        {
+          areaemitters.set_and_activate(
+            name, 
+            new UniformAreaLight(area_power_density*Color::RGBToSpectrum(col))
+          );
+        }
+        else
+        {
+          throw MakeException("Error");
+        }
+      }
+    }
+    else
+    {
+      throw MakeException("Error");
+    }
+    continue;
+  }
+  
     /* lightsource */
   if (!strcmp(token,"l")) 
 	{
 		Double3 pos;
     RGB col;
-		int num = sscanf(line.c_str(),"l %lg %lg %lg %lg %lg %lg",
+    RGBScalar col_multiplier;
+		int num = sscanf(line.c_str(),"l %lg %lg %lg %lg %lg %lg %lg",
 			   &pos[0],&pos[1],&pos[2],
-			   &col[0],&col[1],&col[2]);
-    col *= 1.0_rgb/255.9999_rgb;
+			   &col[0],&col[1],&col[2], &col_multiplier);
 		if (num == 3) {
 			// light source with position only
 			col = RGB::Constant(1._rgb);
-			scene->AddLight(std::make_unique<PointLight>(
+			scene->AddLight(std::make_unique<RadianceOrImportance::PointLight>(
         Color::RGBToSpectrum(col),
         pos
-      ));	
-		} else if (num == 6) {
+      ));
+		} else if (num == 7) {
 			// light source with position and color
-			scene->AddLight(std::make_unique<PointLight>(
-        Color::RGBToSpectrum(col),
+			scene->lights.push_back(std::make_unique<PointLight>(
+        Color::RGBToSpectrum(col_multiplier*col),
         pos
       ));	
 		} else {
@@ -760,8 +816,8 @@ class AssimpReader
     NodeRef(aiNode* _node, const aiMatrix4x4 &_mTrafoParent)
       : node(_node), local_to_world(_mTrafoParent * _node->mTransformation)
     {}
-    aiMatrix4x4 local_to_world;
     aiNode* node;
+    aiMatrix4x4 local_to_world;
   };
 public:
   void Read(const char *filename, NFFParser* parser, Scene *scene)

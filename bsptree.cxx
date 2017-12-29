@@ -32,10 +32,17 @@ void TreeNode::Split(int level, std::vector<Primitive *> list,const Box &nodebox
   std::vector<Primitive *> childlist[2];
   for(unsigned int i=0;i<list.size();i++)
   {
-    bool inlist=false;
-    if(list[i]->InBox(childbox[0])) { inlist=true; childlist[0].push_back(list[i]); }
-    if(list[i]->InBox(childbox[1])) { inlist=true; childlist[1].push_back(list[i]); }
-    assert(inlist);
+    bool inlist1=list[i]->InBox(childbox[0]);
+    bool inlist2=list[i]->InBox(childbox[1]);
+    if(inlist1) 
+    { 
+      childlist[0].push_back(list[i]); 
+    }
+    if(inlist2) 
+    { 
+      childlist[1].push_back(list[i]); 
+    }
+    assert(inlist1 || inlist2);
   }
   {
     decltype(list) begone{};
@@ -124,7 +131,6 @@ std::unique_ptr<TreeNode> BuildBspTree(const std::vector<Primitive *> &list, con
   std::cout << "building bsp tree ..." << std::endl;
   auto root = std::make_unique<TreeNode>();
   root->Split(0, list, box);
-  std::cout << std::endl;
   std::cout << "bsp tree finished" << std::endl;
   return std::move(root);
 }

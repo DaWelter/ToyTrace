@@ -28,11 +28,16 @@ class Scene
   // to the specified group...
   //void ParseMesh(char *filename);
   friend class NFFParser;
+  using Light = RadianceOrImportance::PointEmitter;
+  using EnvironmentalRadianceField = RadianceOrImportance::EnvironmentalRadianceField;
+  using AreaLight = RadianceOrImportance::AreaEmitter;
 
   std::unique_ptr<TreeNode> bsptree;
   // TODO: Manage memory ...
   std::vector<Primitive*> primitives;
-  std::vector<Light *> lights;
+  std::vector<Primitive*> emissive_primitives;
+  std::vector<std::unique_ptr<Light>> lights;
+  std::vector<std::unique_ptr<EnvironmentalRadianceField>> envlights;
   std::unique_ptr<Camera> camera;
   std::unique_ptr<Medium> empty_space_medium;
   
@@ -57,8 +62,7 @@ public:
   
   void AddLight(std::unique_ptr<Light> light) 
   {
-    // TODO: Manage memory ...
-    lights.push_back(light.release());
+    lights.push_back(std::move(light));
   }
   
   int GetNumLights() const
@@ -69,6 +73,26 @@ public:
   const Light& GetLight(int i) const
   {
     return *lights[i];
+  }
+  
+  int GetNumEnvLights() const
+  {
+    return envlights.size();
+  }
+  
+  int GetNumAreaLights() const
+  {
+    return emissive_primitives.size();
+  }
+  
+  std::pair<const Primitive*, const AreaLight*> GetAreaLight(int i) const
+  {
+    return std::make_pair(emissive_primitives[i], emissive_primitives[i]->emitter);
+  }
+  
+  const RadianceOrImportance::EnvironmentalRadianceField& GetEnvLight(int i) const
+  {
+    return *envlights[i];
   }
   
   const Camera& GetCamera() const
@@ -99,6 +123,12 @@ public:
     primitives.push_back(prim);
     return *prim;
   }
+  
+  void MakePrimitiveEmissive(Primitive &prim, RadianceOrImportance::AreaEmitter &emitter)
+  {
+    emissive_primitives.push_back(&prim);
+    prim.emitter = &emitter;
+  }
 
   const Primitive& GetPrimitive(int i) const
   {
@@ -112,6 +142,7 @@ public:
   
   IntersectionCalculator MakeIntersectionCalculator() const
   {
+    assert(bsptree);
     return IntersectionCalculator(*bsptree);
   }
   

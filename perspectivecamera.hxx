@@ -7,17 +7,17 @@
 #include "radianceorimportance.hxx"
 
 
-class Camera : public RadianceOrImportance::EmitterSensorArray
+class Camera : public RadianceOrImportance::PointEmitterArray
 {
 public:
-  using Sample = RadianceOrImportance::Sample;
+  using PositionSample = RadianceOrImportance::PositionSample;
   using DirectionalSample = RadianceOrImportance::DirectionalSample;
   using LightPathContext = RadianceOrImportance::LightPathContext;
   
   int xres,yres;
   
 	Camera(int _xres,int _yres)
-		: RadianceOrImportance::EmitterSensorArray{_xres * _yres},
+		: RadianceOrImportance::PointEmitterArray{_xres * _yres},
       xres(_xres),yres(_yres)
 	{}
     
@@ -62,8 +62,8 @@ public:
 
 class PerspectiveCamera : public Camera
 {
-  double fov;
   Double3 pos;
+  double fov;
   Camera::Frame frame;
   double xmin, xperpixel;
   double ymin, yperpixel;
@@ -89,9 +89,9 @@ public:
     yperpixel = 2.*b / yres;
 	}
 
-  virtual Sample TakePositionSample(int unit_index, Sampler &sampler, const LightPathContext &context) const override
+  virtual PositionSample TakePositionSample(int unit_index, Sampler &sampler, const LightPathContext &context) const override
   {
-    Sample s{this->pos, 1., Spectral3::Constant(1.), false};    
+    PositionSample s{this->pos, Spectral3{1.}, 1.};    
     return s;
   }
   
@@ -106,7 +106,7 @@ public:
       1.0);
     Normalize(v);
     Double3 emission_dir = frame.right*v[0] + frame.up*v[1] + frame.dir*v[2];
-    DirectionalSample s{{pos, emission_dir}, 1.0, Spectral3::Constant(1.)};
+    DirectionalSample s{emission_dir, Spectral3{1.}, 1.};
     return s;
   }
   
@@ -134,9 +134,9 @@ public:
     per_pixel_delta = 2./smallest_side;
   }
 
-  virtual Sample TakePositionSample(int unit_index, Sampler &sampler, const LightPathContext &context) const override
+  virtual PositionSample TakePositionSample(int unit_index, Sampler &sampler, const LightPathContext &context) const override
   {
-    Sample s{this->pos, 1., Spectral3::Constant(1.), false};    
+    PositionSample s{this->pos, Spectral3{1.}, 1.};    
     return s;
   }
   
@@ -158,12 +158,12 @@ public:
     {
       Double3 emission_dir = frame.right*w[0] + frame.up*w[1] + frame.dir*w[2];
       ASSERT_NORMALIZED(emission_dir);
-      DirectionalSample s{{pos, emission_dir}, 1.0, Spectral3::Constant(1.)};
+      DirectionalSample s{ emission_dir, Spectral3{1.}, 1.0};
       return s;
     }
     else
     {
-      return DirectionalSample{{pos, frame.dir}, 1.0, Spectral3::Constant(0.)};
+      return DirectionalSample{frame.dir, Spectral3{1.}, 1.0};
     }
   }
   
