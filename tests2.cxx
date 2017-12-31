@@ -8,6 +8,20 @@
 #include "spectral.hxx"
 #include "vec3f.hxx"
 
+struct Stuff
+{
+  double a;
+  char b;
+  char c;
+};
+static_assert(sizeof(Stuff) == 16, "Unexpected size!");
+struct MoreStuff
+{
+  Stuff s;
+  char c;
+};
+static_assert(sizeof(MoreStuff) == 24, "Unexpected size!");
+
 
 TEST(BasicAssumptions, FloatType)
 {
@@ -25,6 +39,8 @@ TEST(BasicAssumptions, FloatType)
   EXPECT_TRUE(inf >= inf);
   EXPECT_FALSE(inf == -inf);
   EXPECT_TRUE(-inf == -inf);
+  EXPECT_TRUE(inf+1. == inf);
+  EXPECT_TRUE(std::isnan(inf/(inf+1.)));
 }
 
 
