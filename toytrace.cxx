@@ -372,6 +372,7 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
       ("h", po::value<int>(), "Height")
       ("rd", po::value<int>(), "Max ray depth")
       ("max-spp", po::value<int>(), "Max samples per pixel")
+      ("pt-sample-mode", po::value<std::string>(), "Light sampling: 'bsdf' - bsdf importance sampling, 'lights' - sample lights aka. next event estimation, 'both' - both combined by MIS.")
       ("input-file", po::value<std::string>(), "Input file");
     po::positional_options_description pos_desc;
     pos_desc.add("input-file", -1);
@@ -459,6 +460,15 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
       input_file = vm["input-file"].as<std::string>();
     else
       throw po::error("Input file is required.");
+    
+    if (vm.count("pt-sample-mode"))
+    {
+      std::string mode = vm["pt-sample-mode"].as<std::string>();
+      std::vector<std::string> admissible = { "both", "bsdf", "lights" };
+      if (std::find(admissible.begin(), admissible.end(), mode) == admissible.end())
+        throw po::error("Bad argument for pt-sample-mode");
+      render_params.pt_sample_mode = mode;
+    }
   }
   catch(po::error &ex)
   {

@@ -33,13 +33,6 @@ public:
   }
 
   virtual double Dfactor(const Double3 &exitant_dir) const { return 1.; }
-
-#if 0 // TODO Anti self intersection transform
-    
-    if (intersection) 
-      seg.ray.org += AntiSelfIntersectionOffset(*intersection, RAY_EPSILON, seg.ray.dir);
-
-#endif
 };
 
 
@@ -167,7 +160,6 @@ public:
   
   void InitRayAndMaybeHandlePassageThroughSurface(Ray &ray, const Double3 &exitant_dir, MediumTracker &medium_tracker) const
   {
-    medium_tracker.initializePosition(pos, intersector);
     Vertex::InitRayAndMaybeHandlePassageThroughSurface(ray, exitant_dir, medium_tracker);
   }
 
@@ -323,6 +315,16 @@ public:
   {
     Box bb = _scene.GetBoundingBox();
     sufficiently_long_distance_to_go_outside_the_scene_bounds = 10.*(bb.max - bb.min).maxCoeff();
+    // Which style of sampling for the last vertex of the path. 
+    // Defaults to both light and brdf sampling.
+    if (algo_params.pt_sample_mode == "bsdf")
+    {
+      do_sample_lights = false;
+    }
+    else if (algo_params.pt_sample_mode == "lights")
+    {
+      do_sample_brdf = false;
+    }
   }
   
   template<class SampleType>
@@ -390,7 +392,8 @@ public:
   {
     ConnectionEndNodeData nd;
     auto area_sample = target.TakeAreaSample(primitive, sampler, light_context);
-    nd.segment_to_target = RaySegment::FromTo(vertex.Position(), area_sample.coordinates.pos);
+    auto shifted_pos = area_sample.coordinates.pos += AntiSelfIntersectionOffset(area_sample.coordinates.normal, RAY_EPSILON, Normalized(vertex.Position()-area_sample.coordinates.pos));
+    nd.segment_to_target = RaySegment::FromTo(vertex.Position(), shifted_pos);
     auto direction_factor = target.Evaluate(area_sample.coordinates, -nd.segment_to_target.ray.dir, light_context, nullptr, nullptr);
     nd.sample.coordinates = area_sample.coordinates.pos;
     nd.sample.value       = area_sample.value;
@@ -428,8 +431,6 @@ public:
       std::tie(light, pmf_of_light) = PickLight();
       nd = ComputeConnectionSample(*light, vertex, light_context);
     }
-    // TODO: Unfuck this. Maybe try to use an offset from the surface. Otherwise there are self-interseciton issues!
-    nd.segment_to_target.length -= 10.*RAY_EPSILON; // For safety against intersections with the target.
     nd.sample.pdf_or_pmf *= pmf_of_light*emitter_type_selection_probabilities[which_kind];
     
     double scatter_pdf_wrt_solid_angle = NaN;
@@ -440,6 +441,8 @@ public:
 
     MediumTracker medium_tracker = _medium_tracker_parent;
     vertex.InitRayAndMaybeHandlePassageThroughSurface(nd.segment_to_target.ray, nd.segment_to_target.ray.dir, medium_tracker);
+
+    nd.segment_to_target.ShortenBothEndsBy(RAY_EPSILON);
     
     auto transmittance = TransmittanceEstimate(nd.segment_to_target, medium_tracker, context);
     double mis_weight = MaybeMisWeight(nd.sample, scatter_pdf_wrt_solid_angle);    
@@ -502,29 +505,29 @@ public:
   }
 
   
-  EntityHitFlag DetermineNextInteractionType(const CollisionData &collision, MediumTracker &medium_tracker, RW::Vertex* &vertex)
+  std::pair<EntityHitFlag, RW::Vertex*> DetermineNextInteractionType(const CollisionData &collision, MediumTracker &medium_tracker)
   {
-    vertex = nullptr;
+    RW::Vertex *vertex = nullptr;
     if (collision.smpl.t < collision.segment.length)
     {
       vertex = vertex_storage.allocate<RW::Volume>(collision.smpl, medium_tracker.getCurrentMedium(), collision.segment);
-      return SCATTERER;
+      return std::make_pair(SCATTERER, vertex);
     }
     else if (collision.hit)
     {
       if (collision.hit.primitive->emitter)
       {
-        return AREA_EMITTER;
+        return std::make_pair(AREA_EMITTER, vertex);
       }
       else 
       {
         vertex = vertex_storage.allocate<RW::Surface>(collision.hit, collision.segment);
-        return SCATTERER;
+        return std::make_pair(SCATTERER, vertex);
       }
     }
     else
     {
-      return ENV_LIGHT;
+      return std::make_pair(ENV_LIGHT, vertex);
     }
   }
   
@@ -534,75 +537,68 @@ public:
     PathContext context{lambda_selection.first};
     MediumTracker medium_tracker{scene};
     
-    Spectral3 path_sample_value{0.};
+    Spectral3 path_sample_values{0.};
     
     RW::Camera start_vertex(scene.GetCamera(), pixel_index, intersector);
     {
       auto pos_smpl = start_vertex.PositionSample(sampler, context);
       context.beta *= (1./PmfOrPdfValue(pos_smpl));
+      medium_tracker.initializePosition(pos_smpl.coordinates, intersector);
     }
   
     RW::Vertex* vertex = &start_vertex;
     ScatterSample scatter_smpl{};
     CollisionData collision{Ray{}};
     EntityHitFlag entity_hit_flag = NOTHING;
-    
     Ray ray;
-    {
-      scatter_smpl = vertex->Sample(sampler, context);
-      context.beta *= scatter_smpl.value / PmfOrPdfValue(scatter_smpl);
-     
-      if (context.beta.isZero())
-        return RGB::Zero();
-      
-      vertex->InitRayAndMaybeHandlePassageThroughSurface(ray, scatter_smpl.coordinates, medium_tracker);
-    }
-
     int number_of_interactions = 0;
     
     while (true)
     {
+      ++number_of_interactions;
+      
+      if (this->do_sample_lights) 
+      {
+        // Next vertex. Sample a point on a light source. Compute geometry term. Add path weight to total weights.
+        path_sample_values += context.beta *
+          CalculateLightConnectionSubPathWeight(*vertex, medium_tracker, context);
+      }
+
+      // Next vertex by sampling the BSDF.
+      scatter_smpl = vertex->Sample(sampler, context);
+      context.beta *= scatter_smpl.value / PmfOrPdfValue(scatter_smpl);
+      
+      if (context.beta.isZero()) // Because of odd situations where ray can be scattered below the surface due to smooth normal interpolation.
+        break;
+      
+      vertex->InitRayAndMaybeHandlePassageThroughSurface(ray, scatter_smpl.coordinates, medium_tracker);
+      
+      // And tracking to the next interaction point.
       collision = CollisionData{ray};
       TrackToNextInteraction(collision, medium_tracker, context);
       context.beta *= collision.smpl.weight;
       
-      entity_hit_flag = DetermineNextInteractionType(collision, medium_tracker, vertex);
+      std::tie(entity_hit_flag, vertex) = DetermineNextInteractionType(collision, medium_tracker);
       
-      if (entity_hit_flag != SCATTERER)
-        break;
-      
-      ++number_of_interactions;
+      if (entity_hit_flag != SCATTERER) // Hit a light or particle escaped the scene.
+        break;   
 
       bool survive = RouletteSurvival(context.beta, number_of_interactions);
       if (!survive)
         break;
       
-      if (this->do_sample_lights)
-      {
-        path_sample_value += context.beta *
-          CalculateLightConnectionSubPathWeight(*vertex, medium_tracker, context);
-      }
-
-      scatter_smpl = vertex->Sample(sampler, context);
-      context.beta *= scatter_smpl.value / PmfOrPdfValue(scatter_smpl);
-      
-      if (context.beta.isZero())
-        break;
-      
-      vertex->InitRayAndMaybeHandlePassageThroughSurface(ray, scatter_smpl.coordinates, medium_tracker);
-
+      assert(vertex);
       assert(context.beta.allFinite());
-      vertex_storage.free<RW::Vertex>(vertex);
     }
 
     if (this->do_sample_brdf)
     {
-      path_sample_value += context.beta * CalculateEmitterHitSubPathWeight(
+      path_sample_values += context.beta * CalculateEmitterHitSubPathWeight(
         entity_hit_flag, collision, scatter_smpl, context
       );
     }
     
     vertex_storage.clear();
-    return Color::SpectralSelectionToRGB(lambda_selection.second*path_sample_value, lambda_selection.first);
+    return Color::SpectralSelectionToRGB(lambda_selection.second*path_sample_values, lambda_selection.first);
   }
 };

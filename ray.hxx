@@ -44,6 +44,12 @@ struct RaySegment
     // Want to return some expression template construct. Not an actual Double3. To facilitate optimization.
     return ray.PointAt(length);
   }
+  
+  inline void ShortenBothEndsBy(double epsilon)
+  {
+    ray.org += epsilon*ray.dir;
+    length -= 2.*epsilon;
+  }
 };
 
 
@@ -78,9 +84,15 @@ struct RaySurfaceIntersection
 };
 
 
-inline Double3 AntiSelfIntersectionOffset(const RaySurfaceIntersection &intersection, double eps, const Double3 &ray_dir)
+inline Double3 AntiSelfIntersectionOffset(const Double3 &normal, double eps, const Double3 &exitant_dir)
 {
-  return eps * (Dot(ray_dir, intersection.normal) > 0. ? 1. : -1.) * intersection.normal;
+  return eps * (Dot(exitant_dir, normal) > 0. ? 1. : -1.) * normal;
+}
+
+
+inline Double3 AntiSelfIntersectionOffset(const RaySurfaceIntersection &intersection, double eps, const Double3 &exitant_dir)
+{
+  return AntiSelfIntersectionOffset(intersection.normal, eps, exitant_dir);
 }
 
 

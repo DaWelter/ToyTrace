@@ -18,6 +18,7 @@ struct RenderingParameters
   int num_threads = { -1 };
   int max_ray_depth = 25;
   int max_samples_per_pixel = {-1};
+  std::string pt_sample_mode = {};
 };
 
 
