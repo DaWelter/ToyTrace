@@ -1168,7 +1168,7 @@ TEST(Rendering, VertexAllocation)
     int a;
       
     virtual ScatterSample Sample(Sampler& sampler, const PathContext &context) const override { return ScatterSample{}; }
-    virtual Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) const { return Spectral3{}; }
+    virtual Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) override { return Spectral3{}; }
   };
   
   std::vector<TestVertex*> v;

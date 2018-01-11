@@ -7,6 +7,8 @@
 namespace RandomWalk
 {
 
+using ResponseContainer = std::vector<ROI::PointEmitterArray::Response>;
+  
 class Vertex
 {
 public:
@@ -17,10 +19,11 @@ public:
     SCATTER_VERTEX
   };
   const PathEndTag path_end_tag;
+  ResponseContainer responses;
 public:
   Vertex(PathEndTag _path_end_tag = SCATTER_VERTEX) : path_end_tag{_path_end_tag} {}
   virtual ScatterSample Sample(Sampler& sampler, const PathContext &context) const = 0;
-  virtual Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
+  virtual Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) = 0;
 //   virtual void UpdateThingsAndMakeExitantRay(Ray &ray, ScatterSample &smpl, MediumTracker &medium_tracker, PathContext &context) const = 0;
   virtual void ApplyAntiSelfIntersectionTransform(Ray &ray) const {}
   
@@ -55,7 +58,7 @@ public:
     return smpl;
   }
   
-  Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) const override
+  Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) override
   {
     double d_factor = Dfactor(out_direction);
     const auto &shader = intersection.shader();
@@ -110,7 +113,7 @@ public:
     return medium.SamplePhaseFunction(reverse_incident_dir, pos, sampler, context);
   }
   
-  Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) const override
+  Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) override
   {
     return medium.EvaluatePhaseFunction(reverse_incident_dir, pos, out_direction, context, pdf);
   }
@@ -148,11 +151,11 @@ public:
     return scatter_smpl;
   }
   
-  Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) const override
+  Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) override
   {   
-    // TODO: Fix me! As if there was only one discrete direction in which the ray goes through the pixel.
-    // Of course this is not a bad approximation for a pin hole camera. But it is not true in general.
-    // Need to support camera types with large aperture.
+    // TODO: Make this nice.
+    responses.clear();
+    emitter.Evaluate(pos, out_direction, responses, ROI::LightPathContext{context.lambda_idx});
     if (pdf)
       *pdf = 0.;
     return Spectral3{0.};
@@ -404,7 +407,7 @@ public:
     return nd;
   }
 
-  Spectral3 CalculateLightConnectionSubPathWeight(const RW::Vertex &vertex, const MediumTracker &_medium_tracker_parent, const PathContext &context)
+  Spectral3 CalculateLightConnectionSubPathWeight(RW::Vertex &vertex, const MediumTracker &_medium_tracker_parent, const PathContext &context)
   {    
     ROI::LightPathContext light_context{context.lambda_idx};
 
@@ -436,7 +439,10 @@ public:
     double scatter_pdf_wrt_solid_angle = NaN;
     Spectral3 scatter_factor = vertex.Evaluate(nd.segment_to_target.ray.dir, context, &scatter_pdf_wrt_solid_angle);
 
-    if (scatter_factor.isZero())
+    if (scatter_factor.isZero() && vertex.path_end_tag!=RW::Vertex::END_VERTEX)
+      return Spectral3{0.};
+    
+    if (vertex.path_end_tag == RW::Vertex::END_VERTEX && vertex.responses.empty())
       return Spectral3{0.};
 
     MediumTracker medium_tracker = _medium_tracker_parent;
@@ -445,12 +451,29 @@ public:
     nd.segment_to_target.ShortenBothEndsBy(RAY_EPSILON);
     
     auto transmittance = TransmittanceEstimate(nd.segment_to_target, medium_tracker, context);
-    double mis_weight = MaybeMisWeight(nd.sample, scatter_pdf_wrt_solid_angle);    
     double r2_factor = nd.is_wrt_solid_angle ? 1. : 1./Sqr(nd.segment_to_target.length);
     
-    Spectral3 sub_path_weight = transmittance * scatter_factor * nd.sample.value;
-    sub_path_weight *= r2_factor*mis_weight / PmfOrPdfValue(nd.sample);
-    return sub_path_weight;
+    if (vertex.path_end_tag == RW::Vertex::END_VERTEX) // Camera Vertex?
+    {
+      for (const auto &r : vertex.responses)
+      {
+        int num_attempted_paths = scene.GetCamera().xres*scene.GetCamera().yres;
+        double mis_weight  = MaybeMisWeight(nd.sample, r.pdf_dir);
+        Spectral3 sub_path_weight = transmittance * scatter_factor * nd.sample.value;
+        sub_path_weight *= r2_factor*mis_weight / PmfOrPdfValue(nd.sample);
+        sub_path_weight /= num_attempted_paths;
+        RGB color = Color::SpectralSelectionToRGB(sub_path_weight*context.beta, context.lambda_idx);
+        sensor_responses.push_back({r.unit_index, color});
+      }
+      return Spectral3{0.};
+    }
+    else
+    {
+      double mis_weight = MaybeMisWeight(nd.sample, scatter_pdf_wrt_solid_angle);    
+      Spectral3 sub_path_weight = transmittance * scatter_factor * nd.sample.value;
+      sub_path_weight *= r2_factor*mis_weight / PmfOrPdfValue(nd.sample);
+      return sub_path_weight;
+    }
   }
   
 
@@ -535,8 +558,8 @@ public:
   {
     auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
     PathContext context{lambda_selection.first};
+    context.beta *= lambda_selection.second;
     MediumTracker medium_tracker{scene};
-    
     Spectral3 path_sample_values{0.};
     
     RW::Camera start_vertex(scene.GetCamera(), pixel_index, intersector);
@@ -599,6 +622,6 @@ public:
     }
     
     vertex_storage.clear();
-    return Color::SpectralSelectionToRGB(lambda_selection.second*path_sample_values, lambda_selection.first);
+    return Color::SpectralSelectionToRGB(path_sample_values, lambda_selection.first);
   }
 };

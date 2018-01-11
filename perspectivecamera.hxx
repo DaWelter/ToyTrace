@@ -89,6 +89,16 @@ public:
     yperpixel = 2.*b / yres;
 	}
 
+	double PixelPdfWrtSolidAngle(double x, double y) const
+  {
+    double screen_surface_area = xperpixel*yperpixel;
+    Double3 v{x, y, 1.};
+    double  l = Length(v);
+    v *= 1./l;
+    double pdf = TransformPdfFromAreaToSolidAngle(1./screen_surface_area, l, v, Double3{0., 0., 1.});
+    return pdf;
+  }
+	
   virtual PositionSample TakePositionSample(int unit_index, Sampler &sampler, const LightPathContext &context) const override
   {
     PositionSample s{this->pos, Spectral3{1.}, 1.};    
@@ -106,13 +116,34 @@ public:
       1.0);
     Normalize(v);
     Double3 emission_dir = frame.right*v[0] + frame.up*v[1] + frame.dir*v[2];
-    DirectionalSample s{emission_dir, Spectral3{1.}, 1.};
+    double pdf = PixelPdfWrtSolidAngle(v[0], v[1]);
+    DirectionalSample s{emission_dir, Spectral3{pdf}, pdf};
     return s;
   }
   
   virtual void Evaluate(const Double3 &pos_on_this, const Double3 &dir_out, std::vector<Response> &responses, const LightPathContext &context) const override
   {
-    assert(false && "not implemented");
+    ASSERT_NORMALIZED(dir_out);
+    // Oh yeah why didn't I just use a matrix multiply ...
+    double z = Dot(dir_out, frame.dir);
+    double x = Dot(dir_out, frame.right);
+    double y = Dot(dir_out, frame.up);
+    if (z <= 0.)
+      return;
+    x /= z;
+    y /= z;
+    int pix_x = (x-xmin)/xperpixel;
+    int pix_y = (y-ymin)/yperpixel;
+    if (pix_x<0 || pix_x>=xres || pix_y<0 || pix_y>=yres)
+      return;
+    // Units don't overlap. Therefore there can only respond one of them at most.
+    double pdf = PixelPdfWrtSolidAngle(x, y);
+    responses.push_back({
+      PixelToUnit({pix_x, pix_y}),
+      Spectral3{pdf}, // value
+      1., // pdf pos
+      pdf, // pdf dir
+    });
   }
 };
 

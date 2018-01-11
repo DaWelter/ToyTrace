@@ -74,6 +74,15 @@ public:
     }
   }
   
+  void FillInExtraSamples()
+  {
+    for (const auto &smpl :algo.sensor_responses)
+    {
+      buffer.Insert(smpl.first, smpl.second);
+    }
+    algo.sensor_responses.clear();
+  }
+  
 private:
   void SetState(State _state)
   {
@@ -287,6 +296,7 @@ int main(int argc, char *argv[])
     
     while (display.is_open() && samples_per_pixel_per_iteration>0)
     {
+      buffer.AddSampleCount(samples_per_pixel_per_iteration);
       shared_pixel_index.store(0);
       IssueRequest(workers, Worker::REQUEST_GO);
       
@@ -298,6 +308,9 @@ int main(int argc, char *argv[])
         
         IssueRequest(workers, Worker::REQUEST_HALT);
         WaitForWorkers(workers);
+        
+        for (auto &worker : workers)
+          worker->FillInExtraSamples();
         
         int pixel_index = shared_pixel_index.load();
         int y = pixel_index/render_params.width;
@@ -338,6 +351,7 @@ int main(int argc, char *argv[])
 
       while (display.is_open() && samples_per_pixel_per_iteration>0)
       {
+        buffer.AddSampleCount(samples_per_pixel_per_iteration);
         for (int y = 0; y < render_params.height && display.is_open(); ++y)
         {
           for (int x = 0; x < render_params.width; ++x)
@@ -349,6 +363,9 @@ int main(int argc, char *argv[])
               buffer.Insert(pixel_index, smpl);
             }
           }
+          for (const auto &smpl : algo.sensor_responses)
+            buffer.Insert(smpl.first, smpl.second);
+          algo.sensor_responses.clear();
           buffer.ToImage(bm, y, y+1);
           display.show(bm);
         }
@@ -359,6 +376,7 @@ int main(int argc, char *argv[])
     }
     else
     {
+      buffer.AddSampleCount(1);
       int pixel_index = scene.GetCamera().PixelToUnit(
         {render_params.pixel_x, render_params.pixel_y});
       auto smpl = algo.MakePrettyPixel(pixel_index);
