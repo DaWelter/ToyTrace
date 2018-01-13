@@ -18,7 +18,7 @@ if(NOT WIN32)
 endif()
 find_library(ASSIMP_LIBRARY NAMES assimp)
 find_package(GTest REQUIRED)
-find_package(Boost REQUIRED COMPONENTS program_options)
+find_package(Boost REQUIRED COMPONENTS program_options filesystem)
 find_path(CImg_INCLUDE_DIR
   NAMES CImg.h
   PATHS
@@ -45,7 +45,7 @@ link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSI
 
 set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx bsptree.cxx phasefunctions.cxx atmosphere.cxx spectral.cxx primitive.cxx)
 add_executable(toytrace toytrace.cxx ${SOURCES})
-target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE})
+target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE} ${Boost_FILESYSTEM_LIBRARY_RELEASE})
 
 add_executable(tests tests.cxx ${SOURCES})
 add_executable(tests2 tests2.cxx)
@@ -53,7 +53,7 @@ add_executable(tests2 tests2.cxx)
 
 foreach(EXE tests tests2)
   target_include_directories(${EXE} PUBLIC ${GTEST_INCLUDE_DIRS})
-  target_link_libraries(${EXE} ${GTEST_LIBRARIES} pthread)
+  target_link_libraries(${EXE} ${GTEST_LIBRARIES}  ${Boost_FILESYSTEM_LIBRARY_RELEASE} pthread)
 endforeach()
 
 

@@ -8,6 +8,9 @@
 #include <thread>
 #include <memory>
 #include <boost/program_options.hpp>
+#include <boost/filesystem/path.hpp>
+
+namespace fs = boost::filesystem;
 
 class Worker
 {
@@ -200,20 +203,37 @@ void AssignSamplesPerPixel(WorkerSet &workers, int spp)
 }
 
 
-void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file, RenderingParameters &render_params);
+void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs::path &output_file, RenderingParameters &render_params);
 
 
 int main(int argc, char *argv[])
 {
   RenderingParameters render_params;
-  std::string input_file;
+  fs::path input_file;
+  fs::path output_file;
   
-  HandleCommandLineArguments(argc, argv, input_file, render_params);
+  HandleCommandLineArguments(argc, argv, input_file, output_file, render_params);
   
   Scene scene;
   
-  std::cout << "parsing input file " << input_file << std::endl;
-  scene.ParseNFF(input_file.c_str(), &render_params);
+  std::cout << "Parsing input file " << input_file << std::endl;
+  std::cout << "Output to " << output_file << std::endl;
+  if (input_file.string() != "-")
+  {
+    scene.ParseNFF(input_file.c_str(), &render_params);
+  }
+  else
+  {
+//     std::string scene_str;
+//     constexpr std::size_t SZ = 1024;
+//     std::vector<char> data; data.resize(SZ);
+//     while (std::cin)
+//     {
+//       std::cin.read(&data[0], SZ);
+//       scene_str.append(&data[0], std::cin.gcount());
+//     }
+    scene.ParseNFF(std::cin, &render_params);
+  }
   
   if (!scene.HasCamera())
   {
@@ -294,7 +314,7 @@ int main(int argc, char *argv[])
       
       buffer.ToImage(bm, image_conversion_y_start, render_params.height);
       display.show(bm);
-      bm.write("raytrace.jpg");
+      bm.write(output_file.string());
       
       total_samples_per_pixel += samples_per_pixel_per_iteration;
       std::cout << "Iteration finished, spp = " << samples_per_pixel_per_iteration << ", total " << total_samples_per_pixel << std::endl;
@@ -346,7 +366,7 @@ int main(int argc, char *argv[])
       buffer.ToImage(bm, render_params.pixel_y, render_params.pixel_y+1);
       display.show(bm);
     }
-    bm.write("raytrace.jpg");
+    bm.write(output_file.string());
   }
   
   auto end_time = std::chrono::steady_clock::now();
@@ -357,7 +377,7 @@ int main(int argc, char *argv[])
 
 
 
-void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file, RenderingParameters &render_params)
+void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs::path &output_file, RenderingParameters &render_params)
 {
   namespace po = boost::program_options;
   try
@@ -373,7 +393,8 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
       ("rd", po::value<int>(), "Max ray depth")
       ("max-spp", po::value<int>(), "Max samples per pixel")
       ("pt-sample-mode", po::value<std::string>(), "Light sampling: 'bsdf' - bsdf importance sampling, 'lights' - sample lights aka. next event estimation, 'both' - both combined by MIS.")
-      ("input-file", po::value<std::string>(), "Input file");
+      ("output-file", po::value<fs::path>(), "Output file")
+      ("input-file", po::value<fs::path>(), "Input file");
     po::positional_options_description pos_desc;
     pos_desc.add("input-file", -1);
     po::variables_map vm;
@@ -457,9 +478,24 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
     render_params.max_samples_per_pixel = max_spp;
     
     if (vm.count("input-file"))
-      input_file = vm["input-file"].as<std::string>();
+      input_file = vm["input-file"].as<fs::path>();
     else
       throw po::error("Input file is required.");
+    
+    if (vm.count("output-file"))
+      output_file = vm["output-file"].as<fs::path>();
+    else
+    {
+      if (input_file.string() == "-")
+      {
+        throw po::error("Output file must be set when input is from stdin.");
+      }
+      else
+      {
+        output_file = input_file.parent_path() / input_file.stem();
+        output_file += ".jpg";
+      }
+    }
     
     if (vm.count("pt-sample-mode"))
     {
@@ -473,5 +509,6 @@ void HandleCommandLineArguments(int argc, char* argv[], std::string &input_file,
   catch(po::error &ex)
   {
     std::cerr << ex.what() << std::endl;
+    exit(0);
   }
 }

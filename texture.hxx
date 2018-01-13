@@ -4,23 +4,15 @@
 #include"image.hxx"
 #include"vec3f.hxx"
 #include"spectral.hxx"
+#include <boost/filesystem/path.hpp>
 
 class Texture
 {
 	Image bm;
 public:
-  Texture(const std::string &filename)
+  Texture(const boost::filesystem::path &filename)
   {
-    bm.Read(filename);
-    /*
-        ubyte r,g,b;
-        for(int x=0; x<bm.width(); x++)
-        for(int y=0; y<bm.height(); y++)
-        {
-          bm.getpixel(x,y,r,g,b);
-          std::cout<<"bm["<<x<<","<<y<<"] = "<<r<<" "<<g<<" "<<b<<std::endl;
-        }
-    */
+    bm.Read(filename.string());
   }
 
   RGB GetTexel(double u, double v) const

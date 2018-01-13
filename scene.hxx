@@ -8,6 +8,9 @@
 
 #include <memory>
 
+namespace boost { namespace filesystem {
+  class path;
+}};
 
 struct RenderingParameters
 {
@@ -51,8 +54,9 @@ public:
   {
   }
 
-  void ParseNFF(const std::string &filename, RenderingParameters *render_params = nullptr);
+  void ParseNFF(const boost::filesystem::path &filename, RenderingParameters *render_params = nullptr);
   void ParseNFFString(const std::string &scenestr, RenderingParameters *render_params = nullptr);
+  void ParseNFF(std::istream &is, RenderingParameters *render_params = nullptr);
   
   template<class CameraType, class... Args>
   void SetCamera(Args&&... args)

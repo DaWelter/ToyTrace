@@ -9,7 +9,6 @@
 
 #define LINESIZE 1000
 
-#include <libgen.h> // unix specific. Need for dirname.
 #include <vector>
 #include <cstdio>
 #include <iostream>
@@ -20,7 +19,10 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 
+#include <boost/filesystem/path.hpp>
+
 using namespace RadianceOrImportance;
+namespace fs = boost::filesystem;
 
 // TODO: Rename this
 template<class Thing>
@@ -77,8 +79,8 @@ class NFFParser
   CurrentThing<Medium> mediums;
   CurrentThing<AreaEmitter> areaemitters;
   Eigen::Transform<double,3,Eigen::Affine> currentTransform;
-  std::string directory;
-  std::string filename;
+  fs::path    directory;
+  fs::path    filename;
   std::string line;
   bool        line_stream_state;
   std::string peek_line;
@@ -92,7 +94,7 @@ public:
       Scene* _scene,
       RenderingParameters *_render_params,
       std::istream &_is,
-      const std::string &_path_hint)
+      const fs::path &_path_hint)
       :
     scene(_scene),
     shaders("Shader", "invisible", new InvisibleShader()),
@@ -107,10 +109,7 @@ public:
     currentTransform = decltype(currentTransform)::Identity();
     if (!filename.empty())
     {
-      auto *dirnamec_storage = strdup(filename.c_str()); // modifies its argument.
-      auto *dirnamec = ::dirname(dirnamec_storage);
-      directory.assign(dirnamec);
-      free(dirnamec_storage);
+      directory = filename.parent_path();
     }
     line_stream_state = true;
     peek_stream_state = (bool)std::getline(input, peek_line);
@@ -122,7 +121,7 @@ private:
 
   bool NextLine();
   std::runtime_error MakeException(const std::string &msg);
-  std::string MakeFullPath(const std::string &filename) const;
+  fs::path MakeFullPath(const std::string &filename) const;
 
   void AssignCurrentMaterialParams(Primitive &primitive);
   Double3 ApplyTransform(const Double3 &p) const;
@@ -154,10 +153,10 @@ void NFFParser::AssignCurrentMaterialParams(Primitive& primitive)
 }
 
 
-std::string NFFParser::MakeFullPath(const std::string &filename) const
+fs::path NFFParser::MakeFullPath(const std::string &filename) const
 {
   // Assuming we get a relative path as input.
-  std::string fullpath = directory + (directory.empty() ? "" : "/") + filename;
+  fs::path fullpath = directory / filename;
   return fullpath;
 }
 
@@ -995,9 +994,9 @@ void NFFParser::ParseMesh(const char* filename)
 }
 
 
-void Scene::ParseNFF(const std::string &filename, RenderingParameters *render_params)
+void Scene::ParseNFF(const fs::path &filename, RenderingParameters *render_params)
 {
-  std::ifstream is(filename);
+  std::ifstream is(filename.string());
   if (!is.good())
   {
     throw std::runtime_error(strconcat("Could not open input file", filename));
@@ -1009,5 +1008,11 @@ void Scene::ParseNFF(const std::string &filename, RenderingParameters *render_pa
 void Scene::ParseNFFString(const std::string &scenestr, RenderingParameters *render_params)
 {
   std::istringstream is(scenestr);
+  NFFParser(this, render_params, is, std::string()).Parse();
+}
+
+
+void Scene::ParseNFF(std::istream &is, RenderingParameters *render_params)
+{
   NFFParser(this, render_params, is, std::string()).Parse();
 }
