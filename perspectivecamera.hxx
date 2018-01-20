@@ -163,7 +163,7 @@ public:
     }
     else
     {
-      return DirectionalSample{frame.dir, Spectral3{1.}, 1.0};
+      return DirectionalSample{frame.dir, Spectral3{0.}, 1.0};
     }
   }
   
