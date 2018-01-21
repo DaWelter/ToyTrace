@@ -12,6 +12,11 @@ public:
   Box() 
   { Clear(); };
   
+  inline Double3 Center() const
+  {
+    return 0.5*(min+max);
+  }
+  
   void Extend(Double3 a)
   { min = a.cwiseMin(min); max = a.cwiseMax(max); };
   

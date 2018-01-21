@@ -40,8 +40,7 @@ inline void impl(std::stringstream &ss, const T& x, Args&& ... args)
 
 }
 
-/* A simple, safe, replacement for sprintf with automatic memory management.
-   I will probably implement this for String, too.
+/* A simple, safe replacement for sprintf with automatic memory management.
 */
 template<class ... Args>
 inline std::string strconcat(Args&& ...args)
@@ -50,6 +49,71 @@ inline std::string strconcat(Args&& ...args)
   strconcat_internal::impl(ss, args...);
   return ss.str();
 }
+
+
+
+namespace strformat_internal
+{
+
+namespace
+{
+
+// The compiler complains that this function is not used. But it really is or else my 
+// strformat would not compile at all because the compile time(!) recursion could not be terminated.
+#pragma GCC diagnostic ignored "-Wunused-function"  // GCC does not even care ...
+  
+// Terminate recursion. All arguments were sunk.
+void impl(std::stringstream &ss, const std::string &format, int start)
+{
+  auto pos = format.find('%', start);
+  
+  if (pos != std::string::npos)
+    throw std::invalid_argument("Too few arguments for strformat");
+  
+  ss << format.substr(start, format.size()-start);
+}
+
+#pragma GCC diagnostic pop // Restore command line options.
+
+
+template<class T, class ... Args>
+void impl(std::stringstream &ss, const std::string &format, int start, const T& x, Args&& ... args)
+{
+  // Note: "for a non-empty substring, if pos >= size(), the function always returns npos."
+  // Ref: http://en.cppreference.com/w/cpp/string/basic_string/find
+  auto pos = format.find('%', start);
+  
+  if (pos == std::string::npos)
+    throw std::invalid_argument("Too many arguments for strformat");
+  
+  ss << format.substr(start, pos-start);
+  
+  if (pos < format.size()-1 && format[pos+1]=='%') // Escaped %% 
+  {
+    ss << '%';
+    impl(ss, format, pos+2, x, args...);
+    return;
+  }      
+  
+  ss << x;
+  
+  impl(ss, format, pos+1, args...);
+}
+
+}
+  
+};
+
+
+template<class ... Args>
+inline std::string strformat(const std::string &format, Args&& ...args)
+{
+  std::stringstream ss;
+  strformat_internal::impl(ss, format, 0, args...);
+  return ss.str();
+}
+
+
 
 
 inline bool startswith(const std::string &a, const std::string &b)

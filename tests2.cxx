@@ -7,6 +7,7 @@
 #include "gtest/gtest.h"
 #include "spectral.hxx"
 #include "vec3f.hxx"
+#include "util.hxx"
 
 struct Stuff
 {
@@ -240,6 +241,14 @@ TEST(Boost, Variant)
   std::cout << test << std::endl;
 }
 
+
+TEST(StrFormat, Test)
+{
+  EXPECT_EQ(strformat("a%b%c", 1, 2), "a1b2c");
+  EXPECT_EQ(strformat("%%%", 1), "%1");
+  EXPECT_EQ(strformat("nothing"), "nothing");
+  EXPECT_EQ(strformat("%bar%", "foo", "baz"), "foobarbaz");
+}
 
 
 int main(int argc, char **argv) {

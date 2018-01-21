@@ -16,11 +16,9 @@
 #include "sphere.hxx"
 #include "triangle.hxx"
 #include "atmosphere.hxx"
+#include "util.hxx"
 
-
-
-
-
+#include <boost/filesystem.hpp>
 
 // Throw a one with probability p and zero with probability 1-p.
 // Let this be reflected by random variable X \in {0, 1}.
@@ -1007,20 +1005,101 @@ TEST_F(PerspectiveCameraTesting, Sampling1)
 }
 
 
-// class SimpleRenderTests : public testing::Test
-// {
-// protected:
-//   Scene scene;
-//   void SetCameraSimple(double z_distance, double fov, int xres, int yres)
-//   {
-//     scene.SetCamera<PerspectiveCamera>(
-//       Double3{0., 0., z_distance},
-//       Double3{0., 0., 1.},
-//       Double3{0., 1., 0.},
-//       fov,
-//       xres, yres);
-//   }
-// };
+namespace 
+{
+  
+void CheckSceneParsedWithScopes(const Scene &scene)
+{
+  auto Getter = [&scene](int i) -> auto 
+  { 
+    return scene.GetPrimitive(i).CalcBounds().Center();
+  };
+  ASSERT_EQ(scene.GetNumPrimitives(), 4);
+  std::array<Double3,4> c{ 
+    Getter(0),
+    Getter(1),
+    Getter(2),
+    Getter(3)
+  };
+  // Checking the coordinates for correct application of the transform statements.
+  ASSERT_NEAR(c[0][0], 1., 1.e-3);
+  ASSERT_NEAR(c[1][0], 5., 1.e-3);
+  ASSERT_NEAR(c[2][0], 8.+11., 1.e-3); // Using the child scope transform.
+  ASSERT_NEAR(c[3][0], 14.+5., 1.e-3); // Using the parent scope transform.
+  ASSERT_EQ(scene.GetPrimitive(3).shader, scene.GetPrimitive(1).shader); // Shaders don't persist beyond scopes.
+  ASSERT_NE(scene.GetPrimitive(2).shader, scene.GetPrimitive(1).shader); // Shader within the scope was actually created and assigned.
+  ASSERT_NE(scene.GetPrimitive(2).shader, scene.GetPrimitive(0).shader); // Shader within the scope is not the default.
+  ASSERT_NE(scene.GetPrimitive(2).shader, nullptr); // And ofc it should not be null.
+}
+  
+}
+
+
+TEST(Parser, Scopes)
+{
+  const char* scenestr = R"""(
+s 1 2 3 0.5
+transform 5 6 7
+diffuse themat 1 1 1 0.9
+s 0 0 0 0.5
+{
+transform 8 9 10
+diffuse themat 1 1 1 0.3
+s 11 12 13 0.5
+}
+s 14 15 16 0.5
+)""";
+  Scene scene;
+  scene.ParseNFFString(scenestr);
+  CheckSceneParsedWithScopes(scene);
+}
+
+
+TEST(Parser, ScopesAndIncludes)
+{
+  namespace fs = boost::filesystem;
+  auto path1 = fs::temp_directory_path() / fs::unique_path("scene1-%%%%-%%%%-%%%%-%%%%.nff");
+  std::cout << "scenepath1: " << path1.string() << std::endl;
+  const char* scenestr1 = R"""(
+transform 5 6 7
+diffuse themat 1 1 1 0.9
+s 0 0 0 0.5
+)""";
+  {
+    std::ofstream os(path1.string());
+    os.write(scenestr1, strlen(scenestr1));
+  }
+  const char* scenestr2 = R"""(
+transform 8 9 10
+diffuse themat 1 1 1 0.3
+s 11 12 13 0.5
+)""";
+  auto path2 = fs::unique_path("scene2-%%%%-%%%%-%%%%-%%%%.nff"); // Relative filepath.
+  auto path2_full = fs::temp_directory_path() / path2;
+  std::cout << "scenepath2: " << path2.string() << std::endl;
+  {
+    std::ofstream os(path2_full.string());
+    os.write(scenestr2, strlen(scenestr2));
+  }
+  const char* scenestr_fmt = R"""(
+s 1 2 3 0.5
+include %
+{
+include %
+}
+s 14 15 16 0.5
+)""";
+  auto path3 = fs::temp_directory_path() / fs::unique_path("scene3-%%%%-%%%%-%%%%-%%%%.nff");
+  std::string scenestr = strformat(scenestr_fmt, path1.string(), path2.string());
+  {
+    std::ofstream os(path3.string());
+    os.write(scenestr.c_str(), scenestr.size());
+  }  
+  Scene scene;
+  scene.ParseNFF(path3);
+  CheckSceneParsedWithScopes(scene);
+}
+
 
 
 TEST(Parser, ImportDAE)
@@ -1060,7 +1139,7 @@ up 0 1 0
 resolution 128 128
 angle 50
 
-l   0 0.75 0  255 255 255
+l 0 0.75 0  1 1 1 1
 
 diffuse white  1 1 1 0.5
 diffuse red    1 0 0 0.5

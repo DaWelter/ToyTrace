@@ -24,15 +24,22 @@
 using namespace RadianceOrImportance;
 namespace fs = boost::filesystem;
 
+
+inline Double3 TransformNormal(const Eigen::Transform<double,3,Eigen::Affine> &trafo, const Double3 &v)
+{
+  return trafo.linear().inverse().transpose() * v;
+}
+
+
 // TODO: Rename this
 template<class Thing>
-class CurrentThing
+class SymbolTable
 {
   Thing* currentThing;
   std::unordered_map<std::string, Thing*> things;
   std::string name;
 public:
-  CurrentThing(const std::string &_name, const std::string &default_name, Thing* default_thing) :
+  SymbolTable(const std::string &_name, const std::string &default_name, Thing* default_thing) :
     currentThing(default_thing), name(_name)
   {
     things[default_name] = default_thing;
@@ -72,13 +79,31 @@ public:
 
 
 
+struct Scope
+{
+  SymbolTable<Shader> shaders;
+  SymbolTable<Medium> mediums;
+  SymbolTable<AreaEmitter> areaemitters;
+  Eigen::Transform<double,3,Eigen::Affine> currentTransform;
+
+  Scope() :
+    shaders("Shader", "invisible", new InvisibleShader()),
+    mediums("Medium", "default", new VacuumMedium()),
+    areaemitters("AreaEmitter", "none", nullptr),
+    currentTransform(decltype(currentTransform)::Identity())
+  {
+    shaders.set_and_activate("default", new DiffuseShader(Color::RGBToSpectrum({0.8_rgb, 0.8_rgb, 0.8_rgb}), nullptr));
+  }
+};
+
+
+
+
+
 class NFFParser
 {
   Scene* scene;
-  CurrentThing<Shader> shaders;
-  CurrentThing<Medium> mediums;
-  CurrentThing<AreaEmitter> areaemitters;
-  Eigen::Transform<double,3,Eigen::Affine> currentTransform;
+  RenderingParameters *render_params;
   fs::path    directory;
   fs::path    filename;
   std::string line;
@@ -87,26 +112,19 @@ class NFFParser
   bool        peek_stream_state;
   std::istream &input;
   int lineno;
-  RenderingParameters *render_params;
   friend class AssimpReader;
 public:
   NFFParser(
       Scene* _scene,
       RenderingParameters *_render_params,
       std::istream &_is,
-      const fs::path &_path_hint)
-      :
+      const fs::path &_path_hint) :
     scene(_scene),
-    shaders("Shader", "invisible", new InvisibleShader()),
-    mediums("Medium", "default", new VacuumMedium()),
-    areaemitters("AreaEmitter", "none", nullptr),
     filename(_path_hint),
     input{_is},
     lineno{0},
     render_params(_render_params)
   {
-    shaders.set_and_activate("default", new DiffuseShader(Color::RGBToSpectrum({0.8_rgb, 0.8_rgb, 0.8_rgb}), nullptr));
-    currentTransform = decltype(currentTransform)::Identity();
     if (!filename.empty())
     {
       directory = filename.parent_path();
@@ -115,49 +133,35 @@ public:
     peek_stream_state = (bool)std::getline(input, peek_line);
   }
 
-  void Parse();
+  void Parse(Scope &scope);
 private:
-  void ParseMesh(const char *filename);
+  void ParseMesh(const char *filename, Scope &scope);
 
   bool NextLine();
   std::runtime_error MakeException(const std::string &msg);
-  fs::path MakeFullPath(const std::string &filename) const;
-
-  void AssignCurrentMaterialParams(Primitive &primitive);
-  Double3 ApplyTransform(const Double3 &p) const;
-  Double3 ApplyTransformNormal(const Double3 &v) const;
+  fs::path MakeFullPath(const fs::path &filename) const;
+  void AssignCurrentMaterialParams(Primitive &primitive, const Scope &scope);
 };
 
 
-Double3 NFFParser::ApplyTransform(const Double3 &p) const
+void NFFParser::AssignCurrentMaterialParams(Primitive& primitive, const Scope &scope)
 {
-  return currentTransform * p;
-}
-
-
-Double3 NFFParser::ApplyTransformNormal(const Double3 &v) const
-{
-  return Normalized(currentTransform.linear().inverse().transpose() * v);
-}
-
-
-void NFFParser::AssignCurrentMaterialParams(Primitive& primitive)
-{
-  primitive.shader = shaders();
-  primitive.medium = mediums();
+  primitive.shader = scope.shaders();
+  primitive.medium = scope.mediums();
   assert(primitive.shader && primitive.medium);
-  if (areaemitters())
+  if (scope.areaemitters())
   {
-    scene->MakePrimitiveEmissive(primitive, *areaemitters());
+    scene->MakePrimitiveEmissive(primitive, *scope.areaemitters());
   }
 }
 
 
-fs::path NFFParser::MakeFullPath(const std::string &filename) const
+fs::path NFFParser::MakeFullPath(const fs::path &filename) const
 {
-  // Assuming we get a relative path as input.
-  fs::path fullpath = directory / filename;
-  return fullpath;
+  if (filename.is_relative()) // Look in the directory of the parent file.
+    return directory / filename;
+  else
+    return filename;
 }
 
 
@@ -181,18 +185,8 @@ bool NFFParser::NextLine()
 }
 
 
-//void NFFParser::Parse(const std::string &_filename)
-//{
-//  filename = _filename;
-//  std::ifstream is(filename);
-//  if (!is.good())
-//  {
-//    throw std::runtime_error(strconcat("Could not open input file", filename));
-//  }
-//}
 
-
-void NFFParser::Parse()
+void NFFParser::Parse(Scope &scope)
 {
   char token[LINESIZE+1];
   while (NextLine())
@@ -208,16 +202,18 @@ void NFFParser::Parse()
     if (numtokens <= 0) // empty line, except for whitespaces
       continue; 
     
-    if (!strcmp(token,"begin_hierarchy")) {
-      // Accepted for legacy reasons
+    
+    if (!strcmp(token,"{")) {
+      Scope child{scope};
+      Parse(child);
       continue;
     }
 
     
-    if (!strcmp(token,"end_hierarchy")) {
-      // Accepted for legacy reasons
-      continue;
+    if (!strcmp(token,"}")) {
+      break;
     }
+    
     
     if (!strcmp(token, "transform"))
     {
@@ -228,7 +224,7 @@ void NFFParser::Parse()
       else if (n == 0) n = -1; // Failure.
       if (n !=0 && n != 3 && n != 6 && n != 9)
         throw std::runtime_error(strconcat("error in ", filename, " : ", line));
-      decltype(currentTransform) trafo;
+      decltype(scope.currentTransform) trafo;
       if (n == 0)
       {
         trafo = decltype(trafo)::Identity();
@@ -249,8 +245,8 @@ void NFFParser::Parse()
           trafo = trafo * Eigen::Scaling(s);
         }
       }
-      currentTransform = trafo;
-      std::cout << "Transform: t=\n" << currentTransform.translation() << "\nr=\n" << currentTransform.linear() << std::endl;
+      scope.currentTransform = trafo;
+      std::cout << "Transform: t=\n" << scope.currentTransform.translation() << "\nr=\n" << scope.currentTransform.linear() << std::endl;
       continue;
     }
     
@@ -334,8 +330,9 @@ void NFFParser::Parse()
       int n = sscanf(line.c_str(),"s %lg %lg %lg %lg",&pos[0],&pos[1],&pos[2],&rad);
       if (n == 4)
       {
+          pos = scope.currentTransform*pos;
           AssignCurrentMaterialParams(
-            scene->AddPrimitive<Sphere>(pos,rad));
+            scene->AddPrimitive<Sphere>(pos,rad), scope);
       }
       else throw MakeException("Error");
       continue;
@@ -358,8 +355,8 @@ void NFFParser::Parse()
         &normal[i][0],&normal[i][1],&normal[i][2],
         &uv[i][0],&uv[i][1],&uv[i][2]) < 9)
         throw MakeException("Error reading TexturedSmoothTriangle");
-      vertex[i] = ApplyTransform(vertex[i]);
-      normal[i] = ApplyTransformNormal(normal[i]);
+      vertex[i] = scope.currentTransform * vertex[i];
+      normal[i] = TransformNormal(scope.currentTransform, normal[i]);
 		}
 
     for (int i=2;i<vertices;i++) {
@@ -373,7 +370,7 @@ void NFFParser::Parse()
             normal[i],
             uv[0],
             uv[i-1],
-            uv[i]));
+            uv[i]), scope);
 		}
 		delete[] vertex;
 		delete[] normal;
@@ -393,7 +390,7 @@ void NFFParser::Parse()
       if (!NextLine() ||
           sscanf(line.c_str(),"%lg %lg %lg\n",&vertex[i][0],&vertex[i][1],&vertex[i][2]) < 3)
         throw MakeException("Error reading Triangle");
-      vertex[i] = ApplyTransform(vertex[i]);
+      vertex[i] = scope.currentTransform*vertex[i];
 		}
 
     for (int i=2;i<vertices;i++) {
@@ -401,7 +398,7 @@ void NFFParser::Parse()
         scene->AddPrimitive<Triangle>(
           vertex[0],
 					vertex[i-1],
-					vertex[i]));
+					vertex[i]), scope);
 			}
 		delete[] vertex;
 		continue;
@@ -414,7 +411,7 @@ void NFFParser::Parse()
       int num = std::sscanf(line.c_str(), "shader %s\n", name);
       if(num==1)
       {
-        shaders.activate(name);
+        scope.shaders.activate(name);
       }
       else throw MakeException("shader directive needs name of the shader.");
       continue;
@@ -442,7 +439,7 @@ void NFFParser::Parse()
           }
           else throw MakeException("Error");
         }
-        shaders.set_and_activate(name, 
+        scope.shaders.set_and_activate(name, 
           new DiffuseShader(
             Color::RGBToSpectrum(kd * rgb), 
             std::move(diffuse_texture)));
@@ -459,7 +456,7 @@ void NFFParser::Parse()
       int num = std::sscanf(line.c_str(),"specularreflective %s %lg %lg %lg %lg\n",name, &rgb[0],&rgb[1],&rgb[2],&k);
       if (num == 5)
       {
-        shaders.set_and_activate(name, 
+        scope.shaders.set_and_activate(name, 
           new SpecularReflectiveShader(
             Color::RGBToSpectrum(k * rgb)
           ));
@@ -495,7 +492,7 @@ void NFFParser::Parse()
           }
           else break;
         }
-        shaders.set_and_activate(name, new MicrofacetShader(
+        scope.shaders.set_and_activate(name, new MicrofacetShader(
           Color::RGBToSpectrum(k*ks_rgb),
           std::move(glossy_texture), 
           phong_exponent
@@ -506,60 +503,66 @@ void NFFParser::Parse()
     }
     
     
-    if (!strcmp(token, "medium"))
+    auto MaybeReadPF = [this]() -> std::unique_ptr<PhaseFunctions::PhaseFunction>
     {
-      RGB sigma_s{0._rgb}, sigma_a{1._rgb};
-      char name[LINESIZE];
-      int num = std::sscanf(line.c_str(), "medium %s %lg %lg %lg %lg %lg %lg\n", name, &sigma_s[0], &sigma_s[1], &sigma_s[2], &sigma_a[0], &sigma_a[1], &sigma_a[2]);
-      if(num == 1)
+      if (startswith(this->peek_line, "pf "))
       {
-        mediums.activate(name);
-      }
-      else if(num == 7)
-      {
-        auto *medium = new HomogeneousMedium(
-          Color::RGBToSpectrum(sigma_s), 
-          Color::RGBToSpectrum(sigma_a), 
-          mediums.size());
-        mediums.set_and_activate(
-          name, medium);
-      }
-      else throw MakeException("Error");
-      continue;
-    }
-  
-
-    if (!strcmp(token, "pf"))
-    {
-      if (auto* medium = dynamic_cast<HomogeneousMedium*>(mediums()))
-      {
+        this->NextLine();
         double g;
         char name[LINESIZE];
-        int num = std::sscanf(line.c_str(),"pf %s %lg\n",name, &g);
+        int num = std::sscanf(this->line.c_str(),"pf %s %lg\n",name, &g);
         if (num > 0)
         {
           if (!strcmp(name, "rayleigh"))
           {
-            medium->phasefunction.reset(new PhaseFunctions::Rayleigh());
+            return std::make_unique<PhaseFunctions::Rayleigh>();
           }
           else if (!strcmp(name, "henleygreenstein") && num>1)
           {
-            medium->phasefunction.reset(new PhaseFunctions::HenleyGreenstein(g));
-          }
-          else
-          {
-            throw MakeException("Error");
+            return std::make_unique<PhaseFunctions::HenleyGreenstein>(g);
           }
         }
-        else
-        {
-          medium->phasefunction.reset(new PhaseFunctions::Uniform());
-        }
+        throw MakeException("Error");
       }
       else
+        return std::unique_ptr<PhaseFunctions::PhaseFunction>{nullptr};
+    };
+    
+    
+    if (!strcmp(token, "medium"))
+    {
+      RGBScalar buffer[6];
+      char name[LINESIZE];
+      int num = std::sscanf(line.c_str(), "medium %s %lg %lg %lg %lg %lg %lg\n", name, &buffer[0], &buffer[1], &buffer[2], &buffer[3], &buffer[4], &buffer[5]);
+      if(num == 1)
       {
-        throw MakeException("Warning: Phasefunction definition only admissible following a HomogeneousMedium definition.");
+        scope.mediums.activate(name);
       }
+      else if(num == 3)
+      {
+        auto *medium = new MonochromaticHomogeneousMedium(
+          value(buffer[0]), 
+          value(buffer[1]), 
+          scope.mediums.size());
+        auto pf = MaybeReadPF();
+        if (pf)
+          medium->phasefunction = std::move(pf);
+        scope.mediums.set_and_activate(
+          name, medium);
+      }
+      else if(num == 7)
+      {
+        auto *medium = new HomogeneousMedium(
+          Color::RGBToSpectrum({buffer[0], buffer[1], buffer[2]}),
+          Color::RGBToSpectrum({buffer[3], buffer[4], buffer[5]}), 
+          scope.mediums.size());
+        auto pf = MaybeReadPF();
+        if (pf)
+          medium->phasefunction = std::move(pf);
+        scope.mediums.set_and_activate(
+          name, medium);
+      }
+      else throw MakeException("Error");
       continue;
     }
 
@@ -572,12 +575,12 @@ void NFFParser::Parse()
       int num = std::sscanf(line.c_str(), "simpleatmosphere %s %lg %lg %lg %lg\n", name, &planet_center[0], &planet_center[1], &planet_center[2], &radius);
       if (num==1)
       {
-        mediums.activate(name);
+        scope.mediums.activate(name);
       }
       else if(num == 5)
       {
-        auto medium = Atmosphere::MakeSimple(planet_center, radius, mediums.size());
-        mediums.set_and_activate(
+        auto medium = Atmosphere::MakeSimple(planet_center, radius, scope.mediums.size());
+        scope.mediums.set_and_activate(
           name, medium.release());
       }
       else
@@ -596,12 +599,12 @@ void NFFParser::Parse()
       int num = std::sscanf(line.c_str(), "tabulatedatmosphere %s %lg %lg %lg %lg %s\n", name, &planet_center[0], &planet_center[1], &planet_center[2], &radius, datafile);
       if (num==1)
       {
-        mediums.activate(name);
+        scope.mediums.activate(name);
       }
       else if(num == 6)
       {
-        auto medium = Atmosphere::MakeTabulated(planet_center, radius, datafile, mediums.size());
-        mediums.set_and_activate(
+        auto medium = Atmosphere::MakeTabulated(planet_center, radius, datafile, scope.mediums.size());
+        scope.mediums.set_and_activate(
           name, medium.release());
       }
       else
@@ -691,7 +694,7 @@ void NFFParser::Parse()
     int num = std::sscanf(line.c_str(), "larea %s %s", name, type);
     if (num == 1)
     {
-      areaemitters.activate(name);
+      scope.areaemitters.activate(name);
     }
     else if (num == 2)
     {
@@ -704,7 +707,7 @@ void NFFParser::Parse()
                               name, &col[0], &col[1], &col[2], &area_power_density);
         if (num == 5)
         {
-          areaemitters.set_and_activate(
+          scope.areaemitters.set_and_activate(
             name, 
             new UniformAreaLight(area_power_density*Color::RGBToSpectrum(col))
           );
@@ -780,7 +783,13 @@ void NFFParser::Parse()
     {
       auto fullpath = MakeFullPath(name);
       std::cout << "including file " << fullpath << std::endl;
-      scene->ParseNFF(fullpath, render_params);
+      std::ifstream is(fullpath.string());
+      if (!is.good())
+      {
+        throw std::runtime_error(strconcat("Could not open input file", fullpath));
+      }
+      // Using this scope.
+      NFFParser(scene, render_params, is, fullpath).Parse(scope);
     }
     continue;
   }
@@ -793,7 +802,7 @@ void NFFParser::Parse()
     if (num == 1)
     {
       auto fullpath = MakeFullPath(meshfile);
-      ParseMesh(fullpath.c_str());
+      ParseMesh(fullpath.c_str(), scope);
     }
     else
     {
@@ -819,12 +828,17 @@ class AssimpReader
     aiMatrix4x4 local_to_world;
   };
 public:
-  void Read(const char *filename, NFFParser* parser, Scene *scene)
+  AssimpReader(NFFParser &parser, Scope &scope)
+    : scene{*parser.scene},
+      parser{parser},
+      scope{scope}
+  {
+  }
+  
+  void Read(const char *filename)
   {
     std::printf("Reading Mesh: %s\n", filename);
     this->aiscene = aiImportFile(filename, 0);
-    this->scene = scene;
-    this->parser = parser;
     
     if (!aiscene)
     {
@@ -892,9 +906,9 @@ private:
     for (int i=0; i<mesh->mNumVertices; ++i)
     {
       vertices.push_back(
-            parser->ApplyTransform(
-              aiVector3_to_myvector(
-                m*mesh->mVertices[i])));
+            scope.currentTransform *
+              aiVector3_to_myvector(m*mesh->mVertices[i]));
+      assert(vertices.back().allFinite());
     }
 
     std::vector<Double3> normals; normals.reserve(1024);
@@ -903,9 +917,9 @@ private:
       for (int i=0; i<mesh->mNumVertices; ++i)
       {
         normals.push_back(
-              parser->ApplyTransformNormal(
-                aiVector3_to_myvector(
-                  m_linear*mesh->mNormals[i])));
+          TransformNormal(scope.currentTransform,
+            aiVector3_to_myvector(m_linear*mesh->mNormals[i])));
+        assert(normals.back().allFinite());
       }
     }
     std::vector<Double3> uvs; uvs.reserve(1024);
@@ -916,6 +930,7 @@ private:
         uvs.push_back(
               aiVector3_to_myvector(
                 mesh->mTextureCoords[0][i]));
+        assert(uvs.back().allFinite());
       }
     }
 
@@ -944,18 +959,18 @@ private:
           uv[1] = uvs[b];
           uv[2] = uvs[c];
         }
-        parser->AssignCurrentMaterialParams(
-          scene->AddPrimitive<TexturedSmoothTriangle>(
+        parser.AssignCurrentMaterialParams(
+          scene.AddPrimitive<TexturedSmoothTriangle>(
             vertices[a], vertices[b], vertices[c],
             no[0], no[1], no[2],
             uv[0], uv[1], uv[2]
-         ));
+         ), scope);
       }
       else
       {
-        parser->AssignCurrentMaterialParams(
-          scene->AddPrimitive<Triangle>(
-              vertices[a], vertices[b], vertices[c]));
+        parser.AssignCurrentMaterialParams(
+          scene.AddPrimitive<Triangle>(
+              vertices[a], vertices[b], vertices[c]), scope);
       }
     }
   }
@@ -973,13 +988,14 @@ private:
     mat->Get(AI_MATKEY_NAME,ainame);
     auto name = std::string(ainame.C_Str());
     if (name != "DefaultMaterial")
-      parser->shaders.activate(name);
+      scope.shaders.activate(name);
   }
 
 private:
   const aiScene *aiscene = { nullptr };
-  Scene* scene = { nullptr };
-  NFFParser *parser = {nullptr};
+  Scene &scene;
+  NFFParser &parser;
+  Scope &scope;
 
   inline Double3 aiVector3_to_myvector(const aiVector3D &v)
   {
@@ -988,9 +1004,9 @@ private:
 };
 
 
-void NFFParser::ParseMesh(const char* filename)
+void NFFParser::ParseMesh(const char* filename, Scope &scope)
 {
-  AssimpReader().Read(filename, this, scene);
+  AssimpReader(*this, scope).Read(filename);
 }
 
 
@@ -1001,18 +1017,20 @@ void Scene::ParseNFF(const fs::path &filename, RenderingParameters *render_param
   {
     throw std::runtime_error(strconcat("Could not open input file", filename));
   }
-  NFFParser(this, render_params, is, filename).Parse();
+  Scope scope;
+  NFFParser(this, render_params, is, filename).Parse(scope);
 }
 
 
 void Scene::ParseNFFString(const std::string &scenestr, RenderingParameters *render_params)
 {
   std::istringstream is(scenestr);
-  NFFParser(this, render_params, is, std::string()).Parse();
+  ParseNFF(is, render_params);
 }
 
 
 void Scene::ParseNFF(std::istream &is, RenderingParameters *render_params)
 {
-  NFFParser(this, render_params, is, std::string()).Parse();
+  Scope scope;
+  NFFParser(this, render_params, is, std::string()).Parse(scope);
 }
