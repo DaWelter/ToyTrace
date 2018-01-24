@@ -1,4 +1,6 @@
 #include <iostream>
+#include <typeinfo>
+
 #include <boost/serialization/strong_typedef.hpp>
 #include <boost/pool/simple_segregated_storage.hpp>
 #include <boost/variant.hpp>
@@ -77,6 +79,100 @@ TEST(BasicAssumptions, NewMax)
 {
   constexpr int a = std::max({1, 2, 3, 4, 3, 2, 1});
   static_assert(a == 4, "Must be the maximum");
+}
+
+
+template<class Derived1, class Derived2>
+inline auto TestExpression( const Eigen::MatrixBase<Derived1>& u, const Eigen::MatrixBase<Derived2> &v )
+{
+  return (u.array()*v.array()).matrix();
+}
+
+// Because auto does not work well with expression templates.
+// See https://eigen.tuxfamily.org/dox/TopicPitfalls.html
+
+// These tests can identify an returned expression structure by
+// clearing the memory of the arguments before the expression is
+// evaluated!
+#define UGLY_EXPR_TEST_BINARY_VEC_RETURN(func, x0, x1, y0, y1) \
+  Double3 a{x0, x1, 0}, b{y0, y1, 0}; \
+  auto d = func(a, b);  \
+  a = Double3{0}; \
+  b = Double3{0}; \
+  Double3 result{d};
+  
+#define UGLY_EXPR_TEST_BINARY_DOUBLE_RETURN(func, x0, x1, y0, y1) \
+  Double3 a{x0, x1, 0}, b{y0, y1, 0}; \
+  auto d = func(a, b);  \
+  a = Double3{0}; \
+  b = Double3{0}; \
+  double result = d;
+
+#define UGLY_EXPR_TEST_UNARY_DOUBLE_RETURN(func, x0, x1) \
+  Double3 a{x0, x1, 0}; \
+  auto d = func(a);  \
+  a = Double3{0}; \
+  double result = d;
+
+#define UGLY_EXPR_TEST_UNARY_VEC_RETURN(func, x0, x1) \
+  Double3 a{x0, x1, 0}; \
+  auto d = func(a);  \
+  a = Double3{0}; \
+  Double3 result{d};
+  
+ 
+TEST(BasicAssumptions, ExpressionTemplates1)
+{
+  UGLY_EXPR_TEST_BINARY_VEC_RETURN(TestExpression, 1, 0, 1, 0)
+  ASSERT_NEAR(result[0], 0., 1.e-3);
+}
+
+
+TEST(BasicAssumptions, ExpressionTemplates2)
+{
+  UGLY_EXPR_TEST_BINARY_VEC_RETURN(Cross, 1, 0, 0, 1)
+  ASSERT_NEAR(result[2], 1., 1.e-3);
+}
+
+
+TEST(BasicAssumptions, ExpressionTemplates3)
+{
+  UGLY_EXPR_TEST_BINARY_VEC_RETURN(Product, 2, 2, 3, 3)
+  ASSERT_NEAR(result[0], 0., 1.e-3); // Would be 6 but since the return is an expression type, we expect 0.
+}
+
+
+TEST(BasicAssumptions, ExpressionTemplates4)
+{
+  UGLY_EXPR_TEST_BINARY_DOUBLE_RETURN(Dot, 2, 2, 1, 0)
+  ASSERT_NEAR(result, 2., 1.e-3);
+}
+
+
+TEST(BasicAssumptions, ExpressionTemplates5)
+{
+  UGLY_EXPR_TEST_UNARY_DOUBLE_RETURN(Length, 2, 2)
+  ASSERT_NEAR(result, std::sqrt(8), 1.e-3);
+}
+
+TEST(BasicAssumptions, ExpressionTemplates6)
+{
+  UGLY_EXPR_TEST_UNARY_DOUBLE_RETURN(LengthSqr, 2, 2)
+  ASSERT_NEAR(result, 8., 1.e-3);
+}
+
+
+TEST(BasicAssumptions, ExpressionTemplates7)
+{
+  UGLY_EXPR_TEST_UNARY_VEC_RETURN(Normalized, 2, 0)
+  ASSERT_NEAR(result[0], 1., 1.e-3);
+}
+
+
+TEST(BasicAssumptions, ExpressionTemplates8)
+{
+  UGLY_EXPR_TEST_BINARY_VEC_RETURN(Reflected, 1, 1, 1, 0)
+  ASSERT_NEAR(result[1], 0., 1.e-3); // Would be -1 but since the return is an expression type, we expect 0.
 }
 
 

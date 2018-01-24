@@ -162,9 +162,9 @@ auto Normalized(const Eigen::MatrixBase<Derived>& u)
 }
 
 template<class Derived>
-auto Reflected(const Eigen::MatrixBase<Derived>& reverse_incident_dir, const Eigen::MatrixBase<Derived>& normal) // -> decltype(2.*reverse_incident_dir.dot(normal)*normal - reverse_incident_dir)
+auto Reflected(const Eigen::MatrixBase<Derived>& reverse_incident_dir, const Eigen::MatrixBase<Derived>& normal)
 {
-  return 2.*reverse_incident_dir.dot(normal)*normal - reverse_incident_dir;
+  return (2.*reverse_incident_dir.dot(normal)*normal - reverse_incident_dir);
 }
 
 #ifndef NDEBUG
