@@ -2,27 +2,33 @@
 #include "primitive.hxx"
 
 
-RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySegment &_incident_segment)
+SurfaceInteraction::SurfaceInteraction(const HitId& _hitid)
   : hitid(_hitid)
 {
   assert(hitid.primitive);
-  hitid.primitive->GetLocalGeometry(hitid, this->pos, this->normal, this->shading_normal);
-  double sign = Dot(-_incident_segment.ray.dir, normal) > 0. ? 1. : -1;
-  geometry_normal = normal;
-  normal *= sign;
-  shading_normal *= sign;
-  assert(LengthSqr(geometry_normal)>0.9);
+  hitid.primitive->GetLocalGeometry(hitid, this->pos, this->geometry_normal, this->smooth_normal);
+}
+
+
+
+RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySegment &_incident_segment)
+  : SurfaceInteraction(_hitid)
+{
+  double sign = Dot(-_incident_segment.ray.dir, geometry_normal) > 0. ? 1. : -1;
+  normal = sign*geometry_normal;
+  shading_normal = sign*smooth_normal;
+  assert(LengthSqr(normal)>0.9);
   assert(LengthSqr(shading_normal)>0.9);
 }
 
 
-const Primitive& RaySurfaceIntersection::primitive() const
+const Primitive& SurfaceInteraction::primitive() const
 { 
   assert((bool)hitid); 
   return *hitid.primitive; 
 }
 
-const Shader& RaySurfaceIntersection::shader() const
+const Shader& SurfaceInteraction::shader() const
 { 
   assert((bool)hitid && hitid.primitive->shader); 
   return *hitid.primitive->shader; 

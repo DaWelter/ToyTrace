@@ -37,6 +37,12 @@ public:
 };
 
 
+using PosSampleCoordinates = HitId;
+struct TagAreaSample {};
+struct Nothing {};
+using AreaSample = Sample<PosSampleCoordinates, Nothing, TagAreaSample>;
+
+
 class PointEmitter : public Emitter
 {
 public:
@@ -48,36 +54,31 @@ public:
 };
 
 
-struct AreaSampleCoordinates
+inline SurfaceInteraction MakeSurfaceInteraction(const PosSampleCoordinates &coords)
 {
-  Double3 pos;
-  Double3 normal;
-  HitId hit;
-};
-
-inline AreaSampleCoordinates MakeAreaSampleCoordinatesFrom(const HitId &hit)
-{
-  AreaSampleCoordinates area;
-  area.hit = hit;
-  Double3 dummy1;
-  hit.primitive->GetLocalGeometry(hit, area.pos, area.normal, dummy1);
-  return area;
+  return SurfaceInteraction(coords);
 }
 
-struct TagAreaSample {};
-using AreaSample = Sample<AreaSampleCoordinates, Spectral3, TagAreaSample>;
+// inline PosSampleCoordinates MakePosSampleCoordinatesFrom(const HitId &hit)
+// {
+//   PosSampleCoordinates area;
+//   area.hit = hit;
+//   Double3 dummy1;
+//   hit.primitive->GetLocalGeometry(hit, area.pos, area.normal, dummy1);
+//   return area;
+// }
 
 
 class AreaEmitter : public Emitter
 {
 public:
   virtual AreaSample TakeAreaSample(const Primitive& primitive, Sampler &sampler, const LightPathContext &context) const = 0; 
-  virtual DirectionalSample TakeDirectionSampleFrom(const AreaSampleCoordinates &area, Sampler &sampler, const LightPathContext &context) const
+  virtual DirectionalSample TakeDirectionSampleFrom(const PosSampleCoordinates &area, Sampler &sampler, const LightPathContext &context) const
   {
     assert(!"Not Implemented");
     return DirectionalSample{};
   }
-  virtual Spectral3 Evaluate(const AreaSampleCoordinates &area, const Double3 &dir_out, const LightPathContext &context, double *pdf_pos, double *pdf_dir) const = 0;
+  virtual Spectral3 Evaluate(const PosSampleCoordinates &area, const Double3 &dir_out, const LightPathContext &context, double *pdf_pos, double *pdf_dir) const = 0;
 };
 
 

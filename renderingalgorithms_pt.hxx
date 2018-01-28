@@ -392,14 +392,14 @@ public:
   {
     ConnectionEndNodeData nd;
     auto area_sample = target.TakeAreaSample(primitive, sampler, light_context);
-    auto shifted_pos = area_sample.coordinates.pos += AntiSelfIntersectionOffset(area_sample.coordinates.normal, RAY_EPSILON, Normalized(vertex.Position()-area_sample.coordinates.pos));
-    nd.segment_to_target = RaySegment::FromTo(vertex.Position(), shifted_pos);
-    auto direction_factor = target.Evaluate(area_sample.coordinates, -nd.segment_to_target.ray.dir, light_context, nullptr, nullptr);
-    nd.sample.coordinates = area_sample.coordinates.pos;
-    nd.sample.value       = area_sample.value;
+    auto surfaceinteraction = ROI::MakeSurfaceInteraction(area_sample.coordinates);
+    surfaceinteraction.pos += AntiSelfIntersectionOffset(surfaceinteraction.geometry_normal, RAY_EPSILON, Normalized(vertex.Position()-surfaceinteraction.pos));
+    nd.segment_to_target = RaySegment::FromTo(vertex.Position(), surfaceinteraction.pos);
+    auto radiance = target.Evaluate(area_sample.coordinates, -nd.segment_to_target.ray.dir, light_context, nullptr, nullptr);
+    nd.sample.coordinates = surfaceinteraction.pos;
+    nd.sample.value       = radiance;
     nd.sample.pdf_or_pmf  = area_sample.pdf_or_pmf;
-    nd.sample.value *= direction_factor;
-    nd.sample.pdf_or_pmf = TransformPdfFromAreaToSolidAngle(nd.sample.pdf_or_pmf, nd.segment_to_target.length, nd.segment_to_target.ray.dir, area_sample.coordinates.normal);
+    nd.sample.pdf_or_pmf  = TransformPdfFromAreaToSolidAngle(nd.sample.pdf_or_pmf, nd.segment_to_target.length, nd.segment_to_target.ray.dir, surfaceinteraction.geometry_normal);
     nd.is_wrt_solid_angle = true;
     return nd;
   }
@@ -471,11 +471,11 @@ public:
   
   Spectral3 EmitterHit(const ROI::AreaEmitter &emitter, const HitId &hit, const RaySegment &incident_segment, const PathContext &context, double &pdf_of_emitter_wrt_solid_angle)
   {
-    ROI::AreaSampleCoordinates area = ROI::MakeAreaSampleCoordinatesFrom(hit);
     double pdf_of_pos;
-    auto radiance = emitter.Evaluate(area, -incident_segment.ray.dir, ROI::LightPathContext{context.lambda_idx}, &pdf_of_pos, nullptr);
+    auto radiance = emitter.Evaluate(hit, -incident_segment.ray.dir, ROI::LightPathContext{context.lambda_idx}, &pdf_of_pos, nullptr);
     assert(pdf_of_pos >= 0 && std::isfinite(pdf_of_pos));
-    pdf_of_emitter_wrt_solid_angle = TransformPdfFromAreaToSolidAngle(pdf_of_pos, incident_segment.length, incident_segment.ray.dir, area.normal);
+    SurfaceInteraction surfaceinteraction = ROI::MakeSurfaceInteraction(hit);
+    pdf_of_emitter_wrt_solid_angle = TransformPdfFromAreaToSolidAngle(pdf_of_pos, incident_segment.length, incident_segment.ray.dir, surfaceinteraction.geometry_normal);
     return radiance;
   }
   

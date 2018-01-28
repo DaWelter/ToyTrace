@@ -69,17 +69,15 @@ public:
   virtual AreaSample TakeAreaSample(const Primitive& primitive, Sampler &sampler, const LightPathContext &context) const override
   {
     AreaSample smpl;
-    smpl.coordinates.hit = primitive.SampleUniformPosition(sampler);
+    smpl.coordinates = primitive.SampleUniformPosition(sampler);
     smpl.pdf_or_pmf = 1./primitive.Area();
-    Double3 unused_shading_normal;
-    primitive.GetLocalGeometry(smpl.coordinates.hit, smpl.coordinates.pos, smpl.coordinates.normal, unused_shading_normal);
-    smpl.value = Spectral3{1.};
+    smpl.value = Nothing{};
     return smpl;
   }
   
-  inline Spectral3 Evaluate(const AreaSampleCoordinates &area, const Double3 &dir_out, const LightPathContext &context, double *pdf_pos, double *pdf_dir) const
+  inline Spectral3 Evaluate(const PosSampleCoordinates &area, const Double3 &dir_out, const LightPathContext &context, double *pdf_pos, double *pdf_dir) const override
   {
-    const auto* primitive = area.hit.primitive;
+    const auto* primitive = area.primitive;
     if (pdf_pos)
       *pdf_pos = 1./primitive->Area();
     if (pdf_dir)

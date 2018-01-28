@@ -69,16 +69,26 @@ struct HitId
 };
 
 
-struct RaySurfaceIntersection
+struct SurfaceInteraction
 {
   HitId hitid;
-  Double3 normal;        // Used for shading and tracing. Oriented toward the incomming ray.
-  Double3 shading_normal;
   Double3 geometry_normal;
+  Double3 smooth_normal;
   Double3 pos;
-
+  
   const Primitive& primitive() const;
   const Shader& shader() const;
+  
+  SurfaceInteraction(const HitId &hitid);
+  SurfaceInteraction() = default;
+};
+
+
+struct RaySurfaceIntersection : public SurfaceInteraction
+{
+  Double3 normal;        // Used for shading and tracing. Oriented toward the incomming ray.
+  Double3 shading_normal;
+  
   RaySurfaceIntersection(const HitId &hitid, const RaySegment &_incident_segment);
   RaySurfaceIntersection() = default;
 };
