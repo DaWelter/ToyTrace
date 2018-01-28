@@ -76,7 +76,7 @@ Spectral3 DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurf
     *pdf = n_dot_out>0. ? n_dot_out/Pi : 0.;
   if (n_dot_out > 0.)
   {
-    auto kr_d_taken = Take(kr_d, context.lambda_idx);
+    Spectral3 kr_d_taken = Take(kr_d, context.lambda_idx);
     return MaybeMultiplyTextureLookup(kr_d_taken, diffuse_texture.get(), surface_hit, context.lambda_idx);
   }
   else
@@ -90,7 +90,14 @@ ScatterSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySu
   Double3 v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
   double pdf = v[2]/Pi;
   Double3 out_direction = m * v;
-  Spectral3 value = Dot(out_direction, surface_hit.normal)>0 ? Take(kr_d, context.lambda_idx) : Spectral3{0.};
+  Spectral3 value;
+  if (Dot(out_direction, surface_hit.normal) > 0.)
+  {
+    value = Take(kr_d, context.lambda_idx);
+    value = MaybeMultiplyTextureLookup(value, diffuse_texture.get(), surface_hit, context.lambda_idx);
+  }
+  else
+    value = 0.;
   return ScatterSample{out_direction, value, pdf};
 }
 
@@ -115,14 +122,19 @@ ScatterSample SpecularReflectiveShader::SampleBSDF(const Double3& incident_dir, 
 {
   Double3 r = Reflected(incident_dir, surface_hit.shading_normal);
   double cos_rn = Dot(surface_hit.normal, r);
-  if (cos_rn < 0.)
-    return ScatterSample{r, Spectral3{0.}, 1.};
-  else
+  
+  auto NominalSample = [&]() -> ScatterSample
   {
     double cos_rsdn = Dot(surface_hit.shading_normal, r);
     auto kr_s_taken = Take(kr_s, context.lambda_idx);
     return ScatterSample{r, kr_s_taken/cos_rsdn, 1.};
-  }
+  };
+  
+  ScatterSample smpl = (cos_rn < 0.) ?
+    ScatterSample{r, Spectral3{0.}, 1.} :
+    NominalSample();
+  SetPmfFlag(smpl);
+  return smpl;
 }
 
 
@@ -344,10 +356,11 @@ ScatterSample SpecularDenseDielectricShader::SampleBSDF(const Double3& reverse_i
     {
       smpl = ScatterSample{refl_dir, Spectral3{0.}, reflected_fraction};
     }
+    SetPmfFlag(smpl);
   }
   else
   {
-    ScatterSample smpl = diffuse_part.SampleBSDF(reverse_incident_dir, surface_hit, sampler, context);
+    smpl = diffuse_part.SampleBSDF(reverse_incident_dir, surface_hit, sampler, context);
     double cos_n_exitant = std::max(0., Dot(surface_hit.shading_normal, smpl.coordinates));
     double other_reflection_term = SchlicksApproximation(specular_reflectivity, cos_n_exitant);
     double average_albedo = AverageOfProjectedSchlicksApproximationOverHemisphere<double>(specular_reflectivity);
