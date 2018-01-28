@@ -81,17 +81,32 @@ public:
 class MicrofacetShader : public Shader
 {
   SpectralN kr_s;
-  double alpha;
-  std::unique_ptr<Texture> glossy_texture;
+  double alpha_max;
+  std::unique_ptr<Texture> glossy_exponent_texture;
 public:
   MicrofacetShader(
-    const SpectralN &_glossy_reflectance, std::unique_ptr<Texture> _glossy_texture,
-    double _glossy_exponent
+    const SpectralN &_glossy_reflectance,
+    double _glossy_exponent,
+    std::unique_ptr<Texture> _glossy_exponent_texture
   );
   ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
   Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
 
+
+class SpecularDenseDielectricShader : public Shader
+{
+  // Certainly, the compiler is going to de-virtualize calls to these members?!
+  DiffuseShader diffuse_part;
+  double specular_reflectivity;
+public:
+  SpecularDenseDielectricShader(
+    const double _specular_reflectivity,
+    const SpectralN &_diffuse_reflectivity,
+    std::unique_ptr<Texture> _diffuse_texture);
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;    
+};
 
 
 class InvisibleShader : public Shader

@@ -16,6 +16,41 @@ inline Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Textur
   }
   return ret;
 }
+
+
+inline double MaybeMultiplyTextureLookup(double _value, const Texture *tex, const RaySurfaceIntersection &surface_hit)
+{
+  if (tex)
+  {
+    Double3 uv = surface_hit.primitive().GetUV(surface_hit.hitid);
+    RGB col = tex->GetTexel(uv[0], uv[1]);
+    _value *= (value(col[0])+value(col[1])+value(col[2]))/3.;
+  }
+  return _value;
+}
+
+
+template<class T>
+inline T SchlicksApproximation(const T &kspecular, double n_dot_dir)
+{
+  // Ref: Siggraph 2012 Course. "Background: Physics and Math of Shading (Naty Hoffman)"
+  //      http://blog.selfshadow.com/publications/s2012-shading-course/hoffman/s2012_pbs_physics_math_notes.pdf
+  return kspecular + (1.-kspecular)*std::pow(1-n_dot_dir, 5.);
+}
+
+
+template<class T>
+inline T AverageOfProjectedSchlicksApproximationOverHemisphere(const T &kspecular)
+{
+  // Computes I= 1/Pi * Int_HalfSphere F_schlick(w)*cos(theta) dw
+  // The average albedo of ideal specular reflection.
+  return kspecular + (1.-kspecular)*2./42.;
+  // The 42 here is no joke. It comes out of Wolfram Alpha when ordered to compute:
+  // integrate (1-cos(x))^5*cos(x)*sin(x) from 0 to pi/2
+  // The factor two comes from the integration over the azimuthal angle.
+}
+
+
 }
 
 
@@ -110,12 +145,13 @@ double G1(double cos_v_m, double cos_v_n, double alpha)
 
 
 MicrofacetShader::MicrofacetShader(
-  const SpectralN &_glossy_reflectance, std::unique_ptr<Texture> _glossy_texture,
-  double _glossy_exponent)
+  const SpectralN &_glossy_reflectance,
+  double _glossy_exponent,
+  std::unique_ptr<Texture> _glossy_exponent_texture)
   : Shader(0),
     kr_s(_glossy_reflectance), 
-    alpha(_glossy_exponent),
-    glossy_texture(std::move(_glossy_texture))
+    alpha_max(_glossy_exponent),
+    glossy_exponent_texture(std::move(_glossy_exponent_texture))
 {
 }
 
@@ -134,6 +170,7 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
   { // Beckman Distrib. This formula is using the normalized distribution D(cs) 
     // such that Int_omega D(cs) cs dw = 1, using the differential solid angle dw, 
     // integrated over the hemisphere.
+    double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
     double cs = ns_dot_wh;
     double t1 = (cs*cs-1.)/(cs*cs*alpha*alpha);
     double t2 = alpha*alpha*cs*cs*cs*cs*Pi;
@@ -164,7 +201,7 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
                     MicrofacetDetail::G1(wh_dot_out, ns_dot_out, alpha);
 #endif
   }
-  double fresnel_term;
+  
   {
 #if 0
     Way too little reflection as these formulae are for dielectrics which reflect mostly at glancing angles.
@@ -185,25 +222,20 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
     }
     else
       fresnel_term = 1.;
-#else
-    // Schlicks approximation. Parameters for metal.
-    // Ref: Jacco Bikkers Lecture.
-    double kspecular = 0.92; // Alu.
-    fresnel_term = kspecular + (1-kspecular)*std::pow(1-wh_dot_in, 5.);
 #endif
   }
-  double microfacet_val = fresnel_term*geometry_term*microfacet_distribution_val*0.25/ns_dot_in/ns_dot_out;
-
-  auto kr_s_taken = Take(kr_s, context.lambda_idx);
-  auto kr_s_local = MaybeMultiplyTextureLookup(kr_s_taken, glossy_texture.get(), surface_hit, context.lambda_idx);  
-
-  return microfacet_val * kr_s_local;
+  
+  Spectral3 kr_s_taken = Take(kr_s, context.lambda_idx);
+  Spectral3 fresnel_term = SchlicksApproximation(kr_s_taken, wh_dot_in);
+  double monochromatic_terms = geometry_term*microfacet_distribution_val*0.25/ns_dot_in/ns_dot_out;
+  return monochromatic_terms*fresnel_term;
 }
 
 
 ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
 {
   auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
+  double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
   Double3 h_r_local = SampleTrafo::ToBeckmanHemisphere(sampler.UniformUnitSquare(), alpha);
   Double3 h_r = m*h_r_local;
   // The following is the inversion of the half-vector formula. It is like reflection except for the abs. But the abs is needed.
@@ -235,6 +267,102 @@ ScatterSample InvisibleShader::SampleBSDF(const Double3 &incident_dir, const Ray
 
 
 
+
+
+
+SpecularDenseDielectricShader::SpecularDenseDielectricShader(const double _specular_reflectivity, const SpectralN& _diffuse_reflectivity, std::unique_ptr<Texture> _diffuse_texture): 
+  Shader(), diffuse_part{_diffuse_reflectivity, std::move(_diffuse_texture)}, specular_reflectivity{_specular_reflectivity}
+{
+  
+}
+
+
+namespace SmoothAndDenseDielectricDetail
+{
+// Symmetry demands that f(w1,w2)=f(w2,w1). Therefore, following, Klemen & Kalos, I use the factors 
+// (1-R(w1))*(1-R(w2)) where R(w) is the reflective albedo of the specular part given and w the incidence direction. 
+// Ref: Klemen & Kalos (2001) "A Microfacet Based Coupled Specular-Matte BRDF Model with Importance Sampling", 
+  
+double DiffuseAttenuationFactor(double albedo1, double albedo2, double average_albedo) 
+{
+  assert(0 <= average_albedo && average_albedo <= 1.);
+  assert(0 <= albedo1 && albedo1 <= 1.);
+  assert(0 <= albedo2 && albedo2 <= 1.);
+  double normalization = 1./(1.-average_albedo);
+  // Another factor 1/Pi comes from the normalization built into the Diffuse shader class.
+  return (1.-albedo1)*(1.-albedo2)*normalization;
+}
+}
+
+
+Spectral3 SpecularDenseDielectricShader::EvaluateBSDF(const Double3& reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext& context, double* pdf) const
+{ 
+  double cos_out_n = Dot(surface_hit.normal, out_direction);
+  if (cos_out_n > 0.)
+  {
+    double cos_shn_exitant = std::max(0., Dot(surface_hit.shading_normal, out_direction));
+    double cos_shn_incident = std::max(0., Dot(surface_hit.shading_normal, reverse_incident_dir));
+    
+    double reflected_fraction = SchlicksApproximation(specular_reflectivity, cos_shn_incident);
+    double other_reflection_term = SchlicksApproximation(specular_reflectivity, cos_shn_exitant);  
+    double average_albedo = AverageOfProjectedSchlicksApproximationOverHemisphere<double>(specular_reflectivity);
+   
+    Spectral3 brdf_value = diffuse_part.EvaluateBSDF(reverse_incident_dir, surface_hit, out_direction, context, pdf); 
+    brdf_value *= SmoothAndDenseDielectricDetail::DiffuseAttenuationFactor(
+      reflected_fraction, other_reflection_term, average_albedo);
+    
+    if (pdf)
+      *pdf *= (1.-reflected_fraction);
+    return brdf_value;
+  }
+  else
+  {
+    if (pdf)
+      *pdf = 0.;
+    return Spectral3{0.};
+  }
+}
+
+
+
+ScatterSample SpecularDenseDielectricShader::SampleBSDF(const Double3& reverse_incident_dir, const RaySurfaceIntersection& surface_hit, Sampler& sampler, const PathContext& context) const
+{
+  double cos_shn_incident = std::max(0., Dot(surface_hit.shading_normal, reverse_incident_dir));
+  double reflected_fraction = SchlicksApproximation(specular_reflectivity, cos_shn_incident);
+  assert(reflected_fraction >= 0. && reflected_fraction <= 1.);
+  double decision_var = sampler.Uniform01();
+  ScatterSample smpl;
+  if (decision_var < reflected_fraction)
+  {
+    Double3 refl_dir = Reflected(reverse_incident_dir, surface_hit.shading_normal);
+    double cos_rn = Dot(surface_hit.normal, refl_dir);
+    if (cos_rn >= 0.)
+    {
+      smpl = ScatterSample{refl_dir, Spectral3{reflected_fraction/(cos_shn_incident+Epsilon)}, reflected_fraction};
+    }
+    else
+    {
+      smpl = ScatterSample{refl_dir, Spectral3{0.}, reflected_fraction};
+    }
+  }
+  else
+  {
+    ScatterSample smpl = diffuse_part.SampleBSDF(reverse_incident_dir, surface_hit, sampler, context);
+    double cos_n_exitant = std::max(0., Dot(surface_hit.shading_normal, smpl.coordinates));
+    double other_reflection_term = SchlicksApproximation(specular_reflectivity, cos_n_exitant);
+    double average_albedo = AverageOfProjectedSchlicksApproximationOverHemisphere<double>(specular_reflectivity);
+    smpl.value *= SmoothAndDenseDielectricDetail::DiffuseAttenuationFactor(
+      reflected_fraction, other_reflection_term, average_albedo);
+    smpl.pdf_or_pmf *= (1.-reflected_fraction);
+  }
+  return smpl;
+}
+
+
+
+/*************************************
+ * Media
+ ***********************************/
 
 
 Spectral3 VacuumMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, const PathContext &context, double* pdf) const

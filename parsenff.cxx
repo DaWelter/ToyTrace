@@ -120,10 +120,10 @@ public:
       std::istream &_is,
       const fs::path &_path_hint) :
     scene(_scene),
+    render_params(_render_params),
     filename(_path_hint),
     input{_is},
-    lineno{0},
-    render_params(_render_params)
+    lineno{0}
   {
     if (!filename.empty())
     {
@@ -418,6 +418,27 @@ void NFFParser::Parse(Scope &scope)
     }
     
     
+    auto MaybeReadTexture = [this](const char *identifier) -> std::unique_ptr<Texture>
+    {
+      if (startswith(peek_line, identifier))
+      {
+        NextLine();
+        std::string format = strconcat(identifier, " %s\n");
+        char buffer [LINESIZE];
+        int num = std::sscanf(line.c_str(), format.c_str(), buffer);
+        if (num == 1)
+        {
+          auto path = MakeFullPath(buffer);
+          return std::make_unique<Texture>(path);
+        }
+        else 
+          throw MakeException("Error");
+      }
+      else
+        return std::unique_ptr<Texture>(nullptr);
+    };
+    
+    
     if (!strcmp(token,"diffuse"))
     {
       RGB rgb;
@@ -426,20 +447,8 @@ void NFFParser::Parse(Scope &scope)
       int num = std::sscanf(line.c_str(),"diffuse %s %lg %lg %lg %lg\n",name, &rgb[0],&rgb[1],&rgb[2],&kd);
       if (num == 5)
       {
-        std::unique_ptr<Texture> diffuse_texture;
-        if (startswith(peek_line, "diffusetexture"))
-        {
-          NextLine();
-          char buffer [LINESIZE];
-          num = std::sscanf(line.c_str(), "diffusetexture %s\n", buffer);
-          if (num == 1)
-          {
-            auto path = MakeFullPath(buffer);
-            diffuse_texture = std::make_unique<Texture>(path);
-          }
-          else throw MakeException("Error");
-        }
-        scope.shaders.set_and_activate(name, 
+        std::unique_ptr<Texture> diffuse_texture = MaybeReadTexture("diffusetexture");
+        scope.shaders.set_and_activate(name,
           new DiffuseShader(
             Color::RGBToSpectrum(kd * rgb), 
             std::move(diffuse_texture)));
@@ -465,38 +474,40 @@ void NFFParser::Parse(Scope &scope)
       continue;
     }
     
+    if (!strcmp(token, "speculardensedielectric"))
+    {
+      RGB diffuse_coeff;
+      double specular_coeff;
+      char name[LINESIZE];
+      int num = std::sscanf(line.c_str(), "speculardensedielectric %s %lg %lg %lg %lg\n", name, &diffuse_coeff[0], &diffuse_coeff[1], &diffuse_coeff[2], &specular_coeff);
+      if (num == 5)
+      {
+        std::unique_ptr<Texture> diffuse_texture = MaybeReadTexture("diffusetexture");
+        scope.shaders.set_and_activate(name,
+          new SpecularDenseDielectricShader(
+            specular_coeff,
+            Color::RGBToSpectrum(diffuse_coeff),
+            std::move(diffuse_texture)));
+      }
+      else throw MakeException("Error");
+      continue;
+    }
+    
     if (!strcmp(token,"glossy"))
     {
       RGBScalar k;
       double phong_exponent;
       RGB kd_rgb, ks_rgb;
-      std::unique_ptr<Texture> diffuse_texture, glossy_texture;
       char name[LINESIZE];
       
       int num = std::sscanf(line.c_str(),"glossy %s %lg %lg %lg %lg %lg\n",name,&ks_rgb[0], &ks_rgb[1], &ks_rgb[2], &k, &phong_exponent);
       if(num == 6)
       {
-        while (true)
-        {
-          char buffer [LINESIZE];
-          if (startswith(peek_line, "glossytexture"))
-          {
-            NextLine();
-            num = std::sscanf(line.c_str(), "glossytexture %s\n", buffer);
-            if (num == 1)
-            {
-              auto path = MakeFullPath(buffer);
-              glossy_texture = std::make_unique<Texture>(path);
-            }
-            else throw MakeException("Error");
-          }
-          else break;
-        }
+        std::unique_ptr<Texture> glossy_texture = MaybeReadTexture("exponenttexture");
         scope.shaders.set_and_activate(name, new MicrofacetShader(
           Color::RGBToSpectrum(k*ks_rgb),
-          std::move(glossy_texture), 
-          phong_exponent
-        ));
+          phong_exponent,
+          std::move(glossy_texture)));
       }
       else throw MakeException("Error");
       continue;
