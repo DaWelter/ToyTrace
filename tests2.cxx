@@ -6,10 +6,164 @@
 #include <boost/variant.hpp>
 #include <boost/align/aligned_allocator.hpp>
 
+#include <bitset>
+
 #include "gtest/gtest.h"
 #include "spectral.hxx"
 #include "vec3f.hxx"
 #include "util.hxx"
+#include "very_strong_typedef.hxx"
+
+
+
+TEST(VeryStrongTypedef, WrappingAStructType)
+{
+  struct TagNumberType {};
+  struct TagOtherType {};
+  using NumberType = very_strong_typedef<double, TagNumberType>;
+  NumberType nt{5.};
+  
+  struct Test
+  {
+    double f;
+    Test(double _f) : f(_f) {}
+  };
+  using OtherType = very_strong_typedef<Test, TagOtherType>;
+  OtherType ot{5.};
+  EXPECT_EQ(value(ot).f, 5.);
+}
+
+
+TEST(BasicAssumptions, BitsetSize)
+{
+  static constexpr int NBITS = 128;
+  std::bitset<NBITS> bs;
+  EXPECT_EQ(sizeof(bs), NBITS/8);
+}
+
+
+struct RVODemo
+{
+  volatile int q; 
+  // Volatile, hoping that it will stop the compiler from replacing my code with values computed at compile time.
+  // I suppose it could do that since the inputs are literals. 
+  // And the code is trivial. Just a branch and a multiplication, essentially.
+  int &num_copies;
+  RVODemo(volatile int q, int &_num_copies) : q{q}, num_copies{_num_copies} {}
+  RVODemo(const RVODemo &demo) 
+    : q{demo.q}, num_copies{demo.num_copies} 
+    { ++num_copies; }
+  RVODemo& operator=(const RVODemo &other)
+  {
+    ++num_copies;
+    q = other.q;
+  }
+};
+
+RVODemo RVODemoFunc(volatile int q, int &num_copies)
+{
+  if (q == 1)
+  {
+    return RVODemo{q, num_copies};
+  }
+  else
+  {
+    return RVODemo{q*q, num_copies};
+  }
+};
+
+RVODemo RVODemoFunc2(volatile int q, int &num_copies)
+{
+  RVODemo result{0, num_copies};
+  if (q == 1)
+  {
+    result.q = q;
+  }
+  else
+  {
+    result.q = q*q;
+  }
+  return result;
+};
+
+
+RVODemo RVODemoFunc3(volatile int q, int &num_copies)
+{
+  RVODemo result{q, num_copies};
+  if (q == 1)
+  {
+    return RVODemo{1, num_copies};
+  }
+  result.q = q*q;
+  return result; // <-- copy!
+};
+
+
+std::tuple<RVODemo, int> RVODemoFunc4(volatile int q, int &num_copies)
+{
+  if (q == 1)
+  {
+    return std::make_tuple(RVODemo{q, num_copies}, 42);
+  }
+  else
+  {
+    return std::make_tuple(RVODemo{q*q, num_copies}, 7);
+  }  
+}
+
+
+TEST(BasicAssumptions, RVO)
+{
+  int num_copies;
+  volatile int q = 1;
+  {
+    num_copies = 0;
+    RVODemo demo = RVODemoFunc(q, num_copies);
+    std::cout << "q=" << demo.q << " num_copies =" << num_copies << std::endl;
+    EXPECT_EQ(num_copies, 0);
+  }
+  {
+    num_copies = 0;
+    RVODemo demo = RVODemoFunc2(q, num_copies);
+    std::cout << "q=" << demo.q << " num_copies =" << num_copies << std::endl; 
+    EXPECT_EQ(num_copies, 0);
+  }
+  {
+    num_copies = 0;
+    RVODemo demo = RVODemoFunc3(q, num_copies);
+    std::cout << "q=" << demo.q << " num_copies =" << num_copies << std::endl;
+    EXPECT_EQ(num_copies, 0);
+  }
+  { 
+    num_copies = 0;
+    RVODemo demo{0, num_copies};
+    int demo_other = 0;
+    std::tie(demo, demo_other) = RVODemoFunc4(q, num_copies);
+    std::cout << "Demo4: q=" << demo.q << " num_copies =" << num_copies << std::endl;
+    EXPECT_EQ(num_copies, 2); // Initial construction of tuple + copy into destination variable via std::tie.
+  }
+  q = 2;
+  {
+    num_copies = 0;
+    RVODemo demo = RVODemoFunc(q, num_copies);
+    std::cout << "q=" << demo.q << " num_copies =" << num_copies << std::endl;
+    EXPECT_EQ(num_copies, 0);
+  }
+  {
+    num_copies = 0;
+    RVODemo demo = RVODemoFunc2(q, num_copies);
+    std::cout << "q=" << demo.q << " num_copies =" << num_copies << std::endl;
+    EXPECT_EQ(num_copies, 0);
+  }
+  { 
+    num_copies = 0;
+    RVODemo demo = RVODemoFunc3(q, num_copies);
+    std::cout << "q=" << demo.q << " num_copies =" << num_copies << std::endl;
+    EXPECT_EQ(num_copies, 1);
+  }
+}
+
+
 
 struct Stuff
 {
