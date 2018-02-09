@@ -1,12 +1,13 @@
 #include <iostream>
 #include <typeinfo>
+#include <bitset>
+#include <type_traits>
 
 #include <boost/serialization/strong_typedef.hpp>
 #include <boost/pool/simple_segregated_storage.hpp>
 #include <boost/variant.hpp>
+#include <boost/variant/polymorphic_get.hpp>
 #include <boost/align/aligned_allocator.hpp>
-
-#include <bitset>
 
 #include "gtest/gtest.h"
 #include "spectral.hxx"
@@ -15,22 +16,94 @@
 #include "very_strong_typedef.hxx"
 
 
-
-TEST(VeryStrongTypedef, WrappingAStructType)
+namespace UnionTestDetail
 {
-  struct TagNumberType {};
-  struct TagOtherType {};
-  using NumberType = very_strong_typedef<double, TagNumberType>;
-  NumberType nt{5.};
+
+struct NoDefaultCtor
+{
+  int a;
+  explicit NoDefaultCtor(int _a) : a{_a} {}
+  NoDefaultCtor() = delete;
+};
   
-  struct Test
+  
+struct UnionTesting
+{
+  union U
   {
-    double f;
-    Test(double _f) : f(_f) {}
+    NoDefaultCtor ctor;
+    double d;
+    U() {}
   };
-  using OtherType = very_strong_typedef<Test, TagOtherType>;
-  OtherType ot{5.};
-  EXPECT_EQ(value(ot).f, 5.);
+  U u;
+  UnionTesting() 
+  {
+    u.ctor = NoDefaultCtor{7};
+  }
+  UnionTesting(double _d)
+    {
+      u.d = _d;
+    }
+};
+  
+};
+
+
+TEST(BasicAssumptions, Unions)
+{
+  UnionTestDetail::UnionTesting t1{};
+  UnionTestDetail::UnionTesting t2{0.5};
+  std::cout << t2.u.d << std::endl;
+}
+
+
+namespace EnableIfTestDetail
+{
+
+struct Base
+{
+  int a = { 7 };
+};
+
+struct Derived : public Base
+{
+  int b = { 42 };
+};
+
+
+struct EnableIfOperatorTest
+{
+  template<class T, typename std::enable_if_t<std::is_base_of<Base,T>{}, int> = 0>
+  bool operator()(const T& u) const
+  {
+    return true;
+  }
+  
+  template<class T, typename std::enable_if_t<!std::is_base_of<Base,T>{}, int> = 0>
+  bool operator()(const T& u) const
+  {
+    return false; // Default
+  }
+
+  // Compile error! :-(
+//   template<class T>
+//   bool operator()(const T& u) const
+//   {
+//     return false; // Default
+//   }
+};
+
+}
+
+TEST(BasicAssumptions, EnableIf)
+{
+  using namespace EnableIfTestDetail;
+  Base base;
+  Derived derived;
+  int a_int = 9;
+  EXPECT_FALSE(EnableIfOperatorTest()(a_int));
+  EXPECT_TRUE(EnableIfOperatorTest()(base));
+  EXPECT_TRUE(EnableIfOperatorTest()(derived));
 }
 
 
@@ -57,6 +130,7 @@ struct RVODemo
   {
     ++num_copies;
     q = other.q;
+    return *this;
   }
 };
 
@@ -408,6 +482,23 @@ TEST(StrongTypedef, Boost1)
 }
 
 
+TEST(VeryStrongTypedef, WrappingAStructType)
+{
+  struct TagNumberType {};
+  struct TagOtherType {};
+  using NumberType = very_strong_typedef<double, TagNumberType>;
+  NumberType nt{5.};
+  
+  struct Test
+  {
+    double f;
+    Test(double _f) : f(_f) {}
+  };
+  using OtherType = very_strong_typedef<Test, TagOtherType>;
+  OtherType ot{5.};
+  EXPECT_EQ(value(ot).f, 5.);
+}
+
 
 
 namespace SmallObjectStorageDetail
@@ -489,6 +580,111 @@ TEST(Boost, Variant)
   a = 5;
   ASSERT_EQ(test.which(), 0);
   std::cout << test << std::endl;
+}
+
+namespace VariantTestDetail
+{
+
+struct Demo
+{
+  int &ref;
+  int r = {42};
+  int s = {7};
+  Demo(int &_ref) : ref{_ref} {}
+};
+
+
+class VariantTestVisitorIdentifyString : public boost::static_visitor<bool>
+{
+public:
+  // Compileable version of the operator must be available for each type in the variant.
+  template<typename T>
+  bool operator()(const T &u) const
+  {
+    return false;
+  }
+  
+  // http://en.cppreference.com/w/cpp/language/overload_resolution
+  // Section "Best viable function" states that normal functions are prefered over templates (?).
+  bool operator()(const std::string &u) const
+  {
+    return true;
+  }
+};
+
+}
+
+TEST(Boost, VariantVisitation)
+{
+  using namespace VariantTestDetail;
+  int reference_target = 0;
+  // See "Enabling Optimizations" section in the manual. Nothrow copy constructors on each type should guarantee best efficiency, i.e. no allocations.
+  //static_assert(boost::has_nothrow_constructor<Demo>() == true, "Efficiency. See Manual."); // Triggered because no default ctor
+  static_assert(boost::has_nothrow_copy<Demo>() == true, "Efficiency. See Manual.");
+  
+  using VariantType = boost::variant<Demo, std::string, int>;
+  VariantType test_str{"foo"};
+  VariantType test_int{1};
+  VariantType test_demo{Demo{reference_target}};
+  EXPECT_EQ(boost::apply_visitor(VariantTestVisitorIdentifyString(), test_str), true);
+  EXPECT_EQ(boost::apply_visitor(VariantTestVisitorIdentifyString(), test_int), false);
+  EXPECT_EQ(boost::apply_visitor(VariantTestVisitorIdentifyString(), test_demo), false);
+  
+  struct VariantAsMember
+  {
+    VariantType vari = {"bazz"};
+  } foo;
+}
+
+
+namespace VariantTestDetail
+{
+struct PolyBase
+{
+  virtual int anumber() const = 0;
+};
+
+struct PolyDerived1 : public PolyBase
+{
+  int anumber() const override { return 1; }
+};
+
+struct PolyDerived2 : public PolyBase
+{
+  int anumber() const override { return 2; }
+};
+
+struct PolyDerived21 : public PolyDerived2
+{
+  int anumber() const override { return 21; }
+};
+
+struct JustDataBase
+{
+  int a = 42;
+};
+
+struct JustDataDerived : public JustDataBase
+{
+  int b = 7;
+};
+
+};
+
+TEST(Boost, VariantPolymorphic)
+{
+  using namespace VariantTestDetail;
+  using StorageType = boost::variant<PolyBase, PolyDerived1, PolyDerived2, PolyDerived21>;
+  StorageType stack_based_storage{PolyDerived2{}};
+  EXPECT_EQ(boost::polymorphic_get<PolyBase>(stack_based_storage).anumber(), 2);
+  
+  using DataStorage = boost::variant<JustDataBase, JustDataDerived>;
+  DataStorage data_storage{JustDataDerived{}};
+  EXPECT_EQ(boost::polymorphic_get<JustDataBase>(data_storage).a, 42);
+  
+  data_storage = JustDataBase{};
+  EXPECT_EQ(boost::polymorphic_get<JustDataBase>(data_storage).a, 42);
+  ASSERT_ANY_THROW(boost::polymorphic_get<JustDataDerived>(data_storage).b); // Boom. Query inactive type.
 }
 
 
