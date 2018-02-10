@@ -121,7 +121,7 @@ public:
     return s;
   }
   
-  virtual void Evaluate(const Double3 &pos_on_this, const Double3 &dir_out, std::vector<Response> &responses, const LightPathContext &context) const override
+  virtual Response Evaluate(const Double3 &pos_on_this, const Double3 &dir_out, const LightPathContext &context, double *pdf_direction) const override
   {
     ASSERT_NORMALIZED(dir_out);
     // Oh yeah why didn't I just use a matrix multiply ...
@@ -129,21 +129,21 @@ public:
     double x = Dot(dir_out, frame.right);
     double y = Dot(dir_out, frame.up);
     if (z <= 0.)
-      return;
+      return {};
     x /= z;
     y /= z;
     int pix_x = (x-xmin)/xperpixel;
     int pix_y = (y-ymin)/yperpixel;
     if (pix_x<0 || pix_x>=xres || pix_y<0 || pix_y>=yres)
-      return;
-    // Units don't overlap. Therefore there can only respond one of them at most.
+      return {};
+    // Units don't overlap (yet). Therefore there can only respond one of them at most.
     double pdf = PixelPdfWrtSolidAngle(x, y);
-    responses.push_back({
+    if (pdf_direction)
+      *pdf_direction = pdf;
+    return {
       PixelToUnit({pix_x, pix_y}),
       Spectral3{pdf}, // value
-      1., // pdf pos
-      pdf, // pdf dir
-    });
+    };
   }
 };
 
@@ -190,17 +190,36 @@ public:
       Double3 emission_dir = frame.right*w[0] + frame.up*w[1] + frame.dir*w[2];
       ASSERT_NORMALIZED(emission_dir);
       DirectionalSample s{ emission_dir, Spectral3{1.}, 1.0};
+      SetPmfFlag(s);
       return s;
     }
     else
     {
-      return DirectionalSample{frame.dir, Spectral3{0.}, 1.0};
+      DirectionalSample s{frame.dir, Spectral3{0.}, 1.0};
+      SetPmfFlag(s);
+      return s;
     }
   }
   
-  virtual void Evaluate(const Double3 &pos_on_this, const Double3 &dir_out, std::vector<Response> &responses, const LightPathContext &context) const override
+  virtual Response Evaluate(const Double3 &pos_on_this, const Double3 &dir_out, const LightPathContext &context, double *pdf_direction) const override
   {
-    assert(false && "not implemented");
+//     ASSERT_NORMALIZED(dir_out);
+//     double w2 = Dot(dir_out, frame.dir);
+//     double w0 = Dot(dir_out, frame.right);
+//     double w1 = Dot(dir_out, frame.up);
+//     if (w2 <= 0.)
+//       return {};
+//     w2 = -w2;
+//     double u = w0/(1.-w2+Epsilon);
+//     double v = w1/(1.-w2+Epsilon);
+//     
+//     int pix_x = (x-xmin)/xperpixel;
+//     int pix_y = (y-ymin)/yperpixel;
+//     if (pix_x<0 || pix_x>=xres || pix_y<0 || pix_y>=yres)
+//       return {};
+    if (pdf_direction)
+      *pdf_direction = 0;
+    return {};
   }
 };
 

@@ -33,7 +33,7 @@ class EnvironmentalRadianceField : public Emitter
 {
 public:
   virtual DirectionalSample TakeDirectionSample(Sampler &sampler, const LightPathContext &context) const = 0;
-  virtual Spectral3 Evaluate(const Double3 &emission_dir, const LightPathContext &context, double *pdf_dir) const = 0;  
+  virtual Spectral3 Evaluate(const Double3 &emission_dir, const LightPathContext &context, double *pdf_dir) const = 0;
 };
 
 
@@ -88,15 +88,14 @@ public:
   const int num_units;
   struct Response
   {
-    int unit_index;
-    Spectral3 value;
-    double pdf_pos;
-    double pdf_dir;
+    int unit_index = { -1 };
+    Spectral3 weight = Spectral3{ 0. };
   };
   PointEmitterArray(int _num_units) : num_units(_num_units) {}
+  // Position sample is needed for physical camera.
   virtual PositionSample TakePositionSample(int unit_index, Sampler &sampler, const LightPathContext &context) const = 0;
   virtual DirectionalSample TakeDirectionSampleFrom(int unit_index, const Double3 &pos, Sampler &sampler, const LightPathContext &context) const = 0;
-  virtual void Evaluate(const Double3 &pos_on_this, const Double3 &dir_out, std::vector<Response> &responses, const LightPathContext &context) const = 0;
+  virtual Response Evaluate(const Double3 &pos_on_this, const Double3 &dir_out, const LightPathContext &context, double *pdf_direction) const = 0;
 };
 
 

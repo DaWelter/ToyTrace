@@ -19,7 +19,6 @@ public:
     SCATTER_VERTEX
   };
   const PathEndTag path_end_tag;
-  ResponseContainer responses;
 public:
   Vertex(PathEndTag _path_end_tag = SCATTER_VERTEX) : path_end_tag{_path_end_tag} {}
   virtual ScatterSample Sample(Sampler& sampler, const PathContext &context) const = 0;
@@ -128,10 +127,11 @@ class Camera : public Vertex
   const ROI::PointEmitterArray &emitter;
   Double3 pos;
   IntersectionCalculator &intersector;
+  int &splatting_unit_index;
 public:
   // TODO: Get rid of the intersector!
-  Camera(const ROI::PointEmitterArray &_emitter, int _unit_index, IntersectionCalculator &_intersector)
-    : Vertex(END_VERTEX), unit_index{_unit_index}, emitter{_emitter}, intersector{_intersector}
+  Camera(const ROI::PointEmitterArray &_emitter, int _unit_index, IntersectionCalculator &_intersector, int &_splatting_unit_index)
+    : Vertex(END_VERTEX), unit_index{_unit_index}, emitter{_emitter}, intersector{_intersector}, splatting_unit_index{_splatting_unit_index}
   {}
   
   ROI::PositionSample PositionSample(Sampler& sampler, const PathContext &context)
@@ -147,18 +147,14 @@ public:
     ROI::LightPathContext light_context{context.lambda_idx};
     auto smpl_dir = emitter.TakeDirectionSampleFrom(unit_index, pos, sampler, light_context);
     auto scatter_smpl = ScatterSample{smpl_dir.coordinates, smpl_dir.value, smpl_dir.pdf_or_pmf};
-    SetPmfFlag(scatter_smpl); // TODO: See below.
     return scatter_smpl;
   }
   
   Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) override
   {   
-    // TODO: Make this nice.
-    responses.clear();
-    emitter.Evaluate(pos, out_direction, responses, ROI::LightPathContext{context.lambda_idx});
-    if (pdf)
-      *pdf = 0.;
-    return Spectral3{0.};
+    auto response = emitter.Evaluate(pos, out_direction, ROI::LightPathContext{context.lambda_idx}, pdf);
+    splatting_unit_index = response.unit_index;
+    return response.weight;
   }
   
   void InitRayAndMaybeHandlePassageThroughSurface(Ray &ray, const Double3 &exitant_dir, MediumTracker &medium_tracker) const
@@ -307,6 +303,7 @@ class PathTracing : public BaseAlgo
   LambdaSelectionFactory lambda_selection_factory;
   bool do_sample_brdf;
   bool do_sample_lights;
+  int splatting_unit_index;
 public:
   PathTracing(const Scene &_scene, const AlgorithmParameters &algo_params) 
   : BaseAlgo(_scene), 
@@ -439,12 +436,9 @@ public:
     double scatter_pdf_wrt_solid_angle = NaN;
     Spectral3 scatter_factor = vertex.Evaluate(nd.segment_to_target.ray.dir, context, &scatter_pdf_wrt_solid_angle);
 
-    if (scatter_factor.isZero() && vertex.path_end_tag!=RW::Vertex::END_VERTEX)
+    if (scatter_factor.isZero())
       return Spectral3{0.};
     
-    if (vertex.path_end_tag == RW::Vertex::END_VERTEX && vertex.responses.empty())
-      return Spectral3{0.};
-
     MediumTracker medium_tracker = _medium_tracker_parent;
     vertex.InitRayAndMaybeHandlePassageThroughSurface(nd.segment_to_target.ray, nd.segment_to_target.ray.dir, medium_tracker);
 
@@ -453,27 +447,10 @@ public:
     auto transmittance = TransmittanceEstimate(nd.segment_to_target, medium_tracker, context);
     double r2_factor = nd.is_wrt_solid_angle ? 1. : 1./Sqr(nd.segment_to_target.length);
     
-    if (vertex.path_end_tag == RW::Vertex::END_VERTEX) // Camera Vertex?
-    {
-      for (const auto &r : vertex.responses)
-      {
-        int num_attempted_paths = scene.GetCamera().xres*scene.GetCamera().yres;
-        double mis_weight  = MaybeMisWeight(nd.sample, r.pdf_dir);
-        Spectral3 sub_path_weight = transmittance * scatter_factor * nd.sample.value;
-        sub_path_weight *= r2_factor*mis_weight / PmfOrPdfValue(nd.sample);
-        sub_path_weight /= num_attempted_paths;
-        RGB color = Color::SpectralSelectionToRGB(sub_path_weight*context.beta, context.lambda_idx);
-        sensor_responses.push_back({r.unit_index, color});
-      }
-      return Spectral3{0.};
-    }
-    else
-    {
-      double mis_weight = MaybeMisWeight(nd.sample, scatter_pdf_wrt_solid_angle);    
-      Spectral3 sub_path_weight = transmittance * scatter_factor * nd.sample.value;
-      sub_path_weight *= r2_factor*mis_weight / PmfOrPdfValue(nd.sample);
-      return sub_path_weight;
-    }
+    double mis_weight = MaybeMisWeight(nd.sample, scatter_pdf_wrt_solid_angle);    
+    Spectral3 sub_path_weight = transmittance * scatter_factor * nd.sample.value;
+    sub_path_weight *= r2_factor*mis_weight / PmfOrPdfValue(nd.sample);
+    return sub_path_weight;
   }
   
 
@@ -556,13 +533,15 @@ public:
   
   RGB MakePrettyPixel(int pixel_index) override
   {
+    splatting_unit_index = -1;
+    
     auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
     PathContext context{lambda_selection.first};
     context.beta *= lambda_selection.second;
     MediumTracker medium_tracker{scene};
     Spectral3 path_sample_values{0.};
     
-    RW::Camera start_vertex(scene.GetCamera(), pixel_index, intersector);
+    RW::Camera start_vertex(scene.GetCamera(), pixel_index, intersector, splatting_unit_index);
     {
       auto pos_smpl = start_vertex.PositionSample(sampler, context);
       context.beta *= (1./PmfOrPdfValue(pos_smpl));
@@ -583,8 +562,19 @@ public:
       if (this->do_sample_lights) 
       {
         // Next vertex. Sample a point on a light source. Compute geometry term. Add path weight to total weights.
-        path_sample_values += context.beta *
+        Spectral3 path_weight = context.beta *
           CalculateLightConnectionSubPathWeight(*vertex, medium_tracker, context);
+        if (vertex != &start_vertex)
+        {
+          path_sample_values += path_weight;
+        }
+        else if (splatting_unit_index >= 0)
+        {
+          int num_attempted_paths = scene.GetCamera().xres*scene.GetCamera().yres;
+          path_weight /= num_attempted_paths;
+          RGB color = Color::SpectralSelectionToRGB(path_weight, lambda_selection.first);
+          sensor_responses.push_back({splatting_unit_index, color});
+        }
       }
 
       // Next vertex by sampling the BSDF.

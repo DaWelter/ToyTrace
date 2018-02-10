@@ -246,7 +246,7 @@ public:
   TotalEnvironmentalRadianceField(const Scene& _scene) : scene(_scene) {}
   
   
-  DirectionalSample TakeDirectionSample(Sampler &sampler, const LightPathContext &context) const
+  DirectionalSample TakeDirectionSample(Sampler &sampler, const LightPathContext &context) const override
   {
     assert(size()>0);
     int idx_sample = sampler.UniformInt(0, size()-1);
@@ -276,7 +276,7 @@ public:
   /* Evalutate sum of all env maps. But only continuous parts.
    * Pdf returned is the pdf wrt. solid angle, that the importance sampling strategy would use.
    */
-  Spectral3 Evaluate(const Double3 &emission_dir, const LightPathContext &context, double *pdf_dir) const
+  Spectral3 Evaluate(const Double3 &emission_dir, const LightPathContext &context, double *pdf_dir) const override
   {
     const double selection_probability = size()>0 ? 1./size() : 1.;
     double pdf_sum = 0.;
