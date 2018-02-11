@@ -259,15 +259,16 @@ public:
     }
     else
     {
+      double total_pdf = 0.;
       for (int i=0; i<size(); ++i)
       {
         if (i == idx_sample) continue;
         double pdf;
         auto value = get(i).Evaluate(smpl.coordinates, context, &pdf);
         smpl.value += value;
-        smpl.pdf_or_pmf += pdf;
+        total_pdf += pdf;
       }
-      smpl.pdf_or_pmf *= selection_probability;
+      smpl.pdf_or_pmf = Pdf{selection_probability*total_pdf};
     }
     return smpl;
   }

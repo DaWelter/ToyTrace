@@ -254,7 +254,7 @@ ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, 
   Double3 out_direction = 2.*std::abs(Dot(reverse_incident_dir, h_r))*h_r - reverse_incident_dir;
   ScatterSample smpl; 
   smpl.coordinates = out_direction;
-  smpl.value = this->EvaluateBSDF(reverse_incident_dir, surface_hit, out_direction, context, &smpl.pdf_or_pmf);
+  smpl.value = this->EvaluateBSDF(reverse_incident_dir, surface_hit, out_direction, context, &smpl.pdf_or_pmf.value);
   return smpl;
 }
 

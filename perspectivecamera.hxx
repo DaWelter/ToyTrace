@@ -95,7 +95,7 @@ public:
     Double3 v{x, y, 1.};
     double  l = Length(v);
     v *= 1./l;
-    double pdf = TransformPdfFromAreaToSolidAngle(1./screen_surface_area, l, v, Double3{0., 0., 1.});
+    double pdf = 1./screen_surface_area* PdfConversion::AreaToSolidAngle(l, v, Double3{0., 0., 1.});
     return pdf;
   }
 	

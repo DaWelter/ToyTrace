@@ -369,7 +369,7 @@ public:
   {
     ConnectionEndNodeData nd;
     auto dir_sample = target.TakeDirectionSample(sampler, light_context);
-    nd.sample = dir_sample.as<TagEndNodeSample>();
+    nd.sample = dir_sample.as<EndNodeSample>();
     nd.segment_to_target = RaySegment{{vertex.Position(), -dir_sample.coordinates}, sufficiently_long_distance_to_go_outside_the_scene_bounds};
     nd.is_wrt_solid_angle = true;
     return nd;
@@ -382,7 +382,7 @@ public:
     nd.segment_to_target = RaySegment::FromTo(vertex.Position(), pos_sample.coordinates);
     // Direction component of Le(x-x') is zero for lights with delta function in Le.
     auto direction_factor = target.EvaluateDirectionComponent(pos_sample.coordinates, -nd.segment_to_target.ray.dir, light_context, nullptr);
-    nd.sample = pos_sample.as<TagEndNodeSample>();
+    nd.sample = pos_sample.as<EndNodeSample>();
     nd.sample.value *= direction_factor;
     nd.is_wrt_solid_angle = false;
     return nd;
@@ -399,7 +399,7 @@ public:
     nd.sample.coordinates = surfaceinteraction.pos;
     nd.sample.value       = radiance;
     nd.sample.pdf_or_pmf  = area_sample.pdf_or_pmf;
-    nd.sample.pdf_or_pmf  = TransformPdfFromAreaToSolidAngle(nd.sample.pdf_or_pmf, nd.segment_to_target.length, nd.segment_to_target.ray.dir, surfaceinteraction.geometry_normal);
+    nd.sample.pdf_or_pmf *= PdfConversion::AreaToSolidAngle(nd.segment_to_target.length, nd.segment_to_target.ray.dir, surfaceinteraction.geometry_normal);
     nd.is_wrt_solid_angle = true;
     return nd;
   }
@@ -475,7 +475,7 @@ public:
     auto radiance = emitter.Evaluate(hit, -incident_segment.ray.dir, ROI::LightPathContext{context.lambda_idx}, &pdf_of_pos, nullptr);
     assert(pdf_of_pos >= 0 && std::isfinite(pdf_of_pos));
     SurfaceInteraction surfaceinteraction = ROI::MakeSurfaceInteraction(hit);
-    pdf_of_emitter_wrt_solid_angle = TransformPdfFromAreaToSolidAngle(pdf_of_pos, incident_segment.length, incident_segment.ray.dir, surfaceinteraction.geometry_normal);
+    pdf_of_emitter_wrt_solid_angle = pdf_of_pos*PdfConversion::AreaToSolidAngle(incident_segment.length, incident_segment.ray.dir, surfaceinteraction.geometry_normal);
     return radiance;
   }
   

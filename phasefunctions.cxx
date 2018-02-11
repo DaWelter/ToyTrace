@@ -160,14 +160,15 @@ ScatterSample Combined::SampleDirection(const Double3& reverse_incident_dir, Sam
   Spectral3 other_pf_value = pf[not_sampled_constituent]->Evaluate(reverse_incident_dir, smpl.coordinates, &pf_pdf[not_sampled_constituent]);
   
   smpl.value = prob_constituent_given_lambda[constituent]*smpl.value + prob_constituent_given_lambda[not_sampled_constituent]*other_pf_value;
-  smpl.pdf_or_pmf = 0.;
+  double total_pdf = 0.;
   for (int c = 0; c<NC; ++c)
   {
     for (int lambda = 0; lambda<NL; ++lambda)
     {
-      smpl.pdf_or_pmf += pf_pdf[c]*prob_lambda[lambda]*prob_constituent_given_lambda[c][lambda];
+      total_pdf += pf_pdf[c]*prob_lambda[lambda]*prob_constituent_given_lambda[c][lambda];
     }
   }
+  smpl.pdf_or_pmf = Pdf{total_pdf};
   return smpl;
 }
 
