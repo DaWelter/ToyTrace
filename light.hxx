@@ -20,39 +20,27 @@ public:
     col *= 1./UnitSphereSurfaceArea;
   }
 
-  PositionSample TakePositionSample(Sampler &sampler, const LightPathContext &context) const override
+  Double3 Position() const override
   {
-    PositionSample s {
-      pos,
-      Take(col, context.lambda_idx),
-      1.
-    };
-    SetPmfFlag(s);
-    return s;
+    return pos;
   }
-  
+    
   DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler, const LightPathContext &context) const override
   {
     DirectionalSample s{
       SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare()),
-      Spectral3{1._sp},
+      Take(col, context.lambda_idx),
       1./(UnitSphereSurfaceArea)
     };
     return s;
   }
   
-  Spectral3 EvaluatePositionComponent(const Double3 &pos, const LightPathContext &context, double *pdf) const override
+  Spectral3 Evaluate(const Double3 &pos, const Double3 &dir_out, const LightPathContext &context, double *pdf_direction) const override
   {
     assert (Length(pos - this->pos) <= Epsilon);
-    if (pdf) *pdf = 0.;
-    return Spectral3{0.};
-  }
-  
-  Spectral3 EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, const LightPathContext &context, double *pdf) const override
-  {
-    assert (Length(pos - this->pos) <= Epsilon);
-    if (pdf) *pdf = 1./(UnitSphereSurfaceArea);
-    return Spectral3{1.};
+    if (pdf_direction) 
+      *pdf_direction = 1./(UnitSphereSurfaceArea);
+    return Take(col, context.lambda_idx);
   }
 };
 
@@ -75,15 +63,21 @@ public:
     return smpl;
   }
   
-  inline Spectral3 Evaluate(const PosSampleCoordinates &area, const Double3 &dir_out, const LightPathContext &context, double *pdf_pos, double *pdf_dir) const override
+  inline Spectral3 Evaluate(const PosSampleCoordinates &area, const Double3 &dir_out, const LightPathContext &context, double *pdf_dir) const override
   {
     const auto* primitive = area.primitive;
-    if (pdf_pos)
-      *pdf_pos = 1./primitive->Area();
+    assert (primitive);
     if (pdf_dir)
       *pdf_dir = 1./UnitHalfSphereSurfaceArea;
     // Cos of angle between exitant dir and normal is dealt with elsewhere.
     return Take(spectrum, context.lambda_idx);
+  }
+  
+  double EvaluatePdf(const PosSampleCoordinates &area, const LightPathContext &context) const override
+  {
+    const auto* primitive = area.primitive;
+    assert (primitive && primitive->Area() > 0.);
+    return 1./primitive->Area();
   }
 };
 
@@ -112,11 +106,15 @@ public:
     return s;
   }
   
-  Spectral3 Evaluate(const Double3 &dir_out, const LightPathContext &context, double *pdf) const override
+  Spectral3 Evaluate(const Double3 &dir_out, const LightPathContext &context) const override
   {
     assert (Length(dir_out - this->dir_out) <= Epsilon);
-    if (pdf) *pdf = 0.;
     return Spectral3{0.};
+  }
+  
+  double EvaluatePdf(const Double3 &dir_out, const LightPathContext &context) const override
+  {
+    return 0;
   }
 };
 
@@ -147,13 +145,18 @@ public:
     return s;
   }
   
-  Spectral3 Evaluate(const Double3 &dir_out, const LightPathContext &context, double *pdf) const override
+  Spectral3 Evaluate(const Double3 &dir_out, const LightPathContext &context) const override
   {
-    if (pdf) *pdf = 1./UnitHalfSphereSurfaceArea;
     // Similar rationale as above: light comes from the top hemisphere if
     // the direction vector points down.
     auto above = Dot(dir_out, down_dir);
-    return above > 0 ? Take(col, context.lambda_idx) : Spectral3{0.};
+    return above > 0. ? Take(col, context.lambda_idx) : Spectral3{0.};
+  }
+  
+  double EvaluatePdf(const Double3 &dir_out, const LightPathContext &context) const override
+  {
+    auto above = Dot(dir_out, down_dir);
+    return above > 0. ? 1./UnitHalfSphereSurfaceArea : 0.;
   }
 };
 
@@ -167,6 +170,13 @@ class Sun : public EnvironmentalRadianceField
   // The a positive opening angle is the result of the finite extend of the source.
   double cos_opening_angle;
   double pdf_val;
+  
+  bool IsInCone(const Double3 &dir_out) const
+  {
+    Double3 dir_out_center = frame.col(2);
+    return Dot(dir_out, dir_out_center) > cos_opening_angle;
+  }
+  
 public:
   Sun(double _total_power, const Double3 &_dir_out, double opening_angle)
   {
@@ -189,14 +199,18 @@ public:
     return s;
   }
 
-  Spectral3 Evaluate(const Double3 &dir_out, const LightPathContext &context, double *pdf) const override
+  Spectral3 Evaluate(const Double3 &dir_out, const LightPathContext &context) const override
   {
     ASSERT_NORMALIZED(dir_out);
-    Double3 dir_out_center = frame.col(2);
-    bool is_in_cone = Dot(dir_out, dir_out_center) > cos_opening_angle;
-    if (pdf) 
-      *pdf = is_in_cone ? pdf_val : 0.;
+    bool is_in_cone = IsInCone(dir_out);
     return is_in_cone ? Take(emission_spectrum, context.lambda_idx) : Spectral3{0.};
+  }
+  
+  double EvaluatePdf(const Double3 &dir_out, const LightPathContext &context) const override
+  {
+    ASSERT_NORMALIZED(dir_out);
+    bool is_in_cone = IsInCone(dir_out);
+    return is_in_cone ? pdf_val : 0.;
   }
 };
 

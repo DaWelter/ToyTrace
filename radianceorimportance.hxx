@@ -28,12 +28,12 @@ public:
   virtual ~Emitter() {}
 };
 
-
 class EnvironmentalRadianceField : public Emitter
 {
 public:
   virtual DirectionalSample TakeDirectionSample(Sampler &sampler, const LightPathContext &context) const = 0;
-  virtual Spectral3 Evaluate(const Double3 &emission_dir, const LightPathContext &context, double *pdf_dir) const = 0;
+  virtual Spectral3 Evaluate(const Double3 &emission_dir, const LightPathContext &context) const = 0;
+  virtual double EvaluatePdf(const Double3 &emission_dir, const LightPathContext &context) const = 0;
 };
 
 
@@ -46,27 +46,10 @@ using AreaSample = Sample<PosSampleCoordinates, Nothing, TagAreaSample>;
 class PointEmitter : public Emitter
 {
 public:
-  virtual PositionSample TakePositionSample(Sampler &sampler, const LightPathContext &context) const = 0;
+  virtual Double3 Position() const = 0;
   virtual DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler, const LightPathContext &context) const = 0;
-  //virtual Spectral3 Evaluate(const Double3 &pos_on_this, const Double3 &dir_out, const LightPathContext &context, double *pdf_pos, double *pdf_dir) const = 0;
-  virtual Spectral3 EvaluatePositionComponent(const Double3 &pos, const LightPathContext &context, double *pdf) const = 0;
-  virtual Spectral3 EvaluateDirectionComponent(const Double3 &pos, const Double3 &dir_out, const LightPathContext &context, double *pdf) const = 0;
+  virtual Spectral3 Evaluate(const Double3 &pos, const Double3 &dir_out, const LightPathContext &context, double *pdf_direction) const = 0;
 };
-
-
-inline SurfaceInteraction MakeSurfaceInteraction(const PosSampleCoordinates &coords)
-{
-  return SurfaceInteraction(coords);
-}
-
-// inline PosSampleCoordinates MakePosSampleCoordinatesFrom(const HitId &hit)
-// {
-//   PosSampleCoordinates area;
-//   area.hit = hit;
-//   Double3 dummy1;
-//   hit.primitive->GetLocalGeometry(hit, area.pos, area.normal, dummy1);
-//   return area;
-// }
 
 
 class AreaEmitter : public Emitter
@@ -78,7 +61,8 @@ public:
     assert(!"Not Implemented");
     return DirectionalSample{};
   }
-  virtual Spectral3 Evaluate(const PosSampleCoordinates &area, const Double3 &dir_out, const LightPathContext &context, double *pdf_pos, double *pdf_dir) const = 0;
+  virtual Spectral3 Evaluate(const PosSampleCoordinates &area, const Double3 &dir_out, const LightPathContext &context, double *pdf_direction) const = 0;
+  virtual double EvaluatePdf(const PosSampleCoordinates &area, const LightPathContext &context) const = 0;
 };
 
 

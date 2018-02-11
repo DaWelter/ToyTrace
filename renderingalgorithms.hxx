@@ -252,6 +252,9 @@ public:
     int idx_sample = sampler.UniformInt(0, size()-1);
     const double selection_probability = 1./size();
     ROI::DirectionalSample smpl = get(idx_sample).TakeDirectionSample(sampler, context);
+//    smpl.pdf_or_pmf *= selection_probability; // Russian roulette style removal of all but one sub-component.
+//    return smpl;
+
     if (IsFromPmf(smpl))
     {
       smpl.pdf_or_pmf *= selection_probability;
@@ -263,37 +266,38 @@ public:
       for (int i=0; i<size(); ++i)
       {
         if (i == idx_sample) continue;
-        double pdf;
-        auto value = get(i).Evaluate(smpl.coordinates, context, &pdf);
-        smpl.value += value;
-        total_pdf += pdf;
+        smpl.value += get(i).Evaluate(smpl.coordinates, context);
+        total_pdf += get(i).EvaluatePdf(smpl.coordinates, context);
       }
-      smpl.pdf_or_pmf = Pdf{selection_probability*total_pdf};
+      smpl.pdf_or_pmf = Pdf{selection_probability*total_pdf}; // TODO: This cannot be right.
     }
     return smpl;
   }
   
-  
-  /* Evalutate sum of all env maps. But only continuous parts.
-   * Pdf returned is the pdf wrt. solid angle, that the importance sampling strategy would use.
-   */
-  Spectral3 Evaluate(const Double3 &emission_dir, const LightPathContext &context, double *pdf_dir) const override
+
+  Spectral3 Evaluate(const Double3 &emission_dir, const LightPathContext &context) const override
   {
-    const double selection_probability = size()>0 ? 1./size() : 1.;
-    double pdf_sum = 0.;
     Spectral3 environmental_radiance{0.};
     for (int i=0; i<size(); ++i)
     {
       const auto &light = get(i);
       environmental_radiance += light.Evaluate(
-        emission_dir,
-        context,
-        pdf_dir);
-      pdf_sum += pdf_dir ? *pdf_dir : 0.;
+        emission_dir, context);
     }
-    if (pdf_dir)
-      *pdf_dir = pdf_sum * selection_probability;
     return environmental_radiance;
+  }
+  
+  
+  double EvaluatePdf(const Double3 &dir_out, const LightPathContext &context) const override
+  {
+    const double selection_probability = size()>0 ? 1./size() : 1.;
+    double pdf_sum = 0.;
+    for (int i=0; i<size(); ++i)
+    {
+      const auto &light = get(i);
+      pdf_sum += light.EvaluatePdf(dir_out, context);
+    }
+    return pdf_sum * selection_probability;
   }
 };
 
