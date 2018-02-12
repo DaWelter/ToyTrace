@@ -434,7 +434,6 @@ ScatterSample HomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir
 
 Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler, const PathContext &context) const
 {
-  assert(!context.beta.isZero());
   Medium::InteractionSample smpl{
     0.,
     Spectral3{1.}

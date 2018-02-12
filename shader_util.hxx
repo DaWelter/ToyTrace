@@ -9,11 +9,9 @@
 
 struct PathContext
 {
-  explicit PathContext(const Index3 &_lambda_idx) :
-    beta{1.},
-    lambda_idx(_lambda_idx)
+  explicit PathContext(const Index3 &_lambda_idx)
+    : lambda_idx(_lambda_idx)
   {}
-  Spectral3 beta;
   Index3 lambda_idx;
 };
 

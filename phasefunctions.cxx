@@ -165,6 +165,10 @@ ScatterSample Combined::SampleDirection(const Double3& reverse_incident_dir, Sam
   {
     for (int lambda = 0; lambda<NL; ++lambda)
     {
+      // This is maginalization. I compute the unconditional probability to select the constituent.
+      // Therefore, TODO: The pf_pdf can be pulled out of the loop.
+      // TODO: Actually, since the pdf_pdf does not depend on lambda, the hole processes of selecting lambda and then selecting the constituent is nonsensical.
+      // It would be much easier to compute unconditional selection probabilities in the first place. Or not??
       total_pdf += pf_pdf[c]*prob_lambda[lambda]*prob_constituent_given_lambda[c][lambda];
     }
   }
@@ -198,5 +202,103 @@ Spectral3 Combined::Evaluate(const Double3& reverse_indcident_dir, const Double3
 }
 
 
+
+SimpleCombined::SimpleCombined(const Spectral3& weight1, const PhaseFunction& pf1, const Spectral3& weight2, const PhaseFunction& pf2)
+  : pf{&pf1, &pf2}, weights{ weight1, weight2}
+{
+  double select_prob_normalization = 0;
+  Spectral3 weight_normalization{0.};
+  for (int i=0; i<NUM_CONSTITUENTS; ++i)
+  {
+    assert((weights[i] > 0.).all());
+    selection_probability[i] = weights[i].sum();
+    select_prob_normalization += selection_probability[i];
+    weight_normalization += weights[i];
+  }
+  assert(select_prob_normalization>0.);
+  assert((weight_normalization>0.).all());
+  select_prob_normalization = 1./select_prob_normalization;
+  weight_normalization = 1./weight_normalization;
+  for (int i=0; i<NUM_CONSTITUENTS; ++i)
+  {
+    selection_probability[i] *= select_prob_normalization;
+    weights[i] *= weight_normalization;
+  }
+  // Weights now sum to one component wise.
+}
+
+
+ScatterSample SimpleCombined::SampleDirection(const Double3& reverse_incident_dir, Sampler& sampler) const
+{
+  constexpr int NC = NUM_CONSTITUENTS;
+  static_assert(NC == 2, "Must be 2 constituents");
+  Color::Scalar pf_pdf[NC];
+  
+  int constituent = TowerSampling<NC, Color::Scalar>(selection_probability, sampler.Uniform01());
+  int not_sampled_constituent = constituent==0 ? 1 : 0;
+  
+  auto smpl = pf[constituent]->SampleDirection(reverse_incident_dir, sampler);
+  pf_pdf[constituent] = smpl.pdf_or_pmf;
+  Spectral3 other_pf_value = pf[not_sampled_constituent]->Evaluate(reverse_incident_dir, smpl.coordinates, &pf_pdf[not_sampled_constituent]);
+  
+  smpl.value = weights[constituent]*smpl.value + weights[not_sampled_constituent]*other_pf_value;
+  smpl.pdf_or_pmf = Pdf{
+    selection_probability[0]*pf_pdf[0] + selection_probability[1]*pf_pdf[1]
+  };
+  return smpl;
+}
+
+
+Spectral3 SimpleCombined::Evaluate(const Double3& reverse_indcident_dir, const Double3& out_direction, double* pdf) const
+{
+  constexpr int NC = NUM_CONSTITUENTS;
+  static_assert(NC == 2, "Must be 2 constituents");
+
+  double pf_pdf[NC];
+  Spectral3 pf_val[NC];
+  pf_val[0] = pf[0]->Evaluate(reverse_indcident_dir, out_direction, &pf_pdf[0]);
+  pf_val[1] = pf[1]->Evaluate(reverse_indcident_dir, out_direction, &pf_pdf[1]);
+  if (pdf)
+  {
+    *pdf = selection_probability[0]*pf_pdf[0] + 
+           selection_probability[1]*pf_pdf[1];
+  }
+  return weights[0]*pf_val[0] + weights[1]*pf_val[1];
+}
+
+
+
+
+void WeightsToCombinationProbabilities(Spectral3 &prob_lambda, Spectral3 *prob_constituent_given_lambda, int num_constituents)
+{
+  double prob_lambda_normalization = 0.;
+  for (int lambda = 0; lambda<static_size<Spectral3>(); ++lambda)
+  {
+    // For a given lambda, the normalization sum goes over the constituents.
+    double normalization = 0.;
+    for (int c=0; c<num_constituents; ++c)
+    {
+      // The probability weight to select a constituent for sampling is
+      // just the coefficient in front of the respective scattering function.
+      normalization += prob_constituent_given_lambda[c][lambda];
+    }
+    assert(normalization > 0.);
+    for (int c=0; c<num_constituents; ++c)
+    {
+      prob_constituent_given_lambda[c][lambda] /= normalization;
+    }
+    // The weights of the current path should be reflected in the probability
+    // to select some lambda. That is to prevent sampling a lambda which already
+    // has a very low weight, or zero as in single wavelength sampling mode.
+    // Add epsilon to protect against all zero beta.
+    prob_lambda[lambda] = normalization * (prob_lambda[lambda] + Epsilon);
+    prob_lambda_normalization += prob_lambda[lambda];
+  }
+  assert(prob_lambda_normalization > 0.);
+  for (int lambda = 0; lambda<static_size<Spectral3>(); ++lambda)
+  {
+    prob_lambda[lambda] /= prob_lambda_normalization;
+  }
+}
 
 }

@@ -876,6 +876,14 @@ TEST_F(PhasefunctionTests, Combined)
 }
 
 
+TEST_F(PhasefunctionTests, SimpleCombined)
+{
+  PhaseFunctions::HenleyGreenstein pf1{0.4};
+  PhaseFunctions::Uniform pf2;
+  PhaseFunctions::SimpleCombined pf{{.1, .2, .3}, pf1, {.3, .4, .5}, pf2};
+  TestPfSampling(pf, Double3{0,0,1}, 10000, 3.5);
+}
+
 
 class StratifiedFixture : public testing::Test
 {

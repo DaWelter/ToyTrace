@@ -538,14 +538,14 @@ public:
     
     auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
     PathContext context{lambda_selection.first};
-    context.beta *= lambda_selection.second;
+    Spectral3 beta = lambda_selection.second;
     MediumTracker medium_tracker{scene};
     Spectral3 path_sample_values{0.};
     
     RW::Camera start_vertex(scene.GetCamera(), pixel_index, intersector, splatting_unit_index);
     {
       auto pos_smpl = start_vertex.PositionSample(sampler, context);
-      context.beta *= (1./PmfOrPdfValue(pos_smpl));
+      beta *= (1./PmfOrPdfValue(pos_smpl));
       medium_tracker.initializePosition(pos_smpl.coordinates, intersector);
     }
   
@@ -563,7 +563,7 @@ public:
       if (this->do_sample_lights) 
       {
         // Next vertex. Sample a point on a light source. Compute geometry term. Add path weight to total weights.
-        Spectral3 path_weight = context.beta *
+        Spectral3 path_weight = beta *
           CalculateLightConnectionSubPathWeight(*vertex, medium_tracker, context);
         if (vertex != &start_vertex)
         {
@@ -580,9 +580,9 @@ public:
 
       // Next vertex by sampling the BSDF.
       scatter_smpl = vertex->Sample(sampler, context);
-      context.beta *= scatter_smpl.value / PmfOrPdfValue(scatter_smpl);
+      beta *= scatter_smpl.value / PmfOrPdfValue(scatter_smpl);
       
-      if (context.beta.isZero()) // Because of odd situations where ray can be scattered below the surface due to smooth normal interpolation.
+      if (beta.isZero()) // Because of odd situations where ray can be scattered below the surface due to smooth normal interpolation.
         break;
       
       vertex->InitRayAndMaybeHandlePassageThroughSurface(ray, scatter_smpl.coordinates, medium_tracker);
@@ -590,24 +590,24 @@ public:
       // And tracking to the next interaction point.
       collision = CollisionData{ray};
       TrackToNextInteraction(collision, medium_tracker, context);
-      context.beta *= collision.smpl.weight;
+      beta *= collision.smpl.weight;
       
       std::tie(entity_hit_flag, vertex) = DetermineNextInteractionType(collision, medium_tracker);
       
       if (entity_hit_flag != SCATTERER) // Hit a light or particle escaped the scene.
         break;   
 
-      bool survive = RouletteSurvival(context.beta, number_of_interactions);
+      bool survive = RouletteSurvival(beta, number_of_interactions);
       if (!survive)
         break;
       
       assert(vertex);
-      assert(context.beta.allFinite());
+      assert(beta.allFinite());
     }
 
     if (this->do_sample_brdf)
     {
-      path_sample_values += context.beta * CalculateEmitterHitSubPathWeight(
+      path_sample_values += beta * CalculateEmitterHitSubPathWeight(
         entity_hit_flag, collision, scatter_smpl, context
       );
     }

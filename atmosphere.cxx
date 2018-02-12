@@ -35,7 +35,6 @@ const PhaseFunctions::PhaseFunction& AtmosphereTemplate<ConstituentDistribution_
 template<class ConstituentDistribution_, class Geometry_>
 Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_>::SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const
 {
-  assert(!context.beta.isZero());
   Medium::InteractionSample smpl{
     0.,
     Spectral3{1.}
@@ -141,7 +140,7 @@ Medium::PhaseSample AtmosphereTemplate<ConstituentDistribution_, Geometry_>::Sam
   Spectral3 sigma_s[NUM_CONSTITUENTS];
   constituents.ComputeSigmaS(altitude, sigma_s, context.lambda_idx);
 
-  return PhaseFunctions::Combined(context.beta, sigma_s[0], GetPhaseFunction(0), sigma_s[1], GetPhaseFunction(1))
+  return PhaseFunctions::SimpleCombined(sigma_s[0], GetPhaseFunction(0), sigma_s[1], GetPhaseFunction(1))
     .SampleDirection(incident_dir, sampler);
 }
 
@@ -153,7 +152,7 @@ Spectral3 AtmosphereTemplate<ConstituentDistribution_, Geometry_>::EvaluatePhase
   Spectral3 sigma_s[NUM_CONSTITUENTS];
   constituents.ComputeSigmaS(altitude, sigma_s, context.lambda_idx);
   
-  return PhaseFunctions::Combined(context.beta, sigma_s[0], GetPhaseFunction(0), sigma_s[1], GetPhaseFunction(1))
+  return PhaseFunctions::SimpleCombined(sigma_s[0], GetPhaseFunction(0), sigma_s[1], GetPhaseFunction(1))
     .Evaluate(incident_dir, out_direction, pdf);
 }
 
