@@ -2,7 +2,21 @@
 
 #include "vec3f.hxx"
 #include "spectral.hxx"
+#include "texture.hxx"
 #include "sampler.hxx"
+#include "ray.hxx"
+
+
+struct PathContext
+{
+  explicit PathContext(const Index3 &_lambda_idx) :
+    beta{1.},
+    lambda_idx(_lambda_idx)
+  {}
+  Spectral3 beta;
+  Index3 lambda_idx;
+};
+
 
 namespace TrackingDetail
 {
@@ -29,6 +43,7 @@ inline bool RussianRouletteSurvival(double weight, int iteration, Sampler &sampl
 
 
 // Is passing parameters like that as efficient has having the same number of item as normal individual arguments?
+// Ref: Kutz et a. (2017) "Spectral and Decomposition Tracking for Rendering Heterogeneous Volumes"
 inline void ComputeProbabilitiesHistoryScheme(
   const Spectral3 &weights,
   std::initializer_list<std::reference_wrapper<const Spectral3>> sigmas,

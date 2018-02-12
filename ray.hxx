@@ -8,7 +8,9 @@
 class Primitive;
 class Shader;
 
+
 static constexpr double RAY_EPSILON = 1.e-6; //1.e-10;
+
 
 struct Ray
 {

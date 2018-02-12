@@ -3,16 +3,9 @@
 
 #include <memory>
 
-#include"vec3f.hxx"
-#include"spectral.hxx"
-#include"texture.hxx"
-#include "sampler.hxx"
+#include "shader_util.hxx"
 
-class Sampler;
-struct Ray;
-struct RaySegment;
 class Scene;
-struct RaySurfaceIntersection;
 
 struct TagScatterSample {};
 using ScatterSample = Sample<Double3, Spectral3, TagScatterSample>;
@@ -20,17 +13,6 @@ using ScatterSample = Sample<Double3, Spectral3, TagScatterSample>;
 
 // Included here because it uses ScatterSample.
 #include"phasefunctions.hxx"
-
-
-struct PathContext
-{
-  explicit PathContext(const Index3 &_lambda_idx) :
-    beta{1.},
-    lambda_idx(_lambda_idx)
-  {}
-  Spectral3 beta;
-  Index3 lambda_idx;
-};
 
 
 enum ShaderFlags : int
