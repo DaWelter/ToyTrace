@@ -30,6 +30,7 @@ bool Triangle::Intersect(const Ray &ray, double &ray_length, HitId &hit) const
   hit.barry[0] = edge_func[1] * normalization;
   hit.barry[1] = edge_func[2] * normalization;
   hit.barry[2] = edge_func[0] * normalization;
+  assert(hit.barry.allFinite());
   ray_length = s;
   hit.primitive = this;
   return true;
@@ -47,6 +48,8 @@ void Triangle::GetLocalGeometry(
               hit.barry[2] * p[2];
   shading_normal = normal =
       Normalized(Cross(p[1]-p[0],p[2]-p[0]));
+  assert  (hit_point.allFinite());
+  assert  (normal.allFinite());
 }
 
 

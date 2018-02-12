@@ -66,6 +66,9 @@ public:
                      n[0]*hit.barry[0]+
                      n[1]*hit.barry[1]+
                      n[2]*hit.barry[2]);
+    assert  (hit_point.allFinite());
+    assert  (normal.allFinite());
+    assert  (shading_normal.allFinite());
   }
 };
 
