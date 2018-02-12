@@ -12,7 +12,6 @@ class Camera : public RadianceOrImportance::PointEmitterArray
 public:
   using PositionSample = RadianceOrImportance::PositionSample;
   using DirectionalSample = RadianceOrImportance::DirectionalSample;
-  using LightPathContext = RadianceOrImportance::LightPathContext;
   
   int xres,yres;
   
@@ -99,13 +98,13 @@ public:
     return pdf;
   }
 	
-  virtual PositionSample TakePositionSample(int unit_index, Sampler &sampler, const LightPathContext &context) const override
+  virtual PositionSample TakePositionSample(int unit_index, Sampler &sampler, const PathContext &context) const override
   {
     PositionSample s{this->pos, Spectral3{1.}, 1.};    
     return s;
   }
   
-  virtual DirectionalSample TakeDirectionSampleFrom(int unit_index, const Double3 &pos, Sampler &sampler, const LightPathContext &context) const override
+  virtual DirectionalSample TakeDirectionSampleFrom(int unit_index, const Double3 &pos, Sampler &sampler, const PathContext &context) const override
   {
     auto pixel = this->UnitToPixel(unit_index);
     double r1 = sampler.Uniform01();
@@ -121,7 +120,7 @@ public:
     return s;
   }
   
-  virtual Response Evaluate(const Double3 &pos_on_this, const Double3 &dir_out, const LightPathContext &context, double *pdf_direction) const override
+  virtual Response Evaluate(const Double3 &pos_on_this, const Double3 &dir_out, const PathContext &context, double *pdf_direction) const override
   {
     ASSERT_NORMALIZED(dir_out);
     // Oh yeah why didn't I just use a matrix multiply ...
@@ -165,13 +164,13 @@ public:
     per_pixel_delta = 2./smallest_side;
   }
 
-  virtual PositionSample TakePositionSample(int unit_index, Sampler &sampler, const LightPathContext &context) const override
+  virtual PositionSample TakePositionSample(int unit_index, Sampler &sampler, const PathContext &context) const override
   {
     PositionSample s{this->pos, Spectral3{1.}, 1.};    
     return s;
   }
   
-  virtual DirectionalSample TakeDirectionSampleFrom(int unit_index, const Double3 &pos, Sampler &sampler, const LightPathContext &context) const override
+  virtual DirectionalSample TakeDirectionSampleFrom(int unit_index, const Double3 &pos, Sampler &sampler, const PathContext &context) const override
   {
     auto pixel = this->UnitToPixel(unit_index);
     auto r = sampler.UniformUnitSquare();
@@ -201,7 +200,7 @@ public:
     }
   }
   
-  virtual Response Evaluate(const Double3 &pos_on_this, const Double3 &dir_out, const LightPathContext &context, double *pdf_direction) const override
+  virtual Response Evaluate(const Double3 &pos_on_this, const Double3 &dir_out, const PathContext &context, double *pdf_direction) const override
   {
 //     ASSERT_NORMALIZED(dir_out);
 //     double w2 = Dot(dir_out, frame.dir);

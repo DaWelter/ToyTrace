@@ -136,23 +136,21 @@ public:
   
   ROI::PositionSample PositionSample(Sampler& sampler, const PathContext &context)
   {
-    ROI::LightPathContext light_context{context.lambda_idx};
-    auto smpl = emitter.TakePositionSample(unit_index, sampler, light_context);
+    auto smpl = emitter.TakePositionSample(unit_index, sampler, context);
     pos = smpl.coordinates;
     return smpl;
   }
   
   ScatterSample Sample(Sampler& sampler, const PathContext &context) const override
   {
-    ROI::LightPathContext light_context{context.lambda_idx};
-    auto smpl_dir = emitter.TakeDirectionSampleFrom(unit_index, pos, sampler, light_context);
+    auto smpl_dir = emitter.TakeDirectionSampleFrom(unit_index, pos, sampler, context);
     auto scatter_smpl = ScatterSample{smpl_dir.coordinates, smpl_dir.value, smpl_dir.pdf_or_pmf};
     return scatter_smpl;
   }
   
   Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) override
   {   
-    auto response = emitter.Evaluate(pos, out_direction, ROI::LightPathContext{context.lambda_idx}, pdf);
+    auto response = emitter.Evaluate(pos, out_direction, context, pdf);
     splatting_unit_index = response.unit_index;
     return response.weight;
   }
@@ -196,7 +194,7 @@ public:
 //   
 //   Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf_pos) const override
 //   {
-//     auto radiance = GetEmitter().Evaluate(area_sample, out_direction, ROI::LightPathContext{context.lambda_idx}, pdf_pos, nullptr);
+//     auto radiance = GetEmitter().Evaluate(area_sample, out_direction, context, pdf_pos, nullptr);
 //     return radiance;
 //   }
 //   
@@ -226,7 +224,7 @@ public:
 //   
 //   Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) const override
 //   {
-//     auto radiance = envlight.Evaluate(out_direction, ROI::LightPathContext{context.lambda_idx}, pdf);
+//     auto radiance = envlight.Evaluate(out_direction, context, pdf);
 //     return radiance;
 //   }
 // };
@@ -365,37 +363,37 @@ public:
   };
   
   
-  ConnectionEndNodeData ComputeConnectionSample(const ROI::EnvironmentalRadianceField &target, const RW::Vertex &vertex, const ROI::LightPathContext &light_context)
+  ConnectionEndNodeData ComputeConnectionSample(const ROI::EnvironmentalRadianceField &target, const RW::Vertex &vertex, const PathContext &context)
   {
     ConnectionEndNodeData nd;
-    auto dir_sample = target.TakeDirectionSample(sampler, light_context);
+    auto dir_sample = target.TakeDirectionSample(sampler, context);
     nd.sample = dir_sample.as<EndNodeSample>();
     nd.segment_to_target = RaySegment{{vertex.Position(), -dir_sample.coordinates}, sufficiently_long_distance_to_go_outside_the_scene_bounds};
     nd.is_wrt_solid_angle = true;
     return nd;
   }
   
-  ConnectionEndNodeData ComputeConnectionSample(const ROI::PointEmitter& target, const RW::Vertex &vertex, const ROI::LightPathContext &light_context)
+  ConnectionEndNodeData ComputeConnectionSample(const ROI::PointEmitter& target, const RW::Vertex &vertex, const PathContext &context)
   {
     ConnectionEndNodeData nd;
     Double3 light_pos = target.Position();
     nd.segment_to_target = RaySegment::FromTo(vertex.Position(), light_pos);
     // Direction component of Le(x-x') is zero for lights with delta function in Le.
-    nd.sample.value = target.Evaluate(light_pos, -nd.segment_to_target.ray.dir, light_context, nullptr);
+    nd.sample.value = target.Evaluate(light_pos, -nd.segment_to_target.ray.dir, context, nullptr);
     nd.sample.pdf_or_pmf = 1.;
     SetPmfFlag(nd.sample);
     nd.is_wrt_solid_angle = false;
     return nd;
   }
   
-  ConnectionEndNodeData ComputeConnectionSample(const ROI::AreaEmitter& target, const Primitive &primitive, const RW::Vertex &vertex, const ROI::LightPathContext &light_context)
+  ConnectionEndNodeData ComputeConnectionSample(const ROI::AreaEmitter& target, const Primitive &primitive, const RW::Vertex &vertex, const PathContext &context)
   {
     ConnectionEndNodeData nd;
-    auto area_sample = target.TakeAreaSample(primitive, sampler, light_context);
+    auto area_sample = target.TakeAreaSample(primitive, sampler, context);
     auto surfaceinteraction = SurfaceInteraction{area_sample.coordinates};
     surfaceinteraction.pos += AntiSelfIntersectionOffset(surfaceinteraction.geometry_normal, RAY_EPSILON, Normalized(vertex.Position()-surfaceinteraction.pos));
     nd.segment_to_target = RaySegment::FromTo(vertex.Position(), surfaceinteraction.pos);
-    auto radiance = target.Evaluate(area_sample.coordinates, -nd.segment_to_target.ray.dir, light_context, nullptr);
+    auto radiance = target.Evaluate(area_sample.coordinates, -nd.segment_to_target.ray.dir, context, nullptr);
     nd.sample.coordinates = surfaceinteraction.pos;
     nd.sample.value       = radiance;
     nd.sample.pdf_or_pmf  = area_sample.pdf_or_pmf;
@@ -406,8 +404,6 @@ public:
 
   Spectral3 CalculateLightConnectionSubPathWeight(RW::Vertex &vertex, const MediumTracker &_medium_tracker_parent, const PathContext &context)
   {    
-    ROI::LightPathContext light_context{context.lambda_idx};
-
     //bool can_be_hit_by_scatter_function_sampling = true;
     //double pdf_of_light_vertex_wrt_solid_angle = NaN;
     ConnectionEndNodeData nd;
@@ -416,20 +412,20 @@ public:
     if (which_kind == IDX_PROB_ENV)
     {
       const auto &envlight = this->GetEnvLight();
-      nd = ComputeConnectionSample(envlight, vertex, light_context);
+      nd = ComputeConnectionSample(envlight, vertex, context);
     }
     else if(which_kind == IDX_PROB_AREA)
     {
       const Primitive* primitive;
       const ROI::AreaEmitter* emitter;
       std::tie(primitive, emitter, pmf_of_light) = PickAreaLight();
-      nd = ComputeConnectionSample(*emitter, *primitive, vertex, light_context);
+      nd = ComputeConnectionSample(*emitter, *primitive, vertex, context);
     }
     else
     {
       const ROI::PointEmitter* light; 
       std::tie(light, pmf_of_light) = PickLight();
-      nd = ComputeConnectionSample(*light, vertex, light_context);
+      nd = ComputeConnectionSample(*light, vertex, context);
     }
     nd.sample.pdf_or_pmf *= pmf_of_light*emitter_type_selection_probabilities[which_kind];
     
@@ -464,16 +460,16 @@ public:
   
   Spectral3 EmitterHit(const ROI::EnvironmentalRadianceField& emitter, const RaySegment &incident_segment, const PathContext &context, double &pdf_of_emitter_wrt_solid_angle)
   {
-    auto radiance = envlight.Evaluate(-incident_segment.ray.dir, ROI::LightPathContext{context.lambda_idx});
-    pdf_of_emitter_wrt_solid_angle = envlight.EvaluatePdf(-incident_segment.ray.dir, ROI::LightPathContext{context.lambda_idx});
+    auto radiance = envlight.Evaluate(-incident_segment.ray.dir, context);
+    pdf_of_emitter_wrt_solid_angle = envlight.EvaluatePdf(-incident_segment.ray.dir, context);
     assert(pdf_of_emitter_wrt_solid_angle >= 0 && std::isfinite(pdf_of_emitter_wrt_solid_angle));
     return radiance;
   }
   
   Spectral3 EmitterHit(const ROI::AreaEmitter &emitter, const HitId &hit, const RaySegment &incident_segment, const PathContext &context, double &pdf_of_emitter_wrt_solid_angle)
   {
-    auto radiance = emitter.Evaluate(hit, -incident_segment.ray.dir, ROI::LightPathContext{context.lambda_idx}, nullptr);
-    double pdf_of_pos = emitter.EvaluatePdf(hit, ROI::LightPathContext{context.lambda_idx});
+    auto radiance = emitter.Evaluate(hit, -incident_segment.ray.dir, context, nullptr);
+    double pdf_of_pos = emitter.EvaluatePdf(hit, context);
     assert(pdf_of_pos >= 0 && std::isfinite(pdf_of_pos));
     SurfaceInteraction surfaceinteraction{hit};
     pdf_of_emitter_wrt_solid_angle = pdf_of_pos*PdfConversion::AreaToSolidAngle(incident_segment.length, incident_segment.ray.dir, surfaceinteraction.geometry_normal);

@@ -25,7 +25,7 @@ public:
     return pos;
   }
     
-  DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler, const LightPathContext &context) const override
+  DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler, const PathContext &context) const override
   {
     DirectionalSample s{
       SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare()),
@@ -35,7 +35,7 @@ public:
     return s;
   }
   
-  Spectral3 Evaluate(const Double3 &pos, const Double3 &dir_out, const LightPathContext &context, double *pdf_direction) const override
+  Spectral3 Evaluate(const Double3 &pos, const Double3 &dir_out, const PathContext &context, double *pdf_direction) const override
   {
     assert (Length(pos - this->pos) <= Epsilon);
     if (pdf_direction) 
@@ -54,7 +54,7 @@ public:
     spectrum *= (1./UnitHalfSphereSurfaceArea); // Convert from area power density to exitant radiance.
   }
   
-  virtual AreaSample TakeAreaSample(const Primitive& primitive, Sampler &sampler, const LightPathContext &context) const override
+  virtual AreaSample TakeAreaSample(const Primitive& primitive, Sampler &sampler, const PathContext &context) const override
   {
     AreaSample smpl;
     smpl.coordinates = primitive.SampleUniformPosition(sampler);
@@ -63,7 +63,7 @@ public:
     return smpl;
   }
   
-  inline Spectral3 Evaluate(const PosSampleCoordinates &area, const Double3 &dir_out, const LightPathContext &context, double *pdf_dir) const override
+  inline Spectral3 Evaluate(const PosSampleCoordinates &area, const Double3 &dir_out, const PathContext &context, double *pdf_dir) const override
   {
     const auto* primitive = area.primitive;
     assert (primitive);
@@ -73,7 +73,7 @@ public:
     return Take(spectrum, context.lambda_idx);
   }
   
-  double EvaluatePdf(const PosSampleCoordinates &area, const LightPathContext &context) const override
+  double EvaluatePdf(const PosSampleCoordinates &area, const PathContext &context) const override
   {
     const auto* primitive = area.primitive;
     assert (primitive && primitive->Area() > 0.);
@@ -95,7 +95,7 @@ public:
     : col{_col},dir_out(_dir_out)
     {}
   
-  DirectionalSample TakeDirectionSample(Sampler &sampler, const LightPathContext &context) const override
+  DirectionalSample TakeDirectionSample(Sampler &sampler, const PathContext &context) const override
   {
     DirectionalSample s {
       dir_out,
@@ -106,13 +106,13 @@ public:
     return s;
   }
   
-  Spectral3 Evaluate(const Double3 &dir_out, const LightPathContext &context) const override
+  Spectral3 Evaluate(const Double3 &dir_out, const PathContext &context) const override
   {
     assert (Length(dir_out - this->dir_out) <= Epsilon);
     return Spectral3{0.};
   }
   
-  double EvaluatePdf(const Double3 &dir_out, const LightPathContext &context) const override
+  double EvaluatePdf(const Double3 &dir_out, const PathContext &context) const override
   {
     return 0;
   }
@@ -132,7 +132,7 @@ public:
     frame = OrthogonalSystemZAligned(down_dir);
   }
   
-  DirectionalSample TakeDirectionSample(Sampler &sampler, const LightPathContext &context) const override
+  DirectionalSample TakeDirectionSample(Sampler &sampler, const PathContext &context) const override
   {
     // Generate directions pointing away from the light by
     // sampling the opposite hemisphere!
@@ -145,7 +145,7 @@ public:
     return s;
   }
   
-  Spectral3 Evaluate(const Double3 &dir_out, const LightPathContext &context) const override
+  Spectral3 Evaluate(const Double3 &dir_out, const PathContext &context) const override
   {
     // Similar rationale as above: light comes from the top hemisphere if
     // the direction vector points down.
@@ -153,7 +153,7 @@ public:
     return above > 0. ? Take(col, context.lambda_idx) : Spectral3{0.};
   }
   
-  double EvaluatePdf(const Double3 &dir_out, const LightPathContext &context) const override
+  double EvaluatePdf(const Double3 &dir_out, const PathContext &context) const override
   {
     auto above = Dot(dir_out, down_dir);
     return above > 0. ? 1./UnitHalfSphereSurfaceArea : 0.;
@@ -189,7 +189,7 @@ public:
     emission_spectrum *= pdf_val; // I need it per solid angle.
   }
   
-  DirectionalSample TakeDirectionSample(Sampler &sampler, const LightPathContext &context) const override
+  DirectionalSample TakeDirectionSample(Sampler &sampler, const PathContext &context) const override
   {
     auto dir_out = SampleTrafo::ToUniformSphereSection(cos_opening_angle, sampler.UniformUnitSquare());
     DirectionalSample s {
@@ -199,14 +199,14 @@ public:
     return s;
   }
 
-  Spectral3 Evaluate(const Double3 &dir_out, const LightPathContext &context) const override
+  Spectral3 Evaluate(const Double3 &dir_out, const PathContext &context) const override
   {
     ASSERT_NORMALIZED(dir_out);
     bool is_in_cone = IsInCone(dir_out);
     return is_in_cone ? Take(emission_spectrum, context.lambda_idx) : Spectral3{0.};
   }
   
-  double EvaluatePdf(const Double3 &dir_out, const LightPathContext &context) const override
+  double EvaluatePdf(const Double3 &dir_out, const PathContext &context) const override
   {
     ASSERT_NORMALIZED(dir_out);
     bool is_in_cone = IsInCone(dir_out);

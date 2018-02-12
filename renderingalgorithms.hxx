@@ -246,7 +246,7 @@ public:
   TotalEnvironmentalRadianceField(const Scene& _scene) : scene(_scene) {}
   
   
-  DirectionalSample TakeDirectionSample(Sampler &sampler, const LightPathContext &context) const override
+  DirectionalSample TakeDirectionSample(Sampler &sampler, const PathContext &context) const override
   {
     assert(size()>0);
     int idx_sample = sampler.UniformInt(0, size()-1);
@@ -278,7 +278,7 @@ public:
   }
   
 
-  Spectral3 Evaluate(const Double3 &emission_dir, const LightPathContext &context) const override
+  Spectral3 Evaluate(const Double3 &emission_dir, const PathContext &context) const override
   {
     Spectral3 environmental_radiance{0.};
     for (int i=0; i<size(); ++i)
@@ -291,7 +291,7 @@ public:
   }
   
   
-  double EvaluatePdf(const Double3 &dir_out, const LightPathContext &context) const override
+  double EvaluatePdf(const Double3 &dir_out, const PathContext &context) const override
   {
     const double selection_probability = size()>0 ? 1./size() : 1.;
     double pdf_sum = 0.;
@@ -472,10 +472,10 @@ public:
   
   RGB MakePrettyPixel(int pixel_index) override
   {
-    auto light_context = ROI::LightPathContext(Color::LambdaIdxClosestToRGBPrimaries());
+    auto context = PathContext{Color::LambdaIdxClosestToRGBPrimaries()};
     const auto &camera = scene.GetCamera();
-    auto smpl_pos = camera.TakePositionSample(pixel_index, sampler, light_context);
-    auto smpl_dir = camera.TakeDirectionSampleFrom(pixel_index, smpl_pos.coordinates, sampler, light_context);
+    auto smpl_pos = camera.TakePositionSample(pixel_index, sampler, context);
+    auto smpl_dir = camera.TakeDirectionSampleFrom(pixel_index, smpl_pos.coordinates, sampler, context);
     smpl_dir.pdf_or_pmf *= smpl_pos.pdf_or_pmf;
     smpl_dir.value *= smpl_pos.value;
     
