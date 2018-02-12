@@ -1,5 +1,6 @@
 #include "ray.hxx"
 #include "primitive.hxx"
+#include "util.hxx"
 
 
 SurfaceInteraction::SurfaceInteraction(const HitId& _hitid)
@@ -14,7 +15,7 @@ SurfaceInteraction::SurfaceInteraction(const HitId& _hitid)
 RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySegment &_incident_segment)
   : SurfaceInteraction(_hitid)
 {
-  double sign = Dot(-_incident_segment.ray.dir, geometry_normal) > 0. ? 1. : -1;
+  double sign = -Sign(Dot(_incident_segment.ray.dir, geometry_normal));
   normal = sign*geometry_normal;
   shading_normal = sign*smooth_normal;
   assert(LengthSqr(normal)>0.9);

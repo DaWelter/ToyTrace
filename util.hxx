@@ -2,13 +2,24 @@
 
 #include <iostream>
 #include <cassert>
+#include <cmath>
 #include <limits>
+#include <type_traits>
+
 #include <boost/align/aligned_allocator.hpp>
 
 template<class T>
 inline T Sqr(const T &x)
 {
   return x*x;
+}
+
+
+// Note: Will happily take the signbit from zero. So the result for 0 is basically random.
+template<class T, typename std::enable_if_t<std::is_floating_point<T>{}, int> = 0>
+inline T Sign(const T &x)
+{
+  return std::copysign(1., x);
 }
 
 
