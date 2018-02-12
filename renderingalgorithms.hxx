@@ -252,9 +252,11 @@ public:
     int idx_sample = sampler.UniformInt(0, size()-1);
     const double selection_probability = 1./size();
     ROI::DirectionalSample smpl = get(idx_sample).TakeDirectionSample(sampler, context);
-//    smpl.pdf_or_pmf *= selection_probability; // Russian roulette style removal of all but one sub-component.
-//    return smpl;
-
+#if 1
+    // This simple version seems to work just as well.
+    smpl.pdf_or_pmf *= selection_probability; // Russian roulette style removal of all but one sub-component.
+    return smpl;
+#else
     if (IsFromPmf(smpl))
     {
       smpl.pdf_or_pmf *= selection_probability;
@@ -262,7 +264,7 @@ public:
     }
     else
     {
-      double total_pdf = 0.;
+      double total_pdf = smpl.pdf_or_pmf;
       for (int i=0; i<size(); ++i)
       {
         if (i == idx_sample) continue;
@@ -272,6 +274,7 @@ public:
       smpl.pdf_or_pmf = Pdf{selection_probability*total_pdf}; // TODO: This cannot be right.
     }
     return smpl;
+#endif
   }
   
 
