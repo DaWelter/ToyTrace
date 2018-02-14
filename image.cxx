@@ -291,7 +291,7 @@ void ImageDisplay::show(const Image& img)
 }
 
 
-bool ImageDisplay::is_open()
+bool ImageDisplay::is_open() const
 {
   return !impl()->is_closed();
 }

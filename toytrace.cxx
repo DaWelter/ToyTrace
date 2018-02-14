@@ -212,7 +212,45 @@ void AssignSamplesPerPixel(WorkerSet &workers, int spp)
 }
 
 
-void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs::path &output_file, RenderingParameters &render_params);
+
+class MaybeDisplay
+{
+public:
+  virtual void Show(const Image &im) = 0;
+  virtual bool IsOkToKeepGoing() const = 0;
+};
+
+class CIMGDisplay : public MaybeDisplay
+{
+  ImageDisplay display;
+public:
+  void Show(const Image &im) override
+  {
+    display.show(im);
+  }
+  
+  bool IsOkToKeepGoing() const override
+  {
+    return display.is_open();
+  }
+};
+
+class NoDisplay : public MaybeDisplay
+{
+public:
+  void Show(const Image &im) override
+  {
+  }
+  
+  bool IsOkToKeepGoing() const override
+  {
+    return true;
+  }
+};
+
+std::unique_ptr<MaybeDisplay> MakeDisplay(bool will_open_a_window);
+
+void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs::path &output_file, RenderingParameters &render_params, std::unique_ptr<MaybeDisplay> &display);
 
 
 int main(int argc, char *argv[])
@@ -220,8 +258,9 @@ int main(int argc, char *argv[])
   RenderingParameters render_params;
   fs::path input_file;
   fs::path output_file;
+  std::unique_ptr<MaybeDisplay> display;
   
-  HandleCommandLineArguments(argc, argv, input_file, output_file, render_params);
+  HandleCommandLineArguments(argc, argv, input_file, output_file, render_params, display);
   
   Scene scene;
   
@@ -267,8 +306,7 @@ int main(int argc, char *argv[])
   Image bm(render_params.width, render_params.height);
   bm.SetColor(0, 0, 128);
   bm.DrawRect(0, 0, render_params.width-1, render_params.height-1);
-  ImageDisplay display;
-  display.show(bm);
+  display->Show(bm);
   
   auto start_time = std::chrono::steady_clock::now();
   
@@ -294,7 +332,7 @@ int main(int argc, char *argv[])
     std::cout << "Rendering ..." << std::endl;
     
     
-    while (display.is_open() && samples_per_pixel_per_iteration>0)
+    while (display->IsOkToKeepGoing() && samples_per_pixel_per_iteration>0)
     {
       buffer.AddSampleCount(samples_per_pixel_per_iteration);
       shared_pixel_index.store(0);
@@ -302,7 +340,7 @@ int main(int argc, char *argv[])
       
       int image_conversion_y_start = 0;  
       
-      while (shared_pixel_index.load() < num_pixels && display.is_open())
+      while (shared_pixel_index.load() < num_pixels && display->IsOkToKeepGoing())
       {
         std::this_thread::sleep_for(std::chrono::seconds(1));
         
@@ -319,14 +357,14 @@ int main(int argc, char *argv[])
         IssueRequest(workers, Worker::REQUEST_GO);
 
         image_conversion_y_start = y;      
-        display.show(bm);
+        display->Show(bm);
       }
 
       IssueRequest(workers, Worker::REQUEST_HALT);
       WaitForWorkers(workers);
       
       buffer.ToImage(bm, image_conversion_y_start, render_params.height);
-      display.show(bm);
+      display->Show(bm);
       bm.write(output_file.string());
       
       total_samples_per_pixel += samples_per_pixel_per_iteration;
@@ -349,10 +387,10 @@ int main(int argc, char *argv[])
       int total_samples_per_pixel = 0;
       int samples_per_pixel_per_iteration = 1;
 
-      while (display.is_open() && samples_per_pixel_per_iteration>0)
+      while (display->IsOkToKeepGoing() && samples_per_pixel_per_iteration>0)
       {
         buffer.AddSampleCount(samples_per_pixel_per_iteration);
-        for (int y = 0; y < render_params.height && display.is_open(); ++y)
+        for (int y = 0; y < render_params.height && display->IsOkToKeepGoing(); ++y)
         {
           for (int x = 0; x < render_params.width; ++x)
           {
@@ -367,7 +405,7 @@ int main(int argc, char *argv[])
             buffer.Insert(smpl.first, smpl.second);
           algo.sensor_responses.clear();
           buffer.ToImage(bm, y, y+1);
-          display.show(bm);
+          display->Show(bm);
         }
         total_samples_per_pixel += samples_per_pixel_per_iteration;
         std::cout << "Iteration finished, spp = " << samples_per_pixel_per_iteration << ", total " << total_samples_per_pixel << std::endl;
@@ -382,7 +420,7 @@ int main(int argc, char *argv[])
       auto smpl = algo.MakePrettyPixel(pixel_index);
       buffer.Insert(pixel_index, smpl);
       buffer.ToImage(bm, render_params.pixel_y, render_params.pixel_y+1);
-      display.show(bm);
+      display->Show(bm);
     }
     bm.write(output_file.string());
   }
@@ -395,23 +433,33 @@ int main(int argc, char *argv[])
 
 
 
-void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs::path &output_file, RenderingParameters &render_params)
+std::unique_ptr<MaybeDisplay> MakeDisplay(bool will_open_a_window)
+{
+  if (will_open_a_window)
+    return std::make_unique<CIMGDisplay>();
+  else
+    return std::make_unique<NoDisplay>();
+}
+
+
+void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs::path &output_file, RenderingParameters &render_params, std::unique_ptr<MaybeDisplay> &display)
 {
   namespace po = boost::program_options;
   try
   {
     po::options_description desc{"Options"};
     desc.add_options()
-      ("help,h", "Help screen")
+      ("help", "Help screen")
       ("nt", po::value<int>(), "Number of Threads")
       ("px", po::value<int>(), "X Pixel")
       ("py", po::value<int>(), "Y Pixel")
-      ("w", po::value<int>(), "Width")
-      ("h", po::value<int>(), "Height")
+      ("w,w", po::value<int>(), "Width")
+      ("h,h", po::value<int>(), "Height")
       ("rd", po::value<int>(), "Max ray depth")
       ("max-spp", po::value<int>(), "Max samples per pixel")
       ("pt-sample-mode", po::value<std::string>(), "Light sampling: 'bsdf' - bsdf importance sampling, 'lights' - sample lights aka. next event estimation, 'both' - both combined by MIS.")
-      ("output-file", po::value<fs::path>(), "Output file")
+      ("no-display", po::bool_switch()->default_value(false), "Don't open a display window")
+      ("output-file,o", po::value<fs::path>(), "Output file")
       ("input-file", po::value<fs::path>(), "Input file");
     po::positional_options_description pos_desc;
     pos_desc.add("input-file", -1);
@@ -523,6 +571,11 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
         throw po::error("Bad argument for pt-sample-mode");
       render_params.pt_sample_mode = mode;
     }
+    
+    bool open_display = !vm["no-display"].as<bool>();
+    if (!open_display && render_params.max_samples_per_pixel < 0)
+      std::cout << "WARNING: Not opening display and no sample count given. Will run until killed." << std::endl;
+    display = MakeDisplay(open_display);
   }
   catch(po::error &ex)
   {
