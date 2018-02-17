@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <type_traits>
+#include <vector>
 
 #include <boost/align/aligned_allocator.hpp>
 
@@ -145,12 +146,25 @@ struct iter_pair : std::pair<I, I>
     I end() { return this->second; }
 };
 
-#if 0 // if using c++11
-namespace std {
-template<typename T, typename... Args>
-std::unique_ptr<T> make_unique(Args&&... args) {
-    return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
-}
-}
-#endif
+
+// What an unprofessional choice of name. What would be better? VectorWithAssertInSquareBacketOperator? CheckedVector? Simply Vector? Doh!
+template<class T, class Alloc = std::allocator<T>>
+class ToyVector : public std::vector<T, Alloc>
+{
+  using B = std::vector<T, Alloc>;
+public:
+  using B::B;
+  
+  inline typename B::const_reference operator[](typename B::size_type i) const
+  {
+    assert(i >= 0 && i<B::size());
+    return B::operator[](i);
+  }
+  
+  inline typename B::reference operator[](typename B::size_type i)
+  {
+    assert(i >= 0 && i<B::size());
+    return B::operator[](i);
+  }
+};
 

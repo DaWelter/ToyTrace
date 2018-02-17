@@ -16,6 +16,34 @@
 #include "very_strong_typedef.hxx"
 
 
+TEST(BasicAssumptions, InheritCtor)
+{
+  struct A
+  {
+    int a;
+    A(int a) : a{a} {}
+  };
+  
+  struct B : public A
+  {
+    using A::A;
+    int f() const { return this->a; }
+  };
+  
+  EXPECT_EQ(B(42).f(), 42);
+}
+
+
+TEST(BasicAssumptions, ToyVector)
+{
+  ToyVector<double> fu { 1, 2 };
+  std::cout << typeid(fu).name() << " accessing elem 1: " << fu[1] << std::endl;
+#ifndef NDEBUG
+  ASSERT_DEATH(fu[2], ".*Assertion.*");
+#endif
+}
+
+
 namespace UnionTestDetail
 {
 
