@@ -100,7 +100,7 @@ public:
 	
   virtual PositionSample TakePositionSample(int unit_index, Sampler &sampler, const PathContext &context) const override
   {
-    PositionSample s{this->pos, Spectral3{1.}, 1.};    
+    PositionSample s{this->pos, Spectral3{1.}, Pdf::MakeFromDelta(1.)};    
     return s;
   }
   
@@ -128,17 +128,23 @@ public:
     double x = Dot(dir_out, frame.right);
     double y = Dot(dir_out, frame.up);
     if (z <= 0.)
+    {
+      if (pdf_direction) *pdf_direction = 0.;
       return {};
+    }
     x /= z;
     y /= z;
     int pix_x = (x-xmin)/xperpixel;
     int pix_y = (y-ymin)/yperpixel;
     if (pix_x<0 || pix_x>=xres || pix_y<0 || pix_y>=yres)
+    {
+      if (pdf_direction) *pdf_direction = 0.;
       return {};
+    }
     // Units don't overlap (yet). Therefore there can only respond one of them at most.
     double pdf = PixelPdfWrtSolidAngle(x, y);
     if (pdf_direction)
-      *pdf_direction = pdf;
+      *pdf_direction = pdf; // TODO: correct or not???
     return {
       PixelToUnit({pix_x, pix_y}),
       Spectral3{pdf}, // value
@@ -166,7 +172,7 @@ public:
 
   virtual PositionSample TakePositionSample(int unit_index, Sampler &sampler, const PathContext &context) const override
   {
-    PositionSample s{this->pos, Spectral3{1.}, 1.};    
+    PositionSample s{this->pos, Spectral3{1.}, Pdf::MakeFromDelta(1.)};    
     return s;
   }
   

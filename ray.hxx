@@ -7,7 +7,7 @@
 
 class Primitive;
 class Shader;
-
+class Medium;
 
 static constexpr double RAY_EPSILON = 1.e-6; //1.e-10;
 
@@ -52,6 +52,11 @@ struct RaySegment
     ray.org += epsilon*ray.dir;
     length -= 2.*epsilon;
   }
+  
+  RaySegment Reversed() const
+  {
+    return {{ray.org + length * ray.dir, -ray.dir}, length };
+  }
 };
 
 
@@ -71,12 +76,17 @@ struct HitId
 };
 
 
-struct SurfaceInteraction
+struct InteractionPoint
+{
+  Double3 pos;
+};
+
+
+struct SurfaceInteraction : public InteractionPoint
 {
   HitId hitid;
   Double3 geometry_normal;
   Double3 smooth_normal;
-  Double3 pos;
   
   const Primitive& primitive() const;
   const Shader& shader() const;
@@ -94,6 +104,19 @@ struct RaySurfaceIntersection : public SurfaceInteraction
   RaySurfaceIntersection(const HitId &hitid, const RaySegment &_incident_segment);
   RaySurfaceIntersection() = default;
 };
+
+
+struct VolumeInteraction : public InteractionPoint
+{
+  const Medium *_medium = nullptr;
+  VolumeInteraction() = default;
+  VolumeInteraction(const Double3 &_position, const Medium &_medium)
+    : InteractionPoint{_position}, _medium{&_medium}
+    {}
+    
+  const Medium& medium() const { return *_medium; }
+};
+
 
 
 inline Double3 AntiSelfIntersectionOffset(const Double3 &normal, double eps, const Double3 &exitant_dir)

@@ -12,11 +12,21 @@
 
 namespace fs = boost::filesystem;
 
+
+std::unique_ptr<IRenderingAlgo> RenderAlgorithmFactory(const Scene &_scene, const RenderingParameters &_params)
+{
+  if (_params.algo_name == "bdpt")
+    return std::make_unique<Bdpt>(_scene, _params);
+  else
+    return std::make_unique<PathTracing>(_scene, _params);
+}
+
+
 class Worker
 {
   const Scene &scene;
   Spectral3ImageBuffer &buffer;
-  PathTracing algo;
+  std::unique_ptr<IRenderingAlgo> algo;
   //NormalVisualizer algo;
   const int pixel_stride = 64 / sizeof(Spectral3); // Because false sharing.
   int num_pixels;
@@ -43,7 +53,7 @@ public:
   Worker(std::atomic_int &_shared_pixel_index, Spectral3ImageBuffer &_buffer, const Scene &_scene, RenderingParameters &render_params) :
     scene(_scene),
     buffer(_buffer),
-    algo(_scene, render_params),
+    algo(RenderAlgorithmFactory(_scene, render_params)),
     shared_pixel_index(_shared_pixel_index),
     shared_request(REQUEST_NONE),
     shared_state(THREAD_WAITING),
@@ -76,11 +86,13 @@ public:
   
   void FillInExtraSamples()
   {
-    for (const auto &smpl :algo.sensor_responses)
+    auto &responses = algo->GetSensorResponses();
+    for (const auto &r : responses)
     {
-      buffer.Insert(smpl.first, smpl.second);
+      assert (r);
+      buffer.Insert(r.unit_index, r.weight);
     }
-    algo.sensor_responses.clear();
+    responses.clear();
   }
   
 private:
@@ -155,7 +167,7 @@ private:
       const int nsmpl = samples_per_pixel;
       for(int i=0;i<nsmpl;i++)
       {
-        auto smpl = algo.MakePrettyPixel(pixel_index);
+        auto smpl = algo->MakePrettyPixel(pixel_index);
         buffer.Insert(pixel_index, smpl);
       }
     }
@@ -380,8 +392,7 @@ int main(int argc, char *argv[])
   }
   else
   {
-    PathTracing algo(scene, render_params);
-    //NormalVisualizer algo(scene);
+    std::unique_ptr<IRenderingAlgo> algo = RenderAlgorithmFactory(scene, render_params);
     if (render_params.pixel_x<0 && render_params.pixel_y<0)
     {
       int total_samples_per_pixel = 0;
@@ -397,16 +408,17 @@ int main(int argc, char *argv[])
             int pixel_index = scene.GetCamera().PixelToUnit({x, y});
             for (int s = 0; s < samples_per_pixel_per_iteration; ++s)
             {
-              auto smpl = algo.MakePrettyPixel(pixel_index);
+              auto smpl = algo->MakePrettyPixel(pixel_index);
               buffer.Insert(pixel_index, smpl);
             }
           }
-          for (const auto &smpl : algo.sensor_responses)
-            buffer.Insert(smpl.first, smpl.second);
-          algo.sensor_responses.clear();
+          for (const auto &r : algo->GetSensorResponses())
+            buffer.Insert(r.unit_index, r.weight);
+          algo->GetSensorResponses().clear();
           buffer.ToImage(bm, y, y+1);
           display->Show(bm);
         }
+        algo->NotifyPassesFinished(samples_per_pixel_per_iteration);
         total_samples_per_pixel += samples_per_pixel_per_iteration;
         std::cout << "Iteration finished, spp = " << samples_per_pixel_per_iteration << ", total " << total_samples_per_pixel << std::endl;
         DetermineSamplesPerPixelForNextPass(samples_per_pixel_per_iteration, total_samples_per_pixel, render_params);
@@ -417,7 +429,7 @@ int main(int argc, char *argv[])
       buffer.AddSampleCount(1);
       int pixel_index = scene.GetCamera().PixelToUnit(
         {render_params.pixel_x, render_params.pixel_y});
-      auto smpl = algo.MakePrettyPixel(pixel_index);
+      auto smpl = algo->MakePrettyPixel(pixel_index);
       buffer.Insert(pixel_index, smpl);
       buffer.ToImage(bm, render_params.pixel_y, render_params.pixel_y+1);
       display->Show(bm);
@@ -457,6 +469,7 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
       ("h,h", po::value<int>(), "Height")
       ("rd", po::value<int>(), "Max ray depth")
       ("max-spp", po::value<int>(), "Max samples per pixel")
+      ("algo", po::value<std::string>()->default_value("pt"), "Rendering algorithm: pt or bdpt")
       ("pt-sample-mode", po::value<std::string>(), "Light sampling: 'bsdf' - bsdf importance sampling, 'lights' - sample lights aka. next event estimation, 'both' - both combined by MIS.")
       ("no-display", po::bool_switch()->default_value(false), "Don't open a display window")
       ("output-file,o", po::value<fs::path>(), "Output file")
@@ -533,6 +546,11 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
     
     if (single_pixel_render)
       render_params.num_threads = 0;
+    
+    render_params.algo_name = vm["algo"].as<std::string>();
+    if (render_params.algo_name != "pt" &&
+        render_params.algo_name != "bdpt")
+      throw po::error("Algorithm must be pt or bdpt");
     
     int max_spp = -1;
     if (vm.count("max-spp"))

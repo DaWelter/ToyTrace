@@ -4,6 +4,7 @@
 #include <chrono>
 #include <algorithm>
 #include <rapidjson/document.h>
+#include <boost/filesystem.hpp>
 
 #include "ray.hxx"
 #include "image.hxx"
@@ -18,7 +19,6 @@
 #include "atmosphere.hxx"
 #include "util.hxx"
 
-#include <boost/filesystem.hpp>
 
 // Throw a one with probability p and zero with probability 1-p.
 // Let this be reflected by random variable X \in {0, 1}.
@@ -61,13 +61,21 @@ TEST(TestRaySegment, ExprTemplates)
 }
 
 
-
 TEST(TestRaySegment, EndPointNormal)
 {
   Double3 p = RaySegment{{Double3(1., 0., 0.), Double3(0., 1., 0.)}, 2.}.EndPoint();
   ASSERT_EQ(p[0], 1.);
   ASSERT_EQ(p[1], 2.);
   ASSERT_EQ(p[2], 0.);
+}
+
+
+TEST(TestRaySegment, Reversed)
+{
+  RaySegment s{{{1, 2, 3}, {42, 0, 0}}, 5.};
+  RaySegment r = s.Reversed();
+  ASSERT_NEAR(s.EndPoint()[0], r.ray.org[0], 1.e-8);
+  ASSERT_NEAR(r.EndPoint()[0], s.ray.org[0], 1.e-8);
 }
 
 
@@ -1166,37 +1174,6 @@ m scenes/cornelbox2.dae
   ASSERT_LE(size, 3.);
 }
 
-
-TEST(Rendering, VertexAllocation)
-{
-  class TestVertex : public RW::Vertex
-  {
-  public:
-    TestVertex(int a_) : a{a_} {}
-    int a;
-      
-    virtual ScatterSample Sample(Sampler& sampler, const PathContext &context) const override { return ScatterSample{}; }
-    virtual Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) override { return Spectral3{}; }
-  };
-  
-  std::vector<TestVertex*> v;
-  static constexpr int N = 10;
-  RW::VertexStorage storage(N);
-  for (int iter = 0; iter < 10; ++iter)
-  {
-    v.clear();
-    for (int i=0; i<N; ++i)
-    {
-      v.push_back(
-        storage.allocate<TestVertex>(iter * N + i));
-    }
-    for (int i=0; i<N; ++i)
-    {
-      EXPECT_EQ(v[i]->a, iter * N + i);
-    }
-    storage.clear();
-  }
-}
 
 
 void RenderingMediaTransmission1Helper(

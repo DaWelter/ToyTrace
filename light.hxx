@@ -1,6 +1,8 @@
 #pragma once
 
 #include "vec3f.hxx"
+#pragma once
+
 #include "ray.hxx"
 #include "sampler.hxx"
 #include "radianceorimportance.hxx"
@@ -48,13 +50,20 @@ public:
 class UniformAreaLight : public AreaEmitter
 {
   SpectralN spectrum;
+  
+  double Visibility(const PosSampleCoordinates &area, const Double3 &dir) const
+  {
+    SurfaceInteraction interaction{area};
+    return Dot(interaction.geometry_normal, dir) > 0. ? 1. : 0.;
+  }
+  
 public:
   UniformAreaLight(const SpectralN &_spectrum) : spectrum(_spectrum) 
   {
     spectrum *= (1./UnitHalfSphereSurfaceArea); // Convert from area power density to exitant radiance.
   }
   
-  virtual AreaSample TakeAreaSample(const Primitive& primitive, Sampler &sampler, const PathContext &context) const override
+  AreaSample TakeAreaSample(const Primitive& primitive, Sampler &sampler, const PathContext &context) const override
   {
     AreaSample smpl;
     smpl.coordinates = primitive.SampleUniformPosition(sampler);
@@ -63,14 +72,27 @@ public:
     return smpl;
   }
   
+  DirectionalSample TakeDirectionSampleFrom(const PosSampleCoordinates &area, Sampler &sampler, const PathContext &context) const override
+  {
+    // TODO: Sample cos term?
+    Double3 w_hemi = SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare());
+    SurfaceInteraction interaction{area};
+    auto m = OrthogonalSystemZAligned(interaction.geometry_normal);
+    DirectionalSample s{
+      m*w_hemi,
+      Take(spectrum, context.lambda_idx),
+      1./(UnitHalfSphereSurfaceArea)
+    };
+    return s;
+  }
+  
   inline Spectral3 Evaluate(const PosSampleCoordinates &area, const Double3 &dir_out, const PathContext &context, double *pdf_dir) const override
   {
-    const auto* primitive = area.primitive;
-    assert (primitive);
+    double visibility = Visibility(area, dir_out);
     if (pdf_dir)
-      *pdf_dir = 1./UnitHalfSphereSurfaceArea;
+      *pdf_dir = visibility/UnitHalfSphereSurfaceArea;
     // Cos of angle between exitant dir and normal is dealt with elsewhere.
-    return Take(spectrum, context.lambda_idx);
+    return visibility*Take(spectrum, context.lambda_idx);
   }
   
   double EvaluatePdf(const PosSampleCoordinates &area, const PathContext &context) const override
@@ -100,15 +122,13 @@ public:
     DirectionalSample s {
       dir_out,
       Take(col, context.lambda_idx),
-      1.
+      Pdf::MakeFromDelta(1.)
     };
-    SetPmfFlag(s);
     return s;
   }
   
   Spectral3 Evaluate(const Double3 &dir_out, const PathContext &context) const override
   {
-    assert (Length(dir_out - this->dir_out) <= Epsilon);
     return Spectral3{0.};
   }
   
@@ -213,5 +233,22 @@ public:
     return is_in_cone ? pdf_val : 0.;
   }
 };
+
+
+
+
+class TotalEnvironmentalRadianceField : public EnvironmentalRadianceField
+{
+  const Scene& scene;
+  const EnvironmentalRadianceField& get(int i) const;
+  int size() const;
+public:
+  TotalEnvironmentalRadianceField(const Scene& _scene) : scene(_scene) {}
+  DirectionalSample TakeDirectionSample(Sampler &sampler, const PathContext &context) const override;
+  Spectral3 Evaluate(const Double3 &emission_dir, const PathContext &context) const override;
+  double EvaluatePdf(const Double3 &dir_out, const PathContext &context) const override;
+};
+
+
 
 } // namespace

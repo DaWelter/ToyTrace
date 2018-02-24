@@ -113,12 +113,8 @@ inline int TowerSampling(const T *probs, T r)
 
 namespace PdfConversion
 {
-// It is important in MIS weighting to express the pdf of various sampling 
-// strategies w.r.t. to the same integration domain. E.g. Solid angle or area.
-// However it should be okay to compose the joint pdfs of paths using different sub-domains, e.g.:
-// pdf(path) = pdf_w1(w1)*pdf_a2(x2)*pdf_a3(x3)*... This is cool as long as the product space is
-// consistently used.
-// Ref: Veach's Thesis and PBRT book.
+
+// TODO: Refactor so that it can be used in PT code. As of now used in Camera.
 inline double AreaToSolidAngle(double segment_length, const Double3 &direction, const Double3 &normal)
 {
   double result = Sqr(segment_length) / std::abs(Dot(direction, normal)+Epsilon);
@@ -126,18 +122,18 @@ inline double AreaToSolidAngle(double segment_length, const Double3 &direction, 
   return result;
 }
 
-inline double SolidAngleToArea(double segment_length, const Double3 &direction, const Double3 &normal)
-{
-  double result = std::abs(Dot(direction, normal)) / (Sqr(segment_length)+Epsilon);
-  assert(result >= 0 && std::isfinite(result));
-  return result;
-}
-
-// Area density is projected parallel to direction onto surface oriented according to normal.
-inline double ProjectArea(const Double3 &direction, const Double3 &normal)
-{
-  return std::abs(Dot(direction, normal));
-}
+// inline double SolidAngleToArea(double segment_length, const Double3 &direction, const Double3 &normal)
+// {
+//   double result = std::abs(Dot(direction, normal)) / (Sqr(segment_length)+Epsilon);
+//   assert(result >= 0 && std::isfinite(result));
+//   return result;
+// }
+// 
+// // Area density is projected parallel to direction onto surface oriented according to normal.
+// inline double ProjectArea(const Double3 &direction, const Double3 &normal)
+// {
+//   return std::abs(Dot(direction, normal));
+// }
 
 }
 
@@ -146,10 +142,12 @@ inline double ProjectArea(const Double3 &direction, const Double3 &normal)
 namespace SampleNamespace
 {
 
-
-struct Pdf
+// Use only for BSDF/Emitter samples which may come from delta distributions. Do not use for path densities.
+// TODO: Maybe rename to ScatterPdf or something along those lines?
+class Pdf
 {
   double value;
+public:
   operator double () const { return std::abs(value); }
   Pdf() : value{NaN} {}
   Pdf(double _value) : value{_value} 
@@ -168,7 +166,7 @@ struct Pdf
     return *this;
   }
   
-  // Not permitted. Use only for BSDF/Emitter samples which may come from delta distributions. Do not use for path densities.
+  // Not permitted.
   friend Pdf operator*(Pdf a, Pdf b);
   
   friend Pdf operator*(double q, Pdf pdf)
@@ -177,7 +175,7 @@ struct Pdf
     return pdf;
   }
   
-  friend Pdf MakeFromDelta(Pdf pdf) 
+  static Pdf MakeFromDelta(Pdf pdf) 
   {
     pdf.value = std::copysign(pdf.value, -1.);
     return pdf;
@@ -205,7 +203,7 @@ struct Sample
     return Sample<CoordinateType, ValueType, typename Other::Tag>{coordinates, value, pdf_or_pmf};
   }
   
-  inline friend void SetPmfFlag(Sample &s) { s.pdf_or_pmf = MakeFromDelta(s.pdf_or_pmf); }
+  inline friend void SetPmfFlag(Sample &s) { s.pdf_or_pmf = Pdf::MakeFromDelta(s.pdf_or_pmf); }
   inline friend bool IsFromPmf(const Sample &s) { return s.pdf_or_pmf.IsFromDelta(); }
   inline friend bool IsFromPdf(const Sample &s) { return !IsFromPmf(s); }
   inline friend double PdfValue(const Sample &s) { assert(!IsFromPmf(s)); return (double)s.pdf_or_pmf; }

@@ -1,318 +1,563 @@
 #pragma once
-
-#include <boost/pool/simple_segregated_storage.hpp>
-
 #include "renderingalgorithms.hxx"
+
+#include <unordered_map>
+#include <boost/functional/hash.hpp>
+
+#pragma GCC diagnostic warning "-Wunused-parameter" 
+#pragma GCC diagnostic warning "-Wunused-variable"
 
 namespace RandomWalk
 {
 
-using ResponseContainer = std::vector<ROI::PointEmitterArray::Response>;
+// Ref: Veach's Thesis. Chpt. 10.
+namespace BdptDetail
+{
   
-class Vertex
+using NodeContainer = ToyVector<RW::PathNode>;
+using PdfContainer  = ToyVector<Pdf>;
+using SegmentContainer = ToyVector<RaySegment>;
+using PathDensityContainer = ToyVector<double>;
+using ConversionFactorContainer = ToyVector<double>;
+using SpecularFlagContainer = ToyVector<bool>;
+using WeightContainer = ToyVector<Spectral3>;
+
+static constexpr int INDEX_OF_PICKING_INITIAL_POINT = -1;
+
+class SubpathHistory
 {
 public:
-  virtual ~Vertex() {}
-  enum PathEndTag
+  void Reset()
   {
-    END_VERTEX,
-    SCATTER_VERTEX
-  };
-  const PathEndTag path_end_tag;
-public:
-  Vertex(PathEndTag _path_end_tag = SCATTER_VERTEX) : path_end_tag{_path_end_tag} {}
-  virtual ScatterSample Sample(Sampler& sampler, const PathContext &context) const = 0;
-  virtual Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) = 0;
-//   virtual void UpdateThingsAndMakeExitantRay(Ray &ray, ScatterSample &smpl, MediumTracker &medium_tracker, PathContext &context) const = 0;
-  virtual void ApplyAntiSelfIntersectionTransform(Ray &ray) const {}
+    // Note: Allocation only on first use. clear() keeps the capacity up. However, incurs dtor calls.
+    fwd_conversion_factors.clear();
+    bwd_conversion_factors.clear();
+    pdfs.clear();
+    nodes.clear();
+    betas.clear();
+  }
   
-  virtual Double3 Position() const { return Double3{}; }
-  
-  virtual void InitRayAndMaybeHandlePassageThroughSurface(Ray &ray, const Double3 &exitant_dir, MediumTracker &medium_tracker) const
+  void Start(const RW::PathNode &start, const Spectral3 &_weight, Pdf _start_pdf)
   {
-    ray.org = Position();
-    ray.dir = exitant_dir;
+    // Bah ... copying :-(
+    nodes.push_back(start);
+    pdfs.push_back(_start_pdf);
+    betas.push_back(_weight);
+  }
+  
+  void AddSegment(const RW::PathNode &node, const Spectral3 &_weight, Pdf pdf_start_scatter, const RaySegment &segment_to_node)
+  {
+    nodes.push_back(node);
+    pdfs.push_back(pdf_start_scatter);
+    Spectral3  beta_at_node = betas.back()*_weight;
+    betas.push_back(beta_at_node);
+  }
+  
+  void Pop()
+  {
+    assert (!nodes.empty());
+    nodes.pop_back();
+    pdfs.pop_back();
+    betas.pop_back();
+  }
+  
+  int NumNodes() const
+  {
+    return nodes.size();
   }
 
-  virtual double Dfactor(const Double3 &exitant_dir) const { return 1.; }
+  const RW::PathNode& Node(int i) const
+  {
+    return nodes[i];
+  }
+  
+  const RW::PathNode& NodeFromBack(int i) const
+  {
+    return nodes[nodes.size()-i-1];
+  }
+  
+  const Spectral3& Beta(int i) const
+  {
+    return betas[i];
+  }
+  
+  bool IsSpecular(int i) const
+  {
+    return pdfs[i+1].IsFromDelta();
+  }
+
+private:
+  friend class BdptMis;
+  ConversionFactorContainer fwd_conversion_factors;
+  ConversionFactorContainer bwd_conversion_factors;
+  PdfContainer pdfs;
+  NodeContainer nodes;
+  WeightContainer betas;
 };
 
 
-class Surface : public Vertex
+struct Connection
 {
-  RaySurfaceIntersection intersection;
-  Double3 reverse_incident_dir;
-public:
-  Surface(const HitId &_hitid, const RaySegment &_incident_segment)
-    : intersection(_hitid, _incident_segment), reverse_incident_dir{-_incident_segment.ray.dir}
-  {
-  }
+  Pdf eye_pdf;
+  Pdf light_pdf;
+  int eye_index;
+  int light_index;
+  RaySegment segment;
+};
 
-  ScatterSample Sample(Sampler& sampler, const PathContext &context) const override
+
+// Think this is stupid? It is. But what should I do? There no hash support for pairs in the STL.
+struct IntPairHash
+{
+  std::size_t operator()(const std::pair<int,int> &v) const
   {
-    const auto &shader = intersection.shader();
-    auto smpl = shader.SampleBSDF(reverse_incident_dir, intersection, sampler, context);
-    double d_factor = Dfactor(smpl.coordinates);
-    smpl.value *= d_factor;
-    return smpl;
+    std::size_t seed = boost::hash_value(v.first);
+    boost::hash_combine(seed, boost::hash_value(v.second));
+    return seed;
   }
+};
+using DebugBuffers = std::unordered_map<std::pair<int,int>, Spectral3ImageBuffer, IntPairHash>;
+
+
+} // namespace
   
-  Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) override
-  {
-    double d_factor = Dfactor(out_direction);
-    const auto &shader = intersection.shader();
-    Spectral3 scatter_factor = shader.EvaluateBSDF(reverse_incident_dir, intersection, out_direction, context, pdf);
-    return d_factor*scatter_factor;
-  }
+
+#if 0
+class BdptPaths
+{
+public:
+
+private:
+  SpecularFlagContainer specular_flags;
+  PathDensityContainer eye_densities;
+  PathDensityContainer light_densities;
   
-  virtual void InitRayAndMaybeHandlePassageThroughSurface(Ray &ray, const Double3 &exitant_dir, MediumTracker &medium_tracker) const override
+  PathDensityContainer number_of_paths_of_size;
+  
+  void ComputeNumberOfPathsOfSize()
   {
-    if (Dot(exitant_dir, intersection.normal) < 0.)
+    number_of_paths_of_size.resize(eye_history.NumNodes() + light_history.NumNodes()+1);
+    number_of_paths_of_size[0] = 0;
+    number_of_paths_of_size[1] = 0;
+    for (int s=1; s<=eye_history.NumNodes(); ++s)
     {
-      // By definition, intersection.normal points to where the intersection ray is comming from.
-      // Thus we can determine if the sampled direction goes through the surface by looking
-      // if the direction goes in the opposite direction of the normal.
-      medium_tracker.goingThroughSurface(exitant_dir, intersection);
+      for (int t=1; t<=light_history.NumNodes(); ++t)
+      {
+        number_of_paths_of_size[s+t]++;
+      }
     }
-    ray.org = intersection.pos;
-    ray.dir = exitant_dir;
-    ray.org += AntiSelfIntersectionOffset(intersection, RAY_EPSILON, ray.dir);
   }
   
-  void ApplyAntiSelfIntersectionTransform(Ray &ray) const override
+  void Reset()
   {
-    ray.org += AntiSelfIntersectionOffset(intersection, RAY_EPSILON, ray.dir);
+    eye_history.Reset();
+    light_history.Reset();
+    specular_flags.clear();
+    eye_densities.clear();
+    light_densities.clear();
+    number_of_paths_of_size.clear();
+  }
+
+  void ComputeForwardSubpathDensities(const SubpathHistory &history, PathDensityContainer &path_pdf)
+  {
+//     assert (nodes.size() > 0 && count <= nodes.size());
+//     path_pdf[0] = node_creation_probability;
+//     for (int i=1; i<nodes.size(); ++i)
+//     {
+//       path_pdf[i] = path_pdf[i-1]*pdfs[i-1]*PdfConversionFactorForTarget(nodes[i-1], nodes[i], segments[i-1]);
+//     }
   }
   
-  Double3 Position() const override { return intersection.pos; }
-  
-  double Dfactor(const Double3 &exitant_dir) const override 
-  { 
-    return std::max(0., Dot(intersection.shading_normal, exitant_dir)); 
+  void ComputeConnectionPart(const SubpathHistory &forward, const SubpathHistory &backward, Pdf pdf_scatter_source, Pdf pdf_scatter_dest, const RaySegment &segment, PathDensityContainer &path_pdf)
+  {
+    
   }
-};
+  
+  void ComputeReverseSubpathDensities(const SubpathHistory &history, PathDensityContainer &path_pdf)
+  {
+    
+  }
+  
+  FillSpecularFlags()
+  {
+  }
+
+  double ComputePowerHeuristicWeight()
+  {
+    const int n = eye_history.num_nodes_to_consider + light_history.num_nodes_to_consider;
+    assert(eye_densities.size() == n+1);
+    assert(light_densities.size() == eye_densities.size());
+    assert(specular_flags.size() == n+2);
+    // Attention here. Path densities have one more entry than there are total number of nodes in the path. 
+    // That is to account for the density of 0 number of nodes in the subpath. So, for, say, 2 Nodes in total,
+    // we have for the eye path entries for, 0, 1, and 2 nodes generated by the eye-subpath.
+    double nominator = eye_densities[eye_history.num_nodes_to_consider]*
+                       light_densities[light_history.num_nodes_to_consider];
+    nominator = Sqr(nominator);
+    double denom = 0.;
+    for (int s = 0; s <= n; ++s)
+    {
+      bool flag = !(specular_flags[s] || specular_flags[s+1]);
+      double summand = flag ? (eye_densities[s]*light_densities[n-s]) : 0.;
+      denom += Sqr(summand);
+    }
+    return nominator/denom;
+  }
 
 
-class Volume : public Vertex
-{
-  Double3 pos;
-  Double3 reverse_incident_dir;
-  const Medium& medium;
-  // Sigma_s factor is accounted for in the medium interaction sample weight.
+
 public:
-  Volume(const Medium::InteractionSample &_medium_smpl, const Medium &_medium, const RaySegment &_incident_segment)
-    : pos{_incident_segment.ray.PointAt(_medium_smpl.t)},
-      reverse_incident_dir{-_incident_segment.ray.dir},
-      medium{_medium}
+  double ComputeMISWeightForConnection(
+    int eye_index,
+    int light_index,
+    Pdf pdf_scatter_eye, 
+    Pdf pdf_scatter_light, 
+    const RaySegment &eye_to_light)
   {
-  }
-
-  ScatterSample Sample(Sampler& sampler, const PathContext &context) const override
-  {
-    return medium.SamplePhaseFunction(reverse_incident_dir, pos, sampler, context);
-  }
-  
-  Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) override
-  {
-    return medium.EvaluatePhaseFunction(reverse_incident_dir, pos, out_direction, context, pdf);
-  }
-  
-  Double3 Position() const override { return pos; }
-};
-
-
-class Camera : public Vertex
-{
-  int unit_index;
-  const ROI::PointEmitterArray &emitter;
-  Double3 pos;
-  IntersectionCalculator &intersector;
-  int &splatting_unit_index;
-public:
-  // TODO: Get rid of the intersector!
-  Camera(const ROI::PointEmitterArray &_emitter, int _unit_index, IntersectionCalculator &_intersector, int &_splatting_unit_index)
-    : Vertex(END_VERTEX), unit_index{_unit_index}, emitter{_emitter}, intersector{_intersector}, splatting_unit_index{_splatting_unit_index}
-  {}
-  
-  ROI::PositionSample PositionSample(Sampler& sampler, const PathContext &context)
-  {
-    auto smpl = emitter.TakePositionSample(unit_index, sampler, context);
-    pos = smpl.coordinates;
-    return smpl;
-  }
-  
-  ScatterSample Sample(Sampler& sampler, const PathContext &context) const override
-  {
-    auto smpl_dir = emitter.TakeDirectionSampleFrom(unit_index, pos, sampler, context);
-    auto scatter_smpl = ScatterSample{smpl_dir.coordinates, smpl_dir.value, smpl_dir.pdf_or_pmf};
-    return scatter_smpl;
-  }
-  
-  Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) override
-  {   
-    auto response = emitter.Evaluate(pos, out_direction, context, pdf);
-    splatting_unit_index = response.unit_index;
-    return response.weight;
-  }
-  
-  void InitRayAndMaybeHandlePassageThroughSurface(Ray &ray, const Double3 &exitant_dir, MediumTracker &medium_tracker) const
-  {
-    Vertex::InitRayAndMaybeHandlePassageThroughSurface(ray, exitant_dir, medium_tracker);
-  }
-
-  Double3 Position() const override { return pos; }
-};
-
-
-
-// class EmissiveSurface : public Vertex
-// {
-//   ROI::AreaSample area_sample;
-//   static ROI::AreaSample MakeAreaSampleFromHitPoint(const HitId &_hit, const RaySegment &_incident_segment)
-//   {
-//     ROI::AreaSample area;
-//     area.hit = _hit;
-//     Double3 dummy1, dummy2;
-//     _hit.primitive->GetLocalGeometry(_hit, area.coordinates, area.normal, dummy1);
-//     area.pdf_or_pmf = NaN;
-//     area.value = Spectral3{NaN};
-//     return area;
-//   }
-//   inline const ROI::AreaEmitter& GetEmitter() const { return *area_sample.hit.primitive->emitter; }
-// public:
-//   EmissiveSurface(const HitId &_hit, const RaySegment &_incident_segment)
-//     : Vertex(END_VERTEX), area_sample{MakeAreaSampleFromHitPoint(_hit, _incident_segment)}
-//   {
-//     assert(_hit.primitive->emitter);
-//   }
-//   
-//   ScatterSample Sample(Sampler& sampler, const PathContext &context) const override
-//   {
-//     assert (!"Not Implemented");
-//     return ScatterSample{};
-//   }
-//   
-//   Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf_pos) const override
-//   {
-//     auto radiance = GetEmitter().Evaluate(area_sample, out_direction, context, pdf_pos, nullptr);
-//     return radiance;
-//   }
-//   
-//   Double3 Position() const override { return area_sample.coordinates; }
-//   
-//   double Dfactor(const Double3 &out_direction) const override
-//   {
-//     return std::max(0., Dot(out_direction, area_sample.normal));
-//   }
-// };
-
-
-// class EmissiveEnvironment : public Vertex
-// {
-//   const ROI::EnvironmentalRadianceField &envlight;
-// public:
-//   EmissiveEnvironment(const ROI::EnvironmentalRadianceField &_envlight) 
-//     : Vertex(END_VERTEX), envlight(_envlight) 
-//   {
-//   }
-//   
-//   ScatterSample Sample(Sampler& sampler, const PathContext &context) const override
-//   {
-//     assert (!"Not Implemented");
-//     return ScatterSample{};
-//   }
-//   
-//   Spectral3 Evaluate(const Double3 &out_direction, const PathContext &context, double *pdf) const override
-//   {
-//     auto radiance = envlight.Evaluate(out_direction, context, pdf);
-//     return radiance;
-//   }
-// };
-
-
-class VertexStorage
-{
-  static constexpr std::size_t chunk_size = std::max({
-    sizeof(void*), // Ensure sufficient space for the next-free-chunk pointer.
-    sizeof(Vertex),
-    sizeof(Surface),
-    sizeof(Volume),
-    sizeof(Camera)
-  });
-  
-  std::vector<char> memory;
-  using MemoryManager = boost::simple_segregated_storage<std::size_t>;
-  MemoryManager manager;
-
-  void _init_manager()
-  {
-    manager.add_block(&memory.front(), memory.size(), chunk_size);
-  }
-  
-public:
-  VertexStorage(std::size_t max_num_items)
-  {
-    std::size_t some_reserve_for_inter_block_links = 128; // Which is chosen completely arbitrary in good faith.
-    memory.resize(
-      chunk_size * max_num_items + 
-      some_reserve_for_inter_block_links);
-    _init_manager();
-  }
-  
-  template<class T, typename... Args>
-  T* allocate(Args&&... args)
-  {
-    static_assert(sizeof(T) <= chunk_size, "Must fit in the chunks");
-    void *p = manager.malloc();
-    assert(p != nullptr);
-    return new(p) T(std::forward<Args>(args)...);
-  }
-  
-  // Clear the memory. WARNING: currently no d'tors are called!!!
-  void clear()
-  {
-    manager.~MemoryManager();
-#ifndef NDEBUG
-    std::fill(memory.begin(), memory.end(), std::numeric_limits<char>::max());
+#if 0
+    int num_vertices = eye_history.NumNodes() + light_history.NumNodes();
+    assert (eye_segments.size() == eye_nodes.size()-1);
+    assert (light_segments.size() == light_nodes.size()-1);
+    // TODO: Set num nodes to consider.
+    
+    ComputeForwardSubpathDensities(eye_history, eye_densities);
+    ComputeForwardSubpathDensities(light_history, light_densities);
+    
+    ComputeConnectionPart(eye_history, light_history, pdf_scatter_eye, pdf_scatter_light, eye_to_light, eye_densities);
+    
+    ComputeReverseSubpathDensities(light_history, eye_densities);
+    ComputeReverseSubpathDensities(eye_history, light_densities);
+    
+    FillSpecularFlags();
+    
+    return ComputePowerHeuristicWeight();
+#else
+    if (eye_index < 0 || light_index < 0)
+    {
+      return 1;
+    }
+    if (number_of_paths_of_size.empty())
+    {
+      ComputeNumberOfPathsOfSize();
+    }
+    return number_of_paths_of_size[eye_index+light_index+2];
 #endif
-    new (&manager) MemoryManager();
-    _init_manager();
+  }
+};
+#endif
+
+
+class Bdpt : public RadianceEstimatorBase, public IRenderingAlgo
+{
+  LambdaSelectionFactory lambda_selection_factory;
+  ToyVector<IRenderingAlgo::SensorResponse> rgb_responses;
+
+  struct Splat : public ROI::PointEmitterArray::Response
+  {
+    Splat(int unit_index, const Spectral3 &weight, int _path_length) :
+      ROI::PointEmitterArray::Response{unit_index, weight}, path_length{_path_length} {}
+    int path_length = {};
+  };
+  
+  BdptDetail::SubpathHistory eye_history;
+  BdptDetail::SubpathHistory direct_light_history; // The alternate history ;-) .Where a random light is sampled for s=*,t=1 paths, instead of the original one. Contains only a single node.
+  BdptDetail::SubpathHistory light_history;  
+  ToyVector<Spectral3> contribution_wrt_path_length;
+  ToyVector<int> number_of_contributions_wrt_path_length;
+  ToyVector<Splat> splats;
+  Index3 lambda_idx;
+  int pixel_index;
+  
+  bool enable_debug_buffers;
+  BdptDetail::DebugBuffers debug_buffers;
+  
+public:
+  Bdpt(const Scene &_scene, const AlgorithmParameters &algo_params) 
+  : RadianceEstimatorBase{_scene, algo_params},
+    lambda_selection_factory{},
+    enable_debug_buffers{algo_params.num_threads <= 0}
+  {
+    rgb_responses.reserve(1024);
+  }
+
+  
+  RGB MakePrettyPixel(int _pixel_index) override
+  {
+    eye_history.Reset();
+    light_history.Reset();
+    const int max_path_size = 2 * (max_number_of_interactions+1)+1;
+    contribution_wrt_path_length.clear();
+    contribution_wrt_path_length.resize(max_path_size, Spectral3{0.});
+    number_of_contributions_wrt_path_length.clear();
+    number_of_contributions_wrt_path_length.resize(max_path_size, 0);
+    splats.clear();
+    
+    pixel_index = _pixel_index;
+    Spectral3 lambda_weights;
+    std::tie(this->lambda_idx, lambda_weights) = lambda_selection_factory.WithWeights(sampler);
+    PathContext context{this->lambda_idx};
+
+    Pdf eye_node_pdf;
+    RW::PathNode eye_node = SampleSensorEnd(pixel_index, context, eye_node_pdf);   
+    MediumTracker eye_medium_tracker{scene};
+    InitializeMediumTracker(eye_node, eye_medium_tracker);    
+    eye_history.Start(eye_node, lambda_weights, eye_node_pdf);
+    BdptForwardTrace(eye_history, eye_medium_tracker, context);
+    
+    Pdf light_node_pdf;
+    RW::PathNode light_node = SampleEmissiveEnd(context, light_node_pdf);    
+    MediumTracker light_medium_tracker{scene};
+    InitializeMediumTracker(light_node, light_medium_tracker);
+    light_history.Start(light_node, Spectral3{1.}, light_node_pdf);
+    BdptForwardTrace(light_history, light_medium_tracker, context);
+    
+    if (light_history.NumNodes()>1 && light_history.NodeFromBack(0).node_type != RW::NodeType::SCATTER)
+    {
+      light_history.Pop();
+    }
+
+    for (int eye_idx=0; eye_idx<eye_history.NumNodes(); ++eye_idx)
+    {
+      if (!IsHitableEmissiveNode(eye_history.Node(eye_idx)))
+      {
+        DirectLighting(eye_idx, eye_medium_tracker, context);
+        for (int light_idx=1; light_idx<light_history.NumNodes(); ++light_idx)
+        {
+          ConnectWithLightPath(eye_idx, light_idx, light_medium_tracker, context);
+        }
+      }
+      else
+      {
+        assert (eye_idx == eye_history.NumNodes()-1); // Hitting a light should terminate the walk.
+        HandleLightHit(context);
+      }
+    }
+    
+    assert(number_of_contributions_wrt_path_length[0] == 0);
+    assert(number_of_contributions_wrt_path_length[1] == 0);
+    Spectral3 path_weight_sum{0.};
+    for (int n=2; n<eye_history.NumNodes()+light_history.NumNodes()+1; ++n)
+    {
+      path_weight_sum += contribution_wrt_path_length[n];
+    }
+    for (const auto &splat : splats)
+    {
+      assert(splat.path_length>=2);
+      rgb_responses.push_back(IRenderingAlgo::SensorResponse{
+        splat.unit_index,
+        Color::SpectralSelectionToRGB(splat.weight, lambda_idx)
+      });
+    }
+    
+    return Color::SpectralSelectionToRGB(path_weight_sum, lambda_idx);
+  }
+
+  
+  void DirectLighting(int eye_idx, const MediumTracker &medium_tracker, const PathContext &context)
+  {
+    Pdf pdf_sample_light;
+    RW::PathNode light_node = SampleEmissiveEnd(context, pdf_sample_light); 
+    direct_light_history.Reset();
+    direct_light_history.Start(light_node, Spectral3{1.}, pdf_sample_light);
+    
+    double pdf_scatter_eye, pdf_scatter_light;
+    WeightedSegment to_eye = Connection(
+      direct_light_history.Node(0), medium_tracker, eye_history.Node(eye_idx),
+      context, &pdf_scatter_light, &pdf_scatter_eye);
+    
+    BdptDetail::Connection connection{
+      Pdf{pdf_scatter_eye},
+      Pdf{pdf_scatter_light},
+      eye_idx,
+      0,
+      to_eye.segment.Reversed()
+    };
+    
+    double mis_weight = MisWeight(eye_history, direct_light_history, connection);
+    Spectral3 path_weight = mis_weight*eye_history.Beta(eye_idx)*direct_light_history.Beta(0)*to_eye.weight;
+    AddPathWeight(eye_idx, 0, path_weight);
   }
   
-  template<class T>
-  void free(T *p)
+  
+  void ConnectWithLightPath(int eye_idx, int light_idx, const MediumTracker &light_medium_tracker, const PathContext &context)
   {
-    p->~T();
-    manager.free(p);
+    double eye_pdf, light_pdf;
+    WeightedSegment to_eye = Connection(
+      light_history.Node(light_idx), light_medium_tracker, eye_history.Node(eye_idx),
+      context, &light_pdf, &eye_pdf);
+    
+    BdptDetail::Connection connection{
+      Pdf{eye_pdf},
+      Pdf{light_pdf},
+      eye_idx,
+      light_idx,
+      to_eye.segment.Reversed()
+    };
+    
+    double mis_weight = MisWeight(eye_history, light_history, connection);
+    Spectral3 path_weight = mis_weight*eye_history.Beta(eye_idx)*light_history.Beta(light_idx)*to_eye.weight;
+    AddPathWeight(eye_idx, light_idx, path_weight);
   }
+  
+  
+  void HandleLightHit(const PathContext &context)
+  {
+    assert(eye_history.NumNodes()>=2);
+    const auto &end_node = eye_history.NodeFromBack(0);
+    
+    double reverse_scatter_pdf = 0.;
+    Spectral3 end_weight = EvaluateScatterCoordinate(
+      end_node, -end_node.incident_dir, context, &reverse_scatter_pdf);
+    
+    BdptDetail::Connection connection{
+      Pdf{reverse_scatter_pdf},
+      GetPdfOfGeneratingSampleOnEmitter(end_node, context),
+      eye_history.NumNodes()-1,
+      -1,
+      RaySegment{}
+    };
+    
+    double mis_weight = MisWeight(eye_history, light_history, connection);
+    Spectral3 path_weight = mis_weight*end_weight*eye_history.Beta(eye_history.NumNodes()-1);
+    AddPathWeight(eye_history.NumNodes()-1, -1, path_weight);
+  }
+  
+  
+  double MisWeight(const BdptDetail::SubpathHistory &eye, const BdptDetail::SubpathHistory &light, const BdptDetail::Connection &connection)
+  {
+    int n = NumberOfAdmissibleSamplingTechniques(eye, light, connection);
+    assert (n>=1); // Actually, there can easily be scenes where there are purely specular paths. Mirrors+Pointlights. Can't sample that. Still, for debugging normal scenes the assert is useful.
+    return n>0 ? 1./n : 0.;
+  }
+    
+  
+  int NumberOfAdmissibleSamplingTechniques(const BdptDetail::SubpathHistory &eye, const BdptDetail::SubpathHistory &light, const BdptDetail::Connection &connection)
+  {
+    /* Simple way to understand the number of admissible techniques in Veach's sense:
+     * Imagine there is a very glossy vertex. Sampling via bsdf is low variance because the bsdf and the pdf cancel each other in the nominator/denominator.
+     * Now, sampling something else and connecting to the vertex has high variance because only very few time we get a contribution, and if so, the bsdf has very large value because it is strongly peaked.
+     * Now make the bsdf sharper, narrower, take limit to Dirac-Delta function. 
+     * Variance goes to infinity. We cannot do this. And in fact, my 'Evaluate' & 'Pdf' functions return 0 for specular components, no matter what coordinates.
+     * What is left are the sampling techniques where only non-specular vertices are connected. 
+     * So I simply count the number of segment that have no adjacent specular vertices.
+     */
+    auto IDX_INITIAL = BdptDetail::INDEX_OF_PICKING_INITIAL_POINT;
+    int num_segments_between_non_specular_vertices = 0;
+    for (int i=IDX_INITIAL; i<connection.eye_index-1; ++i)
+      if (!eye.IsSpecular(i) && !eye.IsSpecular(i+1))
+        ++num_segments_between_non_specular_vertices;
+    for (int i=IDX_INITIAL; i<connection.light_index-1; ++i)
+      if (!light.IsSpecular(i) && !light.IsSpecular(i+1))
+        ++num_segments_between_non_specular_vertices;
+    if (!eye.IsSpecular(connection.eye_index-1) && !connection.eye_pdf.IsFromDelta())
+      ++num_segments_between_non_specular_vertices;
+    if (connection.light_index >= 0 && !light.IsSpecular(connection.light_index-1) && !connection.light_pdf.IsFromDelta())
+      ++num_segments_between_non_specular_vertices;
+    if (!connection.eye_pdf.IsFromDelta() && !connection.light_pdf.IsFromDelta())
+      ++num_segments_between_non_specular_vertices;
+    return num_segments_between_non_specular_vertices;
+  }
+  
+  
+  void AddPathWeight(int s, int t, const Spectral3 &path_weight)
+  {
+    int path_length = s+t+2; // +2 Because s and t are 0-based indices.
+    assert(path_length >= 2);
+    if (s == 0) // Initial eye vertex.
+    {
+      if (sensor_connection_unit >= 0)
+      {
+        int num_attempted_paths_per_unit = scene.GetCamera().xres*scene.GetCamera().yres;
+        Spectral3 new_weight = path_weight/num_attempted_paths_per_unit;
+        splats.emplace_back(
+          sensor_connection_unit,
+          new_weight,
+          path_length
+        );
+        AddToDebugBuffer(sensor_connection_unit, s, t, new_weight);
+        sensor_connection_unit = -1;
+      }
+    }
+    else
+    {
+      contribution_wrt_path_length[path_length] += path_weight;
+      AddToDebugBuffer(pixel_index, s, t, path_weight);
+    }
+    ++number_of_contributions_wrt_path_length[path_length];
+  }
+  
+    
+  void BdptForwardTrace(BdptDetail::SubpathHistory &path, MediumTracker &medium_tracker, const PathContext &context)
+  {
+    if (this->max_number_of_interactions <= 1)
+      return;
+    
+    int number_of_interactions = 1;    
+    while (true)
+    {
+      StepResult step = TakeRandomWalkStep(
+        path.NodeFromBack(0), medium_tracker, context);
+      
+      if (step.node.node_type == RW::NodeType::ZERO_CONTRIBUTION_ABORT_WALK) // Hit a light or particle escaped the scene or aborting.
+        break;   
+      
+      // TODO: supply proper scattering pdf for MIS!
+      path.AddSegment(step.node, step.beta_factor, Pdf{0}, step.segment);
+
+      ++number_of_interactions;
+      bool survive = RouletteSurvival(step.beta_factor, number_of_interactions); 
+      if (!survive)
+        break;
+      
+      if (step.node.node_type != RW::NodeType::SCATTER)
+        break;
+    }    
+  }
+
+  // TODO: Duplicated code. Same as in PathTracing. Bad! But interface classes should not have state. In particular not with multi-inheritance. -> Need better interface!
+  ToyVector<IRenderingAlgo::SensorResponse>& GetSensorResponses() override
+  {
+    return rgb_responses;
+  }
+  
+  void AddToDebugBuffer(int unit_index, int s, int t, const Spectral3 &path_weight)
+  {
+    if (!enable_debug_buffers)
+      return;
+
+    auto key = std::make_pair(s, t);
+    auto it = debug_buffers.find(key);
+    if (it == debug_buffers.end())
+    {
+      bool _;
+      std::tie(it, _) = debug_buffers.insert(std::make_pair(
+        key, Spectral3ImageBuffer(scene.GetCamera().xres, scene.GetCamera().yres)));
+    }
+    it->second.Insert(unit_index, Color::SpectralSelectionToRGB(path_weight, lambda_idx));
+  }
+  
+  
+  void NotifyPassesFinished(int pass_count) override;
 };
 
 
-} // RandomWalk
 
 
-namespace RW = RandomWalk;
 
-class PathTracing : public BaseAlgo
+
+class PathTracing : public IRenderingAlgo, public RandomWalk::RadianceEstimatorBase
 { 
-  int max_number_of_interactions;
-  double sufficiently_long_distance_to_go_outside_the_scene_bounds;
-  RW::VertexStorage vertex_storage;
   LambdaSelectionFactory lambda_selection_factory;
   bool do_sample_brdf;
   bool do_sample_lights;
-  int splatting_unit_index;
+  ToyVector<IRenderingAlgo::SensorResponse> rgb_responses;
 public:
   PathTracing(const Scene &_scene, const AlgorithmParameters &algo_params) 
-  : BaseAlgo(_scene), 
-    max_number_of_interactions(algo_params.max_ray_depth),
-    vertex_storage(algo_params.max_ray_depth),
+  : RadianceEstimatorBase{_scene, algo_params},
     lambda_selection_factory{},
     do_sample_brdf{true},
     do_sample_lights{true}
   {
-    Box bb = _scene.GetBoundingBox();
-    sufficiently_long_distance_to_go_outside_the_scene_bounds = 10.*(bb.max - bb.min).maxCoeff();
     // Which style of sampling for the last vertex of the path. 
     // Defaults to both light and brdf sampling.
     if (algo_params.pt_sample_mode == "bsdf")
@@ -323,235 +568,30 @@ public:
     {
       do_sample_brdf = false;
     }
-  }
-  
-  template<class SampleType>
-  double MaybeMisWeight(const SampleType &sample, double pdf_wrt_solid_angle)
-  {
-    double mis_weight = 1.;
-    if (IsFromPdf(sample) && this->do_sample_brdf && this->do_sample_lights)
-    {
-      mis_weight = PowerHeuristic(PdfValue(sample), {pdf_wrt_solid_angle});
-    }
-    return mis_weight;
-  }
-  
-  
-  bool RouletteSurvival(Spectral3 &beta, int number_of_interactions)
-  {
-    static constexpr int MIN_LEVEL = 3;
-    static constexpr double LOW_CONTRIBUTION = 0.5;
-    if (number_of_interactions >= max_number_of_interactions || beta.isZero())
-      return false;
-    if (number_of_interactions < MIN_LEVEL)
-      return true;
-    double p_survive = std::min(0.9, beta.maxCoeff() / LOW_CONTRIBUTION);
-    if (sampler.Uniform01() > p_survive)
-      return false;
-    beta *= 1./p_survive;
-    return true;
-  }
-  
-  struct TagEndNodeSample {};
-  using EndNodeSample = Sample<Double3, Spectral3, TagEndNodeSample>;
-  
-  struct ConnectionEndNodeData
-  {
-    EndNodeSample sample;
-    RaySegment segment_to_target;
-    bool is_wrt_solid_angle;
-  };
-  
-  
-  ConnectionEndNodeData ComputeConnectionSample(const ROI::EnvironmentalRadianceField &target, const RW::Vertex &vertex, const PathContext &context)
-  {
-    ConnectionEndNodeData nd;
-    auto dir_sample = target.TakeDirectionSample(sampler, context);
-    nd.sample = dir_sample.as<EndNodeSample>();
-    nd.segment_to_target = RaySegment{{vertex.Position(), -dir_sample.coordinates}, sufficiently_long_distance_to_go_outside_the_scene_bounds};
-    nd.is_wrt_solid_angle = true;
-    return nd;
-  }
-  
-  ConnectionEndNodeData ComputeConnectionSample(const ROI::PointEmitter& target, const RW::Vertex &vertex, const PathContext &context)
-  {
-    ConnectionEndNodeData nd;
-    Double3 light_pos = target.Position();
-    nd.segment_to_target = RaySegment::FromTo(vertex.Position(), light_pos);
-    // Direction component of Le(x-x') is zero for lights with delta function in Le.
-    nd.sample.value = target.Evaluate(light_pos, -nd.segment_to_target.ray.dir, context, nullptr);
-    nd.sample.pdf_or_pmf = 1.;
-    SetPmfFlag(nd.sample);
-    nd.is_wrt_solid_angle = false;
-    return nd;
-  }
-  
-  ConnectionEndNodeData ComputeConnectionSample(const ROI::AreaEmitter& target, const Primitive &primitive, const RW::Vertex &vertex, const PathContext &context)
-  {
-    ConnectionEndNodeData nd;
-    auto area_sample = target.TakeAreaSample(primitive, sampler, context);
-    auto surfaceinteraction = SurfaceInteraction{area_sample.coordinates};
-    surfaceinteraction.pos += AntiSelfIntersectionOffset(surfaceinteraction.geometry_normal, RAY_EPSILON, Normalized(vertex.Position()-surfaceinteraction.pos));
-    nd.segment_to_target = RaySegment::FromTo(vertex.Position(), surfaceinteraction.pos);
-    auto radiance = target.Evaluate(area_sample.coordinates, -nd.segment_to_target.ray.dir, context, nullptr);
-    nd.sample.coordinates = surfaceinteraction.pos;
-    nd.sample.value       = radiance;
-    nd.sample.pdf_or_pmf  = area_sample.pdf_or_pmf;
-    nd.sample.pdf_or_pmf *= PdfConversion::AreaToSolidAngle(nd.segment_to_target.length, nd.segment_to_target.ray.dir, surfaceinteraction.geometry_normal);
-    nd.is_wrt_solid_angle = true;
-    return nd;
+    rgb_responses.reserve(1024);
   }
 
-  Spectral3 CalculateLightConnectionSubPathWeight(RW::Vertex &vertex, const MediumTracker &_medium_tracker_parent, const PathContext &context)
-  {    
-    //bool can_be_hit_by_scatter_function_sampling = true;
-    //double pdf_of_light_vertex_wrt_solid_angle = NaN;
-    ConnectionEndNodeData nd;
-    double pmf_of_light = 1.;
-    int which_kind = TowerSampling<3>(emitter_type_selection_probabilities.data(), sampler.Uniform01());
-    if (which_kind == IDX_PROB_ENV)
-    {
-      const auto &envlight = this->GetEnvLight();
-      nd = ComputeConnectionSample(envlight, vertex, context);
-    }
-    else if(which_kind == IDX_PROB_AREA)
-    {
-      const Primitive* primitive;
-      const ROI::AreaEmitter* emitter;
-      std::tie(primitive, emitter, pmf_of_light) = PickAreaLight();
-      nd = ComputeConnectionSample(*emitter, *primitive, vertex, context);
-    }
-    else
-    {
-      const ROI::PointEmitter* light; 
-      std::tie(light, pmf_of_light) = PickLight();
-      nd = ComputeConnectionSample(*light, vertex, context);
-    }
-    nd.sample.pdf_or_pmf *= pmf_of_light*emitter_type_selection_probabilities[which_kind];
-    
-    double scatter_pdf_wrt_solid_angle = NaN;
-    Spectral3 scatter_factor = vertex.Evaluate(nd.segment_to_target.ray.dir, context, &scatter_pdf_wrt_solid_angle);
-
-    if (scatter_factor.isZero())
-      return Spectral3{0.};
-    
-    MediumTracker medium_tracker = _medium_tracker_parent;
-    vertex.InitRayAndMaybeHandlePassageThroughSurface(nd.segment_to_target.ray, nd.segment_to_target.ray.dir, medium_tracker);
-
-    nd.segment_to_target.ShortenBothEndsBy(RAY_EPSILON);
-    
-    auto transmittance = TransmittanceEstimate(nd.segment_to_target, medium_tracker, context);
-    double r2_factor = nd.is_wrt_solid_angle ? 1. : 1./Sqr(nd.segment_to_target.length);
-    
-    double mis_weight = MaybeMisWeight(nd.sample, scatter_pdf_wrt_solid_angle);    
-    Spectral3 sub_path_weight = transmittance * scatter_factor * nd.sample.value;
-    sub_path_weight *= r2_factor*mis_weight / PmfOrPdfValue(nd.sample);
-    return sub_path_weight;
-  }
-  
-
-  enum EntityHitFlag
-  {
-    NOTHING,
-    SCATTERER,
-    AREA_EMITTER,
-    ENV_LIGHT
-  };
-  
-  Spectral3 EmitterHit(const ROI::EnvironmentalRadianceField& emitter, const RaySegment &incident_segment, const PathContext &context, double &pdf_of_emitter_wrt_solid_angle)
-  {
-    auto radiance = envlight.Evaluate(-incident_segment.ray.dir, context);
-    pdf_of_emitter_wrt_solid_angle = envlight.EvaluatePdf(-incident_segment.ray.dir, context);
-    assert(pdf_of_emitter_wrt_solid_angle >= 0 && std::isfinite(pdf_of_emitter_wrt_solid_angle));
-    return radiance;
-  }
-  
-  Spectral3 EmitterHit(const ROI::AreaEmitter &emitter, const HitId &hit, const RaySegment &incident_segment, const PathContext &context, double &pdf_of_emitter_wrt_solid_angle)
-  {
-    auto radiance = emitter.Evaluate(hit, -incident_segment.ray.dir, context, nullptr);
-    double pdf_of_pos = emitter.EvaluatePdf(hit, context);
-    assert(pdf_of_pos >= 0 && std::isfinite(pdf_of_pos));
-    SurfaceInteraction surfaceinteraction{hit};
-    pdf_of_emitter_wrt_solid_angle = pdf_of_pos*PdfConversion::AreaToSolidAngle(incident_segment.length, incident_segment.ray.dir, surfaceinteraction.geometry_normal);
-    return radiance;
-  }
-  
-  
-  Spectral3 CalculateEmitterHitSubPathWeight(EntityHitFlag entity_hit_flag, const CollisionData &collision, const ScatterSample &last_scatter_sample, const PathContext &context)
-  {
-    Spectral3 end_weight{0.};
-    double pdf_of_emitter_wrt_solid_angle{0.};
-    if (entity_hit_flag == ENV_LIGHT)
-    {
-      assert(collision.hit.primitive == nullptr);
-      end_weight = EmitterHit(
-        GetEnvLight(), collision.segment, context, pdf_of_emitter_wrt_solid_angle);
-      pdf_of_emitter_wrt_solid_angle *= emitter_type_selection_probabilities[IDX_PROB_ENV];
-    }
-    else if (entity_hit_flag == AREA_EMITTER) 
-    {
-      assert(collision.hit.primitive && collision.hit.primitive->emitter);
-      const auto &emitter = *collision.hit.primitive->emitter;
-      end_weight = EmitterHit(
-        emitter, collision.hit, collision.segment, context, pdf_of_emitter_wrt_solid_angle);
-      pdf_of_emitter_wrt_solid_angle *= emitter_type_selection_probabilities[IDX_PROB_AREA] * PmfOfLight(emitter);
-    }
-    double mis_weight = MaybeMisWeight(last_scatter_sample, pdf_of_emitter_wrt_solid_angle);
-    end_weight *= mis_weight;
-    return end_weight;
-  }
-
-  
-  std::pair<EntityHitFlag, RW::Vertex*> DetermineNextInteractionType(const CollisionData &collision, MediumTracker &medium_tracker)
-  {
-    RW::Vertex *vertex = nullptr;
-    if (collision.smpl.t < collision.segment.length)
-    {
-      vertex = vertex_storage.allocate<RW::Volume>(collision.smpl, medium_tracker.getCurrentMedium(), collision.segment);
-      return std::make_pair(SCATTERER, vertex);
-    }
-    else if (collision.hit)
-    {
-      if (collision.hit.primitive->emitter)
-      {
-        return std::make_pair(AREA_EMITTER, vertex);
-      }
-      else 
-      {
-        vertex = vertex_storage.allocate<RW::Surface>(collision.hit, collision.segment);
-        return std::make_pair(SCATTERER, vertex);
-      }
-    }
-    else
-    {
-      return std::make_pair(ENV_LIGHT, vertex);
-    }
-  }
   
   RGB MakePrettyPixel(int pixel_index) override
   {
-    splatting_unit_index = -1;
+    sensor_connection_unit = -1;
     
     auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
     PathContext context{lambda_selection.first};
-    Spectral3 beta = lambda_selection.second;
     MediumTracker medium_tracker{scene};
+    
     Spectral3 path_sample_values{0.};
+
+    RW::PathNode prev_node;
     
-    RW::Camera start_vertex(scene.GetCamera(), pixel_index, intersector, splatting_unit_index);
-    {
-      auto pos_smpl = start_vertex.PositionSample(sampler, context);
-      beta *= (1./PmfOrPdfValue(pos_smpl));
-      medium_tracker.initializePosition(pos_smpl.coordinates, intersector);
-    }
-  
-    RW::Vertex* vertex = &start_vertex;
-    ScatterSample scatter_smpl{};
-    CollisionData collision{Ray{}};
-    EntityHitFlag entity_hit_flag = NOTHING;
-    Ray ray;
+    StepResult step;
+    step.node = SampleSensorEnd(pixel_index, context, step.scatter_pdf); // Note: abuse of scatter_pdf. This is not about scattering but picking the initial location.
+    
+    Spectral3 beta{lambda_selection.second/step.scatter_pdf};
+    
+    InitializeMediumTracker(step.node, medium_tracker);
+
     int number_of_interactions = 0;
-    
     while (true)
     {
       ++number_of_interactions;
@@ -559,56 +599,99 @@ public:
       if (this->do_sample_lights) 
       {
         // Next vertex. Sample a point on a light source. Compute geometry term. Add path weight to total weights.
-        Spectral3 path_weight = beta *
-          CalculateLightConnectionSubPathWeight(*vertex, medium_tracker, context);
-        if (vertex != &start_vertex)
+        Pdf pdf_light;
+        RW::PathNode light_node = SampleEmissiveEnd(context, pdf_light);
+        double pdf_scatter = NaN;
+        WeightedSegment to_light = Connection(step.node, medium_tracker, light_node, context, &pdf_scatter, nullptr);
+        double pdf_of_light_due_to_scatter = pdf_scatter*PdfConversionFactorForTarget(step.node, light_node, to_light.segment);
+        double mis_weight = MisWeight(
+          pdf_light, // Maybe this needs multiplication with pmf to select the unit_index.
+          pdf_of_light_due_to_scatter);
+        Spectral3 path_weight = (mis_weight/pdf_light)*to_light.weight*beta;
+        if (step.node.node_type == NodeType::CAMERA)
+        {
+          if (sensor_connection_unit >= 0)
+          {
+            int num_attempted_paths = scene.GetCamera().xres*scene.GetCamera().yres;
+            path_weight /= num_attempted_paths;
+            rgb_responses.push_back({
+              sensor_connection_unit,
+              Color::SpectralSelectionToRGB(path_weight, lambda_selection.first)
+            }); // TODO: emplace_back wants a ctor. This part works via the auto-generated curly braces ctor.
+          }
+        }
+        else
         {
           path_sample_values += path_weight;
         }
-        else if (splatting_unit_index >= 0)
-        {
-          int num_attempted_paths = scene.GetCamera().xres*scene.GetCamera().yres;
-          path_weight /= num_attempted_paths;
-          RGB color = Color::SpectralSelectionToRGB(path_weight, lambda_selection.first);
-          sensor_responses.push_back({splatting_unit_index, color});
-        }
       }
 
-      // Next vertex by sampling the BSDF.
-      scatter_smpl = vertex->Sample(sampler, context);
-      beta *= scatter_smpl.value / PmfOrPdfValue(scatter_smpl);
+      prev_node = step.node;
+      step = TakeRandomWalkStep(prev_node, medium_tracker, context);
       
-      if (beta.isZero()) // Because of odd situations where ray can be scattered below the surface due to smooth normal interpolation.
-        break;
+      beta *= step.beta_factor;
       
-      vertex->InitRayAndMaybeHandlePassageThroughSurface(ray, scatter_smpl.coordinates, medium_tracker);
-      
-      // And tracking to the next interaction point.
-      collision = CollisionData{ray};
-      TrackToNextInteraction(collision, medium_tracker, context);
-      beta *= collision.smpl.weight;
-      
-      std::tie(entity_hit_flag, vertex) = DetermineNextInteractionType(collision, medium_tracker);
-      
-      if (entity_hit_flag != SCATTERER) // Hit a light or particle escaped the scene.
+      if (step.node.node_type != RW::NodeType::SCATTER) // Hit a light or particle escaped the scene or aborting.
         break;   
-
-      bool survive = RouletteSurvival(beta, number_of_interactions);
+      
+      bool survive = RouletteSurvival(beta, number_of_interactions); 
       if (!survive)
         break;
       
-      assert(vertex);
       assert(beta.allFinite());
     }
 
-    if (this->do_sample_brdf)
+    if (this->do_sample_brdf && IsHitableEmissiveNode(step.node))
     {
-      path_sample_values += beta * CalculateEmitterHitSubPathWeight(
-        entity_hit_flag, collision, scatter_smpl, context
-      );
+      double pdf_end_pos = 0.;
+      Spectral3 end_weight = EndPathWithZeroVerticesOnOtherSide(prev_node, step.node, step.segment, context, &pdf_end_pos);
+      
+      Pdf step_pdf_of_end = PdfConversionFactorForTarget(prev_node, step.node, step.segment)*step.scatter_pdf;
+      
+      double mis_weight = MisWeight(step_pdf_of_end, pdf_end_pos);
+      
+      path_sample_values += mis_weight*end_weight*beta;
     }
-    
-    vertex_storage.clear();
+ 
     return Color::SpectralSelectionToRGB(path_sample_values, lambda_selection.first);
   }
+
+  
+  // TODO: remove parameter for start node?!
+  Spectral3 EndPathWithZeroVerticesOnOtherSide(const RW::PathNode &, const RW::PathNode &end_node, const RaySegment &segment_to_end,  const PathContext &context, double *pdf_reverse_target)
+  {
+    assert(IsHitableEmissiveNode(end_node));
+    Spectral3 scatter_value = EvaluateScatterCoordinate(end_node, -segment_to_end.ray.dir, context, nullptr);
+    if (pdf_reverse_target)
+    {
+      // Does not need conversion, because is already either w.r.t. area or angle (env).
+      *pdf_reverse_target = GetPdfOfGeneratingSampleOnEmitter(end_node, context);
+    }
+    return scatter_value;
+  }
+  
+  
+  ToyVector<IRenderingAlgo::SensorResponse>& GetSensorResponses() override
+  {
+    return rgb_responses;
+  }
+  
+
+  double MisWeight(Pdf pdf_or_pmf_taken, double pdf_other) const
+  {
+    double mis_weight = 1.;
+    if (!pdf_or_pmf_taken.IsFromDelta() && this->do_sample_brdf && this->do_sample_lights)
+    {
+      mis_weight = PowerHeuristic(pdf_or_pmf_taken, {pdf_other});
+    }
+    return mis_weight;
+  }
 };
+
+} // namespace
+
+using PathTracing = RandomWalk::PathTracing;
+using Bdpt = RandomWalk::Bdpt;
+using RadianceEstimatorBase = RandomWalk::RadianceEstimatorBase;
+
+#pragma GCC diagnostic pop // Restore command line options

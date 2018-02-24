@@ -2,6 +2,17 @@
 
 namespace SampleTrafo
 {
+// Ref: Global Illumination Compendium (2003)
+Double3 ToUniformDisc(Double2 r)
+{
+  double s = std::sqrt(r[1]);
+  double omega = 2.*Pi*r[0];
+  double x = s*std::cos(omega);
+  double y = s*std::sin(omega);
+  return Double3{x,y,0};
+}
+
+// Ref: Global Illumination Compendium (2003)
 Double3 ToUniformSphere(Double2 r)
 {
   double z = 1. - 2.*r[1];
@@ -14,6 +25,7 @@ Double3 ToUniformSphere(Double2 r)
   return Double3{x,y,z};
 }
 
+// That one is obvious isn't it.
 Double3 ToUniformHemisphere(Double2 r)
 {
   Double3 v = ToUniformSphere(r);
@@ -34,6 +46,7 @@ Double3 ToUniformSphereSection(double cos_opening_angle, Double2 r)
   return Double3{x,y,z};
 }
 
+// Ref: Global Illumination Compendium (2003)
 Double3 ToCosHemisphere(Double2 r)
 {
   double rho = std::sqrt(1.-r[0]);

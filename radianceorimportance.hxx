@@ -3,6 +3,8 @@
 #include "shader_util.hxx"
 #include "primitive.hxx"
 
+class Scene;
+
 namespace RadianceOrImportance
 {
 
@@ -64,6 +66,7 @@ public:
   {
     int unit_index = { -1 };
     Spectral3 weight = Spectral3{ 0. };
+    operator bool() const { return unit_index>=0; }
   };
   PointEmitterArray(int _num_units) : num_units(_num_units) {}
   // Position sample is needed for physical camera.
