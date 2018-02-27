@@ -41,16 +41,31 @@ public:
   {
     // Bah ... copying :-(
     nodes.push_back(start);
-    pdfs.push_back(_start_pdf);
     betas.push_back(_weight);
+    pdfs.push_back(_start_pdf);
+    fwd_conversion_factors.push_back(1.);
+    bwd_conversion_factors.push_back(1.);
   }
   
-  void AddSegment(const RW::PathNode &node, const Spectral3 &_weight, Pdf pdf_start_scatter, const RaySegment &segment_to_node)
+  void AddSegment(const RW::PathNode &end_node, const Spectral3 &_weight, Pdf pdf_start_scatter, 
+                  double fwd_pdf_conversion_factor ,double bwd_pdf_conversion_factor)
   {
-    nodes.push_back(node);
-    pdfs.push_back(pdf_start_scatter);
+    nodes.push_back(end_node);
     Spectral3  beta_at_node = betas.back()*_weight;
     betas.push_back(beta_at_node);
+    pdfs.push_back(pdf_start_scatter);
+    fwd_conversion_factors.push_back(fwd_pdf_conversion_factor);
+    bwd_conversion_factors.push_back(bwd_pdf_conversion_factor);
+  }
+  
+  void Finish()
+  {
+    fwd_conversion_factors.push_back(NaN);
+    pdfs.push_back(Pdf{});
+    
+    assert (fwd_conversion_factors.size() == nodes.size() + 1);
+    assert (bwd_conversion_factors.size() == nodes.size());
+    assert (pdfs.size() == nodes.size() + 1);
   }
   
   void Pop()
@@ -59,6 +74,8 @@ public:
     nodes.pop_back();
     pdfs.pop_back();
     betas.pop_back();
+    fwd_conversion_factors.pop_back();
+    bwd_conversion_factors.pop_back();
   }
   
   int NumNodes() const
@@ -85,9 +102,10 @@ public:
   {
     return pdfs[i+1].IsFromDelta();
   }
-
-private:
+  
   friend class BdptMis;
+  friend class BackupAndReplace;
+private:
   ConversionFactorContainer fwd_conversion_factors;
   ConversionFactorContainer bwd_conversion_factors;
   PdfContainer pdfs;
@@ -119,11 +137,36 @@ struct IntPairHash
 using DebugBuffers = std::unordered_map<std::pair<int,int>, Spectral3ImageBuffer, IntPairHash>;
 
 
-} // namespace
+// TODO: replace by templated scope_exit generic thingy like presented in
+// https://www.reddit.com/r/cpp/comments/64iz4n/beautiful_code_final_act_from_gls/
+// https://www.youtube.com/watch?v=WjTrfoiB0MQ
+class BackupAndReplace
+{
+  SubpathHistory &h;
+  int node_index; 
+  Pdf pdf;
+  double fwd_conversion_factor;
   
+public:
+  BackupAndReplace(const BackupAndReplace &) = delete;
+  BackupAndReplace& operator=(const BackupAndReplace &) = delete;
+  
+  BackupAndReplace(SubpathHistory &_h, int _node_index, Pdf pdf_leading_to_node, double conv_leading_to_node) : h{_h}, node_index{_node_index} 
+  {
+    pdf = h.pdfs[_node_index];
+    fwd_conversion_factor = h.fwd_conversion_factors[_node_index];
+    h.pdfs[_node_index] = pdf_leading_to_node;
+    h.fwd_conversion_factors[_node_index] = conv_leading_to_node;
+  }
+  ~BackupAndReplace() 
+  {
+    h.pdfs[node_index] = pdf;
+    h.fwd_conversion_factors[node_index] = fwd_conversion_factor;
+  }
+};
 
-#if 0
-class BdptPaths
+  
+class BdptMis
 {
 public:
 
@@ -131,121 +174,101 @@ private:
   SpecularFlagContainer specular_flags;
   PathDensityContainer eye_densities;
   PathDensityContainer light_densities;
+  int total_node_count;
+  static constexpr auto IDX_INITIAL = BdptDetail::INDEX_OF_PICKING_INITIAL_POINT;
   
-  PathDensityContainer number_of_paths_of_size;
-  
-  void ComputeNumberOfPathsOfSize()
+  void Reset(const Connection &connection)
   {
-    number_of_paths_of_size.resize(eye_history.NumNodes() + light_history.NumNodes()+1);
-    number_of_paths_of_size[0] = 0;
-    number_of_paths_of_size[1] = 0;
-    for (int s=1; s<=eye_history.NumNodes(); ++s)
-    {
-      for (int t=1; t<=light_history.NumNodes(); ++t)
-      {
-        number_of_paths_of_size[s+t]++;
-      }
-    }
-  }
-  
-  void Reset()
-  {
-    eye_history.Reset();
-    light_history.Reset();
+    total_node_count = connection.eye_index+1+connection.light_index+1;
     specular_flags.clear();
     eye_densities.clear();
     light_densities.clear();
-    number_of_paths_of_size.clear();
   }
 
-  void ComputeForwardSubpathDensities(const SubpathHistory &history, PathDensityContainer &path_pdf)
-  {
-//     assert (nodes.size() > 0 && count <= nodes.size());
-//     path_pdf[0] = node_creation_probability;
-//     for (int i=1; i<nodes.size(); ++i)
-//     {
-//       path_pdf[i] = path_pdf[i-1]*pdfs[i-1]*PdfConversionFactorForTarget(nodes[i-1], nodes[i], segments[i-1]);
-//     }
+  void ComputeSpecularFlags(const SubpathHistory &eye, const SubpathHistory &light, const Connection &connection)
+  {   
+    for (int i=0; i<=connection.eye_index+1; ++i)
+      specular_flags.push_back(eye.pdfs[i].IsFromDelta());
+    for (int i=connection.light_index+1; i>=0; --i)
+      specular_flags.push_back(light.pdfs[i].IsFromDelta());
+    assert(specular_flags.size() == total_node_count + 2);
   }
   
-  void ComputeConnectionPart(const SubpathHistory &forward, const SubpathHistory &backward, Pdf pdf_scatter_source, Pdf pdf_scatter_dest, const RaySegment &segment, PathDensityContainer &path_pdf)
+  void ComputeForwardSubpathDensities(const SubpathHistory &fwd_path, const SubpathHistory &reverse_path, 
+                                      int idx_fwd, int idx_rev, PathDensityContainer &destination)
   {
-    
-  }
-  
-  void ComputeReverseSubpathDensities(const SubpathHistory &history, PathDensityContainer &path_pdf)
-  {
-    
-  }
-  
-  FillSpecularFlags()
-  {
+    destination.push_back(Pdf{1.}); // When there are zero nodes on this subpath.
+    for (int i=0; i<=idx_fwd; ++i)
+    {
+      // Joint probability leading up to node idx_fwd+1. 
+      // That is, when the loop is done, we have the density at the other side of the connection.
+      destination.push_back(destination.back()*
+        fwd_path.fwd_conversion_factors[i] * fwd_path.pdfs[i]);
+    }
+    if (idx_rev >= 0)
+    {
+      destination.push_back(destination.back()*
+        fwd_path.fwd_conversion_factors[idx_fwd+1] * fwd_path.pdfs[idx_fwd+1]);
+    }
+    for (int i=idx_rev; i>=1; --i)
+    {
+      // Multiplying the scatter density at the node i with the conversion factor
+      // leading in the reverse direction from node i.
+      destination.push_back(destination.back()*
+        reverse_path.bwd_conversion_factors[i] * reverse_path.pdfs[i+1]);
+    }
+    assert(destination.size() == total_node_count + 1);
   }
 
-  double ComputePowerHeuristicWeight()
+  double ComputePowerHeuristicWeight(const Connection &connection) const
   {
-    const int n = eye_history.num_nodes_to_consider + light_history.num_nodes_to_consider;
-    assert(eye_densities.size() == n+1);
-    assert(light_densities.size() == eye_densities.size());
-    assert(specular_flags.size() == n+2);
-    // Attention here. Path densities have one more entry than there are total number of nodes in the path. 
-    // That is to account for the density of 0 number of nodes in the subpath. So, for, say, 2 Nodes in total,
-    // we have for the eye path entries for, 0, 1, and 2 nodes generated by the eye-subpath.
-    double nominator = eye_densities[eye_history.num_nodes_to_consider]*
-                       light_densities[light_history.num_nodes_to_consider];
+    /* Simple way to understand the number of admissible techniques in Veach's sense:
+     * Imagine there is a very glossy vertex. Sampling via bsdf is low variance because the bsdf and the pdf cancel each other in the nominator/denominator.
+     * Now, sampling something else and connecting to the vertex has high variance because only very few time we get a contribution, and if so, the bsdf has very large value because it is strongly peaked.
+     * Now make the bsdf sharper, narrower, take limit to Dirac-Delta function. 
+     * Variance goes to infinity. We cannot do this. And in fact, my 'Evaluate' & 'Pdf' functions return 0 for specular components, no matter what coordinates.
+     * What is left are the sampling techniques where only non-specular vertices are connected. 
+     * So I simply take the segments that have no adjacent specular vertices.
+     */
+    double nominator = eye_densities[connection.eye_index+1]*
+                       light_densities[connection.light_index+1];
     nominator = Sqr(nominator);
     double denom = 0.;
-    for (int s = 0; s <= n; ++s)
+    for (int s = 0; s <= total_node_count; ++s)
     {
       bool flag = !(specular_flags[s] || specular_flags[s+1]);
-      double summand = flag ? (eye_densities[s]*light_densities[n-s]) : 0.;
+      double summand = flag ? (eye_densities[s]*light_densities[total_node_count-s]) : 0.;
       denom += Sqr(summand);
     }
     return nominator/denom;
   }
-
-
+  
+  double WeightByNumberOfAdmissibleTechniques() const
+  {
+    int num_tech = 0;
+    for (int i = 0; i <= total_node_count; ++i)
+    {
+      num_tech += !(specular_flags[i] || specular_flags[i+1]);
+    }
+    assert (num_tech >= 1); // Actually there can be purely specular paths that cannot be sampled.
+    return 1./(num_tech + Epsilon);
+  }
 
 public:
-  double ComputeMISWeightForConnection(
-    int eye_index,
-    int light_index,
-    Pdf pdf_scatter_eye, 
-    Pdf pdf_scatter_light, 
-    const RaySegment &eye_to_light)
+  double Compute(const SubpathHistory &eye, const SubpathHistory &light, const Connection &connection)
   {
-#if 0
-    int num_vertices = eye_history.NumNodes() + light_history.NumNodes();
-    assert (eye_segments.size() == eye_nodes.size()-1);
-    assert (light_segments.size() == light_nodes.size()-1);
-    // TODO: Set num nodes to consider.
-    
-    ComputeForwardSubpathDensities(eye_history, eye_densities);
-    ComputeForwardSubpathDensities(light_history, light_densities);
-    
-    ComputeConnectionPart(eye_history, light_history, pdf_scatter_eye, pdf_scatter_light, eye_to_light, eye_densities);
-    
-    ComputeReverseSubpathDensities(light_history, eye_densities);
-    ComputeReverseSubpathDensities(eye_history, light_densities);
-    
-    FillSpecularFlags();
-    
-    return ComputePowerHeuristicWeight();
-#else
-    if (eye_index < 0 || light_index < 0)
-    {
-      return 1;
-    }
-    if (number_of_paths_of_size.empty())
-    {
-      ComputeNumberOfPathsOfSize();
-    }
-    return number_of_paths_of_size[eye_index+light_index+2];
-#endif
+    Reset(connection);
+    ComputeSpecularFlags(eye, light, connection);
+    ComputeForwardSubpathDensities(eye, light, connection.eye_index, connection.light_index, eye_densities);
+    ComputeForwardSubpathDensities(light, eye, connection.light_index, connection.eye_index, light_densities);
+    double result = ComputePowerHeuristicWeight(connection);
+    //double result = WeightByNumberOfAdmissibleTechniques();
+    return result;
   }
 };
-#endif
 
+
+} // namespace BdptDetail
 
 class Bdpt : public RadianceEstimatorBase, public IRenderingAlgo
 {
@@ -262,6 +285,7 @@ class Bdpt : public RadianceEstimatorBase, public IRenderingAlgo
   BdptDetail::SubpathHistory eye_history;
   BdptDetail::SubpathHistory direct_light_history; // The alternate history ;-) .Where a random light is sampled for s=*,t=1 paths, instead of the original one. Contains only a single node.
   BdptDetail::SubpathHistory light_history;  
+  BdptDetail::BdptMis bdptmis;
   ToyVector<Spectral3> contribution_wrt_path_length;
   ToyVector<int> number_of_contributions_wrt_path_length;
   ToyVector<Splat> splats;
@@ -303,6 +327,7 @@ public:
     InitializeMediumTracker(eye_node, eye_medium_tracker);    
     eye_history.Start(eye_node, lambda_weights, eye_node_pdf);
     BdptForwardTrace(eye_history, eye_medium_tracker, context);
+    eye_history.Finish();
     
     Pdf light_node_pdf;
     RW::PathNode light_node = SampleEmissiveEnd(context, light_node_pdf);    
@@ -310,6 +335,7 @@ public:
     InitializeMediumTracker(light_node, light_medium_tracker);
     light_history.Start(light_node, Spectral3{1.}, light_node_pdf);
     BdptForwardTrace(light_history, light_medium_tracker, context);
+    light_history.Finish();
     
     if (light_history.NumNodes()>1 && light_history.NodeFromBack(0).node_type != RW::NodeType::SCATTER)
     {
@@ -359,6 +385,7 @@ public:
     RW::PathNode light_node = SampleEmissiveEnd(context, pdf_sample_light); 
     direct_light_history.Reset();
     direct_light_history.Start(light_node, Spectral3{1.}, pdf_sample_light);
+    direct_light_history.Finish();
     
     double pdf_scatter_eye, pdf_scatter_light;
     WeightedSegment to_eye = Connection(
@@ -423,39 +450,31 @@ public:
   }
   
   
-  double MisWeight(const BdptDetail::SubpathHistory &eye, const BdptDetail::SubpathHistory &light, const BdptDetail::Connection &connection)
+  std::pair<double, double> ConnectionPdfConversionFactors(BdptDetail::SubpathHistory &eye, BdptDetail::SubpathHistory &light, const BdptDetail::Connection &connection)
   {
-    int n = NumberOfAdmissibleSamplingTechniques(eye, light, connection);
-    assert (n>=1); // Actually, there can easily be scenes where there are purely specular paths. Mirrors+Pointlights. Can't sample that. Still, for debugging normal scenes the assert is useful.
-    return n>0 ? 1./n : 0.;
+    double eye_to_light_conv = 1., light_to_eye_conv = 1.;
+    assert (connection.eye_index >= 0);
+    if (connection.light_index >= 0)
+    {
+      eye_to_light_conv = PdfConversionFactorForTarget(eye.Node(connection.eye_index), light.Node(connection.light_index), connection.segment);
+      light_to_eye_conv = PdfConversionFactorForTarget(light.Node(connection.light_index), eye.Node(connection.eye_index), connection.segment.Reversed());
+    }
+    return std::make_pair(eye_to_light_conv, light_to_eye_conv);
   }
-    
   
-  int NumberOfAdmissibleSamplingTechniques(const BdptDetail::SubpathHistory &eye, const BdptDetail::SubpathHistory &light, const BdptDetail::Connection &connection)
+  
+  double MisWeight(BdptDetail::SubpathHistory &eye, BdptDetail::SubpathHistory &light, const BdptDetail::Connection &connection)
   {
-    /* Simple way to understand the number of admissible techniques in Veach's sense:
-     * Imagine there is a very glossy vertex. Sampling via bsdf is low variance because the bsdf and the pdf cancel each other in the nominator/denominator.
-     * Now, sampling something else and connecting to the vertex has high variance because only very few time we get a contribution, and if so, the bsdf has very large value because it is strongly peaked.
-     * Now make the bsdf sharper, narrower, take limit to Dirac-Delta function. 
-     * Variance goes to infinity. We cannot do this. And in fact, my 'Evaluate' & 'Pdf' functions return 0 for specular components, no matter what coordinates.
-     * What is left are the sampling techniques where only non-specular vertices are connected. 
-     * So I simply count the number of segment that have no adjacent specular vertices.
-     */
-    auto IDX_INITIAL = BdptDetail::INDEX_OF_PICKING_INITIAL_POINT;
-    int num_segments_between_non_specular_vertices = 0;
-    for (int i=IDX_INITIAL; i<connection.eye_index-1; ++i)
-      if (!eye.IsSpecular(i) && !eye.IsSpecular(i+1))
-        ++num_segments_between_non_specular_vertices;
-    for (int i=IDX_INITIAL; i<connection.light_index-1; ++i)
-      if (!light.IsSpecular(i) && !light.IsSpecular(i+1))
-        ++num_segments_between_non_specular_vertices;
-    if (!eye.IsSpecular(connection.eye_index-1) && !connection.eye_pdf.IsFromDelta())
-      ++num_segments_between_non_specular_vertices;
-    if (connection.light_index >= 0 && !light.IsSpecular(connection.light_index-1) && !connection.light_pdf.IsFromDelta())
-      ++num_segments_between_non_specular_vertices;
-    if (!connection.eye_pdf.IsFromDelta() && !connection.light_pdf.IsFromDelta())
-      ++num_segments_between_non_specular_vertices;
-    return num_segments_between_non_specular_vertices;
+    double eye_to_light_conv, light_to_eye_conv; std::tie(eye_to_light_conv, light_to_eye_conv) = ConnectionPdfConversionFactors(eye, light, connection);
+    BdptDetail::BackupAndReplace eye_backup(eye, connection.eye_index+1,
+      connection.eye_pdf, // Scatter pdf at last eye node
+      eye_to_light_conv   // Conversion factor to obtain native pdf of last light node.
+    );
+    BdptDetail::BackupAndReplace light_backup(light, connection.light_index+1,
+      connection.light_pdf,
+      light_to_eye_conv
+    );
+    return bdptmis.Compute(eye, light, connection);
   }
   
   
@@ -501,8 +520,10 @@ public:
       if (step.node.node_type == RW::NodeType::ZERO_CONTRIBUTION_ABORT_WALK) // Hit a light or particle escaped the scene or aborting.
         break;   
       
-      // TODO: supply proper scattering pdf for MIS!
-      path.AddSegment(step.node, step.beta_factor, Pdf{0}, step.segment);
+      path.AddSegment(step.node, step.beta_factor, step.scatter_pdf, 
+        PdfConversionFactorForTarget(path.NodeFromBack(0), step.node, step.segment),
+        PdfConversionFactorForTarget(step.node, path.NodeFromBack(0), step.segment.Reversed())
+      );
 
       ++number_of_interactions;
       bool survive = RouletteSurvival(step.beta_factor, number_of_interactions); 
