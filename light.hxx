@@ -47,7 +47,31 @@ public:
 };
 
 
-class UniformAreaLight : public AreaEmitter
+template<class Base>
+class AreaUniformMixin : public Base
+{
+public:
+  using Base::Base;
+  
+  AreaSample TakeAreaSample(const Primitive& primitive, Sampler &sampler, const PathContext &context) const override
+  {
+    AreaSample smpl;
+    smpl.coordinates = primitive.SampleUniformPosition(sampler);
+    smpl.pdf_or_pmf = 1./primitive.Area();
+    smpl.value = Nothing{};
+    return smpl;
+  }
+  
+  double EvaluatePdf(const PosSampleCoordinates &area, const PathContext &context) const override
+  {
+    const auto* primitive = area.primitive;
+    assert (primitive && primitive->Area() > 0.);
+    return 1./primitive->Area();
+  }
+};
+
+
+class UniformAreaLightDirectionalPart : public AreaEmitter
 {
   SpectralN spectrum;
   
@@ -58,18 +82,9 @@ class UniformAreaLight : public AreaEmitter
   }
   
 public:
-  UniformAreaLight(const SpectralN &_spectrum) : spectrum(_spectrum) 
+  UniformAreaLightDirectionalPart(const SpectralN &_spectrum) : spectrum(_spectrum) 
   {
     spectrum *= (1./UnitHalfSphereSurfaceArea); // Convert from area power density to exitant radiance.
-  }
-  
-  AreaSample TakeAreaSample(const Primitive& primitive, Sampler &sampler, const PathContext &context) const override
-  {
-    AreaSample smpl;
-    smpl.coordinates = primitive.SampleUniformPosition(sampler);
-    smpl.pdf_or_pmf = 1./primitive.Area();
-    smpl.value = Nothing{};
-    return smpl;
   }
   
   DirectionalSample TakeDirectionSampleFrom(const PosSampleCoordinates &area, Sampler &sampler, const PathContext &context) const override
@@ -94,14 +109,49 @@ public:
     // Cos of angle between exitant dir and normal is dealt with elsewhere.
     return visibility*Take(spectrum, context.lambda_idx);
   }
+};
+
+
+using UniformAreaLight = AreaUniformMixin<UniformAreaLightDirectionalPart>;
+
+
+
+class ParallelAreaLightDirectionalPart : public AreaEmitter
+{
+  SpectralN irradiance;  // (?) The power density w.r.t. area.
   
-  double EvaluatePdf(const PosSampleCoordinates &area, const PathContext &context) const override
+  double Visibility(const PosSampleCoordinates &area, const Double3 &dir) const
   {
-    const auto* primitive = area.primitive;
-    assert (primitive && primitive->Area() > 0.);
-    return 1./primitive->Area();
+    SurfaceInteraction interaction{area};
+    return Dot(interaction.geometry_normal, dir) > 0. ? 1. : 0.;
+  }
+  
+public:
+  ParallelAreaLightDirectionalPart(const SpectralN &_irradiance) : irradiance{_irradiance}
+  {
+  }
+  
+  DirectionalSample TakeDirectionSampleFrom(const PosSampleCoordinates &area, Sampler &sampler, const PathContext &context) const override
+  {
+    SurfaceInteraction interaction{area};
+    DirectionalSample s{
+      interaction.geometry_normal,
+      Take(irradiance, context.lambda_idx),
+      Pdf::MakeFromDelta(1.)
+    };
+    return s;
+  }
+  
+  inline Spectral3 Evaluate(const PosSampleCoordinates &area, const Double3 &dir_out, const PathContext &context, double *pdf_dir) const override
+  {
+    if (pdf_dir)
+      *pdf_dir = 0.;
+    return Spectral3{0.};
   }
 };
+
+using ParallelAreaLight = AreaUniformMixin<ParallelAreaLightDirectionalPart>;
+
 
 
 ///////////////////////////////////////////////////////////////////

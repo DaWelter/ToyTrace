@@ -709,19 +709,29 @@ void NFFParser::Parse(Scope &scope)
     }
     else if (num == 2)
     {
-      if (!strcmp(type, "uniform"))
+      if (!strcmp(type, "uniform") || !strcmp(type, "parallel"))
       {
         RGB col;
         double area_power_density;
         char name[LINESIZE];
-        int num = std::sscanf(line.c_str(), "larea %s uniform %lg %lg %lg %lg",
-                              name, &col[0], &col[1], &col[2], &area_power_density);
-        if (num == 5)
+        int num = std::sscanf(line.c_str(), "larea %s %s %lg %lg %lg %lg",
+                              name, type, &col[0], &col[1], &col[2], &area_power_density);
+        if (num == 6)
         {
-          scope.areaemitters.set_and_activate(
-            name, 
-            new UniformAreaLight(area_power_density*Color::RGBToSpectrum(col))
-          );
+          if (!strcmp(type, "uniform"))
+          {
+            scope.areaemitters.set_and_activate(
+              name, 
+              new UniformAreaLight(area_power_density*Color::RGBToSpectrum(col))
+            );
+          }
+          else
+          {
+            scope.areaemitters.set_and_activate(
+              name,
+              new ParallelAreaLight(area_power_density*Color::RGBToSpectrum(col))
+            );
+          }
         }
         else
         {
