@@ -407,7 +407,7 @@ public:
   struct StepResult
   {
     RW::PathNode node;
-    RaySegment segment; // that lead to the node
+    RaySegment segment; // Leading to the node
     Pdf scatter_pdf; // Of existant coordinate. For envlight it is w.r.t. area. Else w.r.t solid angle.
     Spectral3 beta_factor {0.};
   };
@@ -436,10 +436,8 @@ public:
        
     auto SampleExitantRayEnv = [&]() -> RaySample
     {
-      auto gen = EnvLightPointSamplingBeyondScene(scene);
-      double pdf = gen.Pdf(source_node.coordinates());
-      Double3 org = gen.Sample(source_node.coordinates(), sampler);
-      return RaySample{{org, source_node.coordinates()}, Spectral3{1.}, pdf};
+      auto smpl = SampleScatterCoordinateOfEmitter(source_node, context);
+      return RaySample{{smpl.coordinates, source_node.coordinates()}, smpl.value, smpl.pdf_or_pmf};
     };
     
     RaySample ray_sample = (source_node.node_type != RW::NodeType::ENV) ?
@@ -461,9 +459,8 @@ public:
     auto collision = CollisionData{ray};
     TrackToNextInteraction(collision, medium_tracker, context);
     
-    node_sample.beta_factor *= collision.smpl.weight;
     node_sample.node = AllocateNode(collision, medium_tracker, context);
-    //node_sample.pdf_at_node = PdfConversionFactorForTarget(source_node, node_sample.node, collision.segment) * ray_sample.pdf_or_pmf;
+    node_sample.beta_factor *= collision.smpl.weight; 
     node_sample.scatter_pdf = ray_sample.pdf_or_pmf;
     node_sample.segment = collision.segment;
     assert(node_sample.scatter_pdf > 0.); // Since I rolled that sample it should have non-zero probability of being generated.
@@ -507,14 +504,9 @@ public:
     assert(source_node.node_type != RW::NodeType::ENV || (segment_to_target.ray.dir == source_node.coordinates()));
     Spectral3 scatter_value = EvaluateScatterCoordinate(source_node, segment_to_target.ray.dir, context, source_scatter_pdf);
     scatter_value *= DFactorOf(source_node, segment_to_target.ray.dir);
-//     if (target_pdf)
-//     {
-//       *target_pdf *= PdfConversionFactorForTarget(source_node, target_node, segment_to_target);
-//     }
     return scatter_value;
   }
 
-  
   // Convert the native pdf of sampling the scatter coordinate of  the source into the pdf to represent the location of the target node.
   // It is important in MIS weighting to express the pdf of various sampling 
   // strategies w.r.t. to the same integration domain. E.g. Solid angle or area.
@@ -522,10 +514,10 @@ public:
   // pdf(path) = pdf_w1(w1)*pdf_a2(x2)*pdf_a3(x3)*... This is cool as long as the product space is
   // consistently used.
   // Ref: Veach's Thesis and PBRT book.
-  double PdfConversionFactorForTarget(const RW::PathNode &source, const RW::PathNode &target, const  RaySegment &segment) const
+  double PdfConversionFactorForTarget(const RW::PathNode &source, const RW::PathNode &target, const RaySegment &segment, bool is_parallel_beam) const
   {
-    double factor = DFactorOf(target, -segment.ray.dir);
-    if (source.node_type != NodeType::ENV && target.node_type != NodeType::ENV)
+    double factor = DFactorOf(target, segment.ray.dir);
+    if (source.node_type != NodeType::ENV && target.node_type != NodeType::ENV && !is_parallel_beam)
     {
       // If source is env: I already generate points on a surface. Thus the conversion from angle to surface is only needed for other types.
       // If target is env: By definition, solid angle is used to describe the coordinate of the final node.
@@ -719,11 +711,10 @@ public:
     {
       // For env light, the coordinate is a position!
       const EnvironmentalRadianceFieldInteraction &interaction = node.interaction.emitter_env;
-      auto gen = EnvLightPointSamplingBeyondScene(scene);
+      EnvLightPointSamplingBeyondScene gen{scene};
       double pdf = gen.Pdf(interaction.pos);
       Double3 org = gen.Sample(interaction.pos, sampler);
-      Spectral3 radiance = interaction.emitter->Evaluate(interaction.pos, context);
-      return { org, radiance, pdf };
+      return { org, interaction.radiance, pdf };
     }
     else if (node.node_type == NodeType::AREA_LIGHT)
     {
@@ -883,7 +874,7 @@ public:
     if (source_node.node_type != NodeType::ENV)
       return RaySegment{{coord_source, direction}, length};
     else 
-      return RaySegment{{coord_target, direction}, length};
+      return RaySegment{{coord_target-length*direction, direction}, length};
   }
 
   
@@ -933,7 +924,7 @@ public:
   {
     return envlight;
   }
-  
+
   
   Spectral3 TransmittanceEstimate(RaySegment seg, MediumTracker &medium_tracker, const PathContext &context)
   {

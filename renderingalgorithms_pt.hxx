@@ -27,6 +27,11 @@ static constexpr int INDEX_OF_PICKING_INITIAL_POINT = -1;
 class SubpathHistory
 {
 public:
+  SubpathHistory(RadianceEstimatorBase& _randomwalk_functions)
+    : randomwalk_functions(_randomwalk_functions)
+  {
+  }
+  
   void Reset()
   {
     // Note: Allocation only on first use. clear() keeps the capacity up. However, incurs dtor calls.
@@ -35,6 +40,7 @@ public:
     pdfs.clear();
     nodes.clear();
     betas.clear();
+    segments.clear();
   }
   
   void Start(const RW::PathNode &start, const Spectral3 &_weight, Pdf _start_pdf)
@@ -43,25 +49,41 @@ public:
     nodes.push_back(start);
     betas.push_back(_weight);
     pdfs.push_back(_start_pdf);
-    fwd_conversion_factors.push_back(1.);
-    bwd_conversion_factors.push_back(1.);
+    segments.push_back(RaySegment{}); // For convenience
   }
   
-  void AddSegment(const RW::PathNode &end_node, const Spectral3 &_weight, Pdf pdf_start_scatter, 
-                  double fwd_pdf_conversion_factor ,double bwd_pdf_conversion_factor)
-  {
+  void AddSegment(const RW::PathNode &end_node, const Spectral3 &_weight, Pdf pdf_start_scatter, const RaySegment &segment)
+  {   
     nodes.push_back(end_node);
     Spectral3  beta_at_node = betas.back()*_weight;
     betas.push_back(beta_at_node);
     pdfs.push_back(pdf_start_scatter);
-    fwd_conversion_factors.push_back(fwd_pdf_conversion_factor);
-    bwd_conversion_factors.push_back(bwd_pdf_conversion_factor);
+    segments.push_back(segment);
   }
   
   void Finish()
   {
-    fwd_conversion_factors.push_back(NaN);
-    pdfs.push_back(Pdf{});
+    fwd_conversion_factors.push_back(1.);
+    bwd_conversion_factors.push_back(1.);
+    // Fortunately I don't have to propagate this flag across connections because
+    // connections transmit light/importance only through non-specular interactions.
+     // Set to true/false at pdfs[1] at the emission event.
+    bool is_parallel_beam = true;
+    for (int i=1; i<nodes.size(); ++i)
+    {
+      is_parallel_beam &= pdfs[i].IsFromDelta();
+      double fwd_factor = randomwalk_functions.PdfConversionFactorForTarget(Node(i-1), Node(i), segments[i], is_parallel_beam);
+      fwd_conversion_factors.push_back(fwd_factor);
+    }
+    for (int i=1; i<nodes.size()-1; ++i) // Cannot handle last node because scatter pdf is unknown.
+    {
+      double bwd_factor = randomwalk_functions.PdfConversionFactorForTarget(Node(i), Node(i-1), segments[i], pdfs[i].IsFromDelta());
+      bwd_conversion_factors.push_back(bwd_factor);
+    }
+    if (nodes.size() >= 2)
+      bwd_conversion_factors.push_back(NaN); 
+    fwd_conversion_factors.push_back(NaN); // Space for data of connection segment.
+    pdfs.push_back(Pdf{});  // Dito.
     
     assert (fwd_conversion_factors.size() == nodes.size() + 1);
     assert (bwd_conversion_factors.size() == nodes.size());
@@ -76,6 +98,7 @@ public:
     betas.pop_back();
     fwd_conversion_factors.pop_back();
     bwd_conversion_factors.pop_back();
+    segments.pop_back();
   }
   
   int NumNodes() const
@@ -106,8 +129,10 @@ public:
   friend class BdptMis;
   friend class BackupAndReplace;
 private:
+  RadianceEstimatorBase& randomwalk_functions;
   ConversionFactorContainer fwd_conversion_factors;
   ConversionFactorContainer bwd_conversion_factors;
+  ToyVector<RaySegment> segments;
   PdfContainer pdfs;
   NodeContainer nodes;
   WeightContainer betas;
@@ -137,31 +162,76 @@ struct IntPairHash
 using DebugBuffers = std::unordered_map<std::pair<int,int>, Spectral3ImageBuffer, IntPairHash>;
 
 
-// TODO: replace by templated scope_exit generic thingy like presented in
-// https://www.reddit.com/r/cpp/comments/64iz4n/beautiful_code_final_act_from_gls/
-// https://www.youtube.com/watch?v=WjTrfoiB0MQ
 class BackupAndReplace
 {
   SubpathHistory &h;
   int node_index; 
   Pdf pdf;
   double fwd_conversion_factor;
+  double bwd_conversion_factor;
+  
+  void InitBothPathsNonEmpty(const RW::PathNode &other_end_node, Pdf pdf_node_scatter, const RaySegment &segment)
+  {
+    assert (node_index >= 0 && other_end_node.node_type != RW::NodeType::ZERO_CONTRIBUTION_ABORT_WALK);
+    pdf = h.pdfs[node_index+1];
+    h.pdfs[node_index+1] = pdf_node_scatter; 
+
+    fwd_conversion_factor = h.fwd_conversion_factors[node_index+1];
+    bwd_conversion_factor = h.bwd_conversion_factors[node_index];
+    h.fwd_conversion_factors[node_index+1] = h.randomwalk_functions.PdfConversionFactorForTarget(
+      h.Node(node_index), other_end_node, segment, pdf_node_scatter.IsFromDelta());
+    if (node_index > 0)
+    {
+      h.bwd_conversion_factors[node_index] = h.randomwalk_functions.PdfConversionFactorForTarget(
+        h.Node(node_index-1), h.Node(node_index), h.segments[node_index], pdf_node_scatter.IsFromDelta());
+    }
+    else
+    {
+      assert (h.bwd_conversion_factors[node_index] == 1.);
+    }
+  }
+  
+  void InitOtherSideEmpty(double pdf_reverse_emission)
+  {
+    assert (node_index >= 1); // Because you cannot have a start node and simultaneously hit an emitter with it. Need at least two nodes.
+    pdf = h.pdfs[node_index+1];
+    fwd_conversion_factor = h.fwd_conversion_factors[node_index+1];
+    bwd_conversion_factor = h.bwd_conversion_factors[node_index];
+    
+    h.pdfs[node_index+1] = pdf_reverse_emission;
+    h.fwd_conversion_factors[node_index+1] = 1.;
+    h.bwd_conversion_factors[node_index] = h.randomwalk_functions.PdfConversionFactorForTarget(
+      h.Node(node_index), h.Node(node_index-1), h.segments[node_index], false);
+  }
+  
+  void InitMySideEmpty(double other_node_creation_density)
+  {
+    assert (node_index == -1);
+    h.pdfs[node_index+1] = other_node_creation_density;
+    h.fwd_conversion_factors[node_index+1] = 1.;
+  }
   
 public:
   BackupAndReplace(const BackupAndReplace &) = delete;
   BackupAndReplace& operator=(const BackupAndReplace &) = delete;
   
-  BackupAndReplace(SubpathHistory &_h, int _node_index, Pdf pdf_leading_to_node, double conv_leading_to_node) : h{_h}, node_index{_node_index} 
+  BackupAndReplace(SubpathHistory &_h, int _node_index, SubpathHistory &other_h, int other_node_index, Pdf pdf, const RaySegment &segment) 
+    : h{_h}, node_index{_node_index} 
   {
-    pdf = h.pdfs[_node_index];
-    fwd_conversion_factor = h.fwd_conversion_factors[_node_index];
-    h.pdfs[_node_index] = pdf_leading_to_node;
-    h.fwd_conversion_factors[_node_index] = conv_leading_to_node;
+    if (_node_index >= 0 && other_node_index >= 0)
+      InitBothPathsNonEmpty(other_h.Node(other_node_index), pdf, segment);
+    else if (_node_index >= 0)
+      InitOtherSideEmpty(pdf);
+    else
+      InitMySideEmpty(pdf);
   }
+  
   ~BackupAndReplace() 
   {
-    h.pdfs[node_index] = pdf;
-    h.fwd_conversion_factors[node_index] = fwd_conversion_factor;
+    h.pdfs[node_index+1] = pdf;
+    h.fwd_conversion_factors[node_index+1] = fwd_conversion_factor;
+    if (node_index >= 0)
+      h.bwd_conversion_factors[node_index] = bwd_conversion_factor;
   }
 };
 
@@ -169,14 +239,30 @@ public:
 class BdptMis
 {
 public:
-
+  BdptMis(const Scene& scene)
+  {
+    one_over_number_of_splat_attempts_per_pixel = 1./(scene.GetCamera().xres*scene.GetCamera().yres);
+  }
+  
+  double Compute(const SubpathHistory &eye, const SubpathHistory &light, const Connection &connection)
+  {
+    Reset(connection);
+    ComputeSpecularFlags(eye, light, connection);
+    ComputeForwardSubpathDensities(eye, light, connection.eye_index, connection.light_index, eye_densities);
+    ComputeForwardSubpathDensities(light, eye, connection.light_index, connection.eye_index, light_densities);
+    FactorInNumberWeight();
+    double result = ComputePowerHeuristicWeight(connection);
+    //double result = WeightByNumberOfAdmissibleTechniques();
+    return result;
+  }
 private:
   SpecularFlagContainer specular_flags;
   PathDensityContainer eye_densities;
   PathDensityContainer light_densities;
   int total_node_count;
+  double one_over_number_of_splat_attempts_per_pixel;
   static constexpr auto IDX_INITIAL = BdptDetail::INDEX_OF_PICKING_INITIAL_POINT;
-  
+    
   void Reset(const Connection &connection)
   {
     total_node_count = connection.eye_index+1+connection.light_index+1;
@@ -200,12 +286,10 @@ private:
     destination.push_back(Pdf{1.}); // When there are zero nodes on this subpath.
     for (int i=0; i<=idx_fwd; ++i)
     {
-      // Joint probability leading up to node idx_fwd+1. 
-      // That is, when the loop is done, we have the density at the other side of the connection.
       destination.push_back(destination.back()*
         fwd_path.fwd_conversion_factors[i] * fwd_path.pdfs[i]);
     }
-    if (idx_rev >= 0)
+    if (idx_rev >= 0) // Handling the connection segment.
     {
       destination.push_back(destination.back()*
         fwd_path.fwd_conversion_factors[idx_fwd+1] * fwd_path.pdfs[idx_fwd+1]);
@@ -243,6 +327,14 @@ private:
     return nominator/denom;
   }
   
+  void FactorInNumberWeight()
+  {
+    for (int i=2; i<=total_node_count; ++i)
+    {
+      eye_densities[i] *= one_over_number_of_splat_attempts_per_pixel;
+    }
+  }
+  
   double WeightByNumberOfAdmissibleTechniques() const
   {
     int num_tech = 0;
@@ -252,18 +344,6 @@ private:
     }
     assert (num_tech >= 1); // Actually there can be purely specular paths that cannot be sampled.
     return 1./(num_tech + Epsilon);
-  }
-
-public:
-  double Compute(const SubpathHistory &eye, const SubpathHistory &light, const Connection &connection)
-  {
-    Reset(connection);
-    ComputeSpecularFlags(eye, light, connection);
-    ComputeForwardSubpathDensities(eye, light, connection.eye_index, connection.light_index, eye_densities);
-    ComputeForwardSubpathDensities(light, eye, connection.light_index, connection.eye_index, light_densities);
-    double result = ComputePowerHeuristicWeight(connection);
-    //double result = WeightByNumberOfAdmissibleTechniques();
-    return result;
   }
 };
 
@@ -294,11 +374,16 @@ class Bdpt : public RadianceEstimatorBase, public IRenderingAlgo
   
   bool enable_debug_buffers;
   BdptDetail::DebugBuffers debug_buffers;
+  BdptDetail::DebugBuffers debug_buffers_mis;
   
 public:
   Bdpt(const Scene &_scene, const AlgorithmParameters &algo_params) 
   : RadianceEstimatorBase{_scene, algo_params},
     lambda_selection_factory{},
+    eye_history{*this},
+    direct_light_history{*this},
+    light_history{*this},
+    bdptmis{_scene},
     enable_debug_buffers{algo_params.num_threads <= 0}
   {
     rgb_responses.reserve(1024);
@@ -325,7 +410,7 @@ public:
     RW::PathNode eye_node = SampleSensorEnd(pixel_index, context, eye_node_pdf);   
     MediumTracker eye_medium_tracker{scene};
     InitializeMediumTracker(eye_node, eye_medium_tracker);    
-    eye_history.Start(eye_node, lambda_weights, eye_node_pdf);
+    eye_history.Start(eye_node, lambda_weights/eye_node_pdf, eye_node_pdf);
     BdptForwardTrace(eye_history, eye_medium_tracker, context);
     eye_history.Finish();
     
@@ -333,10 +418,11 @@ public:
     RW::PathNode light_node = SampleEmissiveEnd(context, light_node_pdf);    
     MediumTracker light_medium_tracker{scene};
     InitializeMediumTracker(light_node, light_medium_tracker);
-    light_history.Start(light_node, Spectral3{1.}, light_node_pdf);
+    light_history.Start(light_node, Spectral3{1./light_node_pdf}, light_node_pdf);
     BdptForwardTrace(light_history, light_medium_tracker, context);
     light_history.Finish();
     
+    // TODO Make it so that ray depth sets the total number of nodes! Current mode of setting subpath length leads to artifacts!!
     if (light_history.NumNodes()>1 && light_history.NodeFromBack(0).node_type != RW::NodeType::SCATTER)
     {
       light_history.Pop();
@@ -346,6 +432,7 @@ public:
     {
       if (!IsHitableEmissiveNode(eye_history.Node(eye_idx)))
       {
+        // FIXME: Keep track of media. This media tracker is only valid for the last light/eye node!!!
         DirectLighting(eye_idx, eye_medium_tracker, context);
         for (int light_idx=1; light_idx<light_history.NumNodes(); ++light_idx)
         {
@@ -384,13 +471,16 @@ public:
     Pdf pdf_sample_light;
     RW::PathNode light_node = SampleEmissiveEnd(context, pdf_sample_light); 
     direct_light_history.Reset();
-    direct_light_history.Start(light_node, Spectral3{1.}, pdf_sample_light);
+    direct_light_history.Start(light_node, Spectral3{1./pdf_sample_light}, pdf_sample_light);
     direct_light_history.Finish();
     
     double pdf_scatter_eye, pdf_scatter_light;
     WeightedSegment to_eye = Connection(
       direct_light_history.Node(0), medium_tracker, eye_history.Node(eye_idx),
       context, &pdf_scatter_light, &pdf_scatter_eye);
+    
+    if (to_eye.weight.isZero())
+      return;
     
     BdptDetail::Connection connection{
       Pdf{pdf_scatter_eye},
@@ -401,8 +491,8 @@ public:
     };
     
     double mis_weight = MisWeight(eye_history, direct_light_history, connection);
-    Spectral3 path_weight = mis_weight*eye_history.Beta(eye_idx)*direct_light_history.Beta(0)*to_eye.weight;
-    AddPathWeight(eye_idx, 0, path_weight);
+    Spectral3 path_weight = eye_history.Beta(eye_idx)*direct_light_history.Beta(0)*to_eye.weight;
+    AddPathWeight(eye_idx, 0, mis_weight, path_weight);
   }
   
   
@@ -413,6 +503,9 @@ public:
       light_history.Node(light_idx), light_medium_tracker, eye_history.Node(eye_idx),
       context, &light_pdf, &eye_pdf);
     
+    if (to_eye.weight.isZero())
+      return;
+    
     BdptDetail::Connection connection{
       Pdf{eye_pdf},
       Pdf{light_pdf},
@@ -421,9 +514,10 @@ public:
       to_eye.segment.Reversed()
     };
     
+
     double mis_weight = MisWeight(eye_history, light_history, connection);
-    Spectral3 path_weight = mis_weight*eye_history.Beta(eye_idx)*light_history.Beta(light_idx)*to_eye.weight;
-    AddPathWeight(eye_idx, light_idx, path_weight);
+    Spectral3 path_weight = eye_history.Beta(eye_idx)*light_history.Beta(light_idx)*to_eye.weight;
+    AddPathWeight(eye_idx, light_idx, mis_weight, path_weight);
   }
   
   
@@ -445,40 +539,34 @@ public:
     };
     
     double mis_weight = MisWeight(eye_history, light_history, connection);
-    Spectral3 path_weight = mis_weight*end_weight*eye_history.Beta(eye_history.NumNodes()-1);
-    AddPathWeight(eye_history.NumNodes()-1, -1, path_weight);
+    Spectral3 path_weight = end_weight*eye_history.Beta(eye_history.NumNodes()-1);
+    AddPathWeight(eye_history.NumNodes()-1, -1, mis_weight, path_weight);
   }
   
-  
-  std::pair<double, double> ConnectionPdfConversionFactors(BdptDetail::SubpathHistory &eye, BdptDetail::SubpathHistory &light, const BdptDetail::Connection &connection)
-  {
-    double eye_to_light_conv = 1., light_to_eye_conv = 1.;
-    assert (connection.eye_index >= 0);
-    if (connection.light_index >= 0)
-    {
-      eye_to_light_conv = PdfConversionFactorForTarget(eye.Node(connection.eye_index), light.Node(connection.light_index), connection.segment);
-      light_to_eye_conv = PdfConversionFactorForTarget(light.Node(connection.light_index), eye.Node(connection.eye_index), connection.segment.Reversed());
-    }
-    return std::make_pair(eye_to_light_conv, light_to_eye_conv);
-  }
+
+//   std::pair<double, double> ConnectionPdfConversionFactors(BdptDetail::SubpathHistory &eye, BdptDetail::SubpathHistory &light, const BdptDetail::Connection &connection)
+//   {
+//     double eye_to_light_conv = 1., light_to_eye_conv = 1.;
+//     assert (connection.eye_index >= 0);
+//     if (connection.light_index >= 0)
+//     {
+//       eye_to_light_conv = PdfConversionFactorForTarget(eye.Node(connection.eye_index), light.Node(connection.light_index), connection.segment);
+//       light_to_eye_conv = PdfConversionFactorForTarget(light.Node(connection.light_index), eye.Node(connection.eye_index), connection.segment.Reversed());
+//     }
+//     return std::make_pair(eye_to_light_conv, light_to_eye_conv);
+//   }
   
   
   double MisWeight(BdptDetail::SubpathHistory &eye, BdptDetail::SubpathHistory &light, const BdptDetail::Connection &connection)
   {
-    double eye_to_light_conv, light_to_eye_conv; std::tie(eye_to_light_conv, light_to_eye_conv) = ConnectionPdfConversionFactors(eye, light, connection);
-    BdptDetail::BackupAndReplace eye_backup(eye, connection.eye_index+1,
-      connection.eye_pdf, // Scatter pdf at last eye node
-      eye_to_light_conv   // Conversion factor to obtain native pdf of last light node.
-    );
-    BdptDetail::BackupAndReplace light_backup(light, connection.light_index+1,
-      connection.light_pdf,
-      light_to_eye_conv
-    );
+    using B = BdptDetail::BackupAndReplace;
+    B eye_backup{eye, connection.eye_index, light, connection.light_index, connection.eye_pdf, connection.segment};
+    B light_backup(light, connection.light_index, eye, connection.eye_index, connection.light_pdf, connection.segment);
     return bdptmis.Compute(eye, light, connection);
   }
   
   
-  void AddPathWeight(int s, int t, const Spectral3 &path_weight)
+  void AddPathWeight(int s, int t, double mis_weight, const Spectral3 &path_weight)
   {
     int path_length = s+t+2; // +2 Because s and t are 0-based indices.
     assert(path_length >= 2);
@@ -490,17 +578,17 @@ public:
         Spectral3 new_weight = path_weight/num_attempted_paths_per_unit;
         splats.emplace_back(
           sensor_connection_unit,
-          new_weight,
+          mis_weight*new_weight,
           path_length
         );
-        AddToDebugBuffer(sensor_connection_unit, s, t, new_weight);
+        AddToDebugBuffer(sensor_connection_unit, s, t, mis_weight, new_weight);
         sensor_connection_unit = -1;
       }
     }
     else
     {
-      contribution_wrt_path_length[path_length] += path_weight;
-      AddToDebugBuffer(pixel_index, s, t, path_weight);
+      contribution_wrt_path_length[path_length] += mis_weight*path_weight;
+      AddToDebugBuffer(pixel_index, s, t, mis_weight, path_weight);
     }
     ++number_of_contributions_wrt_path_length[path_length];
   }
@@ -520,11 +608,8 @@ public:
       if (step.node.node_type == RW::NodeType::ZERO_CONTRIBUTION_ABORT_WALK) // Hit a light or particle escaped the scene or aborting.
         break;   
       
-      path.AddSegment(step.node, step.beta_factor, step.scatter_pdf, 
-        PdfConversionFactorForTarget(path.NodeFromBack(0), step.node, step.segment),
-        PdfConversionFactorForTarget(step.node, path.NodeFromBack(0), step.segment.Reversed())
-      );
-
+      path.AddSegment(step.node, step.beta_factor, step.scatter_pdf, step.segment);
+      
       ++number_of_interactions;
       bool survive = RouletteSurvival(step.beta_factor, number_of_interactions); 
       if (!survive)
@@ -541,7 +626,7 @@ public:
     return rgb_responses;
   }
   
-  void AddToDebugBuffer(int unit_index, int s, int t, const Spectral3 &path_weight)
+  void AddToDebugBuffer(int unit_index, int s, int t, double mis_weight, const Spectral3 &path_weight)
   {
     if (!enable_debug_buffers)
       return;
@@ -553,8 +638,22 @@ public:
       bool _;
       std::tie(it, _) = debug_buffers.insert(std::make_pair(
         key, Spectral3ImageBuffer(scene.GetCamera().xres, scene.GetCamera().yres)));
+
     }
     it->second.Insert(unit_index, Color::SpectralSelectionToRGB(path_weight, lambda_idx));
+    
+    if (!path_weight.isZero())
+    {
+      it = debug_buffers_mis.find(key);
+      if (it == debug_buffers_mis.end())
+      {
+        bool _;
+        std::tie(it, _) = debug_buffers_mis.insert(std::make_pair(
+          key, Spectral3ImageBuffer(scene.GetCamera().xres, scene.GetCamera().yres)));
+
+      }
+      it->second.Insert(unit_index, RGB{Color::RGBScalar{mis_weight}});
+    }
   }
   
   
@@ -624,7 +723,7 @@ public:
         RW::PathNode light_node = SampleEmissiveEnd(context, pdf_light);
         double pdf_scatter = NaN;
         WeightedSegment to_light = Connection(step.node, medium_tracker, light_node, context, &pdf_scatter, nullptr);
-        double pdf_of_light_due_to_scatter = pdf_scatter*PdfConversionFactorForTarget(step.node, light_node, to_light.segment);
+        double pdf_of_light_due_to_scatter = pdf_scatter*PdfConversionFactorForTarget(step.node, light_node, to_light.segment, false);
         double mis_weight = MisWeight(
           pdf_light, // Maybe this needs multiplication with pmf to select the unit_index.
           pdf_of_light_due_to_scatter);
@@ -667,7 +766,7 @@ public:
       double pdf_end_pos = 0.;
       Spectral3 end_weight = EndPathWithZeroVerticesOnOtherSide(prev_node, step.node, step.segment, context, &pdf_end_pos);
       
-      Pdf step_pdf_of_end = PdfConversionFactorForTarget(prev_node, step.node, step.segment)*step.scatter_pdf;
+      Pdf step_pdf_of_end = PdfConversionFactorForTarget(prev_node, step.node, step.segment, step.scatter_pdf.IsFromDelta())*step.scatter_pdf;
       
       double mis_weight = MisWeight(step_pdf_of_end, pdf_end_pos);
       

@@ -40,15 +40,15 @@ double SigmaOfAverage(int N, double sample_sigma)
 }
 
 
-void CheckNumberOfSamplesInBin(const char *name, int Nbin, int N, double p_of_bin, double number_of_sigmas_threshold=3.)
+void CheckNumberOfSamplesInBin(const char *name, int num_smpl_in_bin, int total_num_smpl, double p_of_bin, double number_of_sigmas_threshold=3.)
 {
   double mean, sigma;
   std::tie(mean, sigma) = MeanAndSigmaOfThrowingOneWithPandZeroOtherwise(p_of_bin);
-  mean *= N;
-  sigma = SigmaOfAverage(N, sigma * N);
+  mean *= total_num_smpl;
+  sigma = SigmaOfAverage(total_num_smpl, sigma * total_num_smpl);
   if (name)
-    std::cout << "Expected in " << name << ": " << mean << "+/-" << sigma << " Actual: " << Nbin << " of " << N << std::endl;
-  EXPECT_NEAR(Nbin, mean, sigma*number_of_sigmas_threshold);
+    std::cout << "Expected in " << name << ": " << mean << "+/-" << sigma << " Actual: " << num_smpl_in_bin << " of " << total_num_smpl << std::endl;
+  EXPECT_NEAR(num_smpl_in_bin, mean, sigma*number_of_sigmas_threshold);
 }
 
 
@@ -549,6 +549,44 @@ TEST_F(RandomSamplingFixture, CosHemisphereDistribution)
     std::stringstream ss; ss << "'Theta<" << (z_thresholds[z_bin]*180./Pi) <<"deg'";
     double p = std::pow(std::sin(z_thresholds[z_bin]), 2.);
     CheckNumberOfSamplesInBin(ss.str().c_str(), n_samples_z_test[z_bin], N, p);
+  }
+}
+
+
+TEST_F(RandomSamplingFixture, DiscDistribution)
+{
+  static constexpr int N = 100;
+  static constexpr int NUM_REGIONS=5;
+  int n_samples[NUM_REGIONS] = {};
+  const double center_disc_radius = 0.5;
+  const double center_disc_area = Pi*Sqr(center_disc_radius);
+  const double outer_quadrant_area = (Pi - center_disc_area) * 0.25;
+  const double region_area[NUM_REGIONS] = 
+  {
+    center_disc_area,
+    outer_quadrant_area,
+    outer_quadrant_area,
+    outer_quadrant_area,
+    outer_quadrant_area
+  };
+  for (int i=0; i<N; ++i)
+  {
+    Double3 v = SampleTrafo::ToUniformDisc(sampler.UniformUnitSquare());
+    ASSERT_EQ(v[2], 0.);
+    ASSERT_LE(Length(v), 1.);
+    int region = 0;
+    if (Length(v)>center_disc_radius)
+    {
+      if (v[0]>0 && v[1]>0) region=1;
+      if (v[0]>0 && v[1]<=0) region=2;
+      if (v[0]<=0 && v[1]>0) region=3;
+      if (v[0]<=0 && v[1]<=0) region=4;
+    }
+    ++n_samples[region];
+  }
+  for (int bin=0; bin<NUM_REGIONS; ++bin)
+  {
+    CheckNumberOfSamplesInBin("disc_bin", n_samples[bin], N, region_area[bin]/Pi);
   }
 }
 

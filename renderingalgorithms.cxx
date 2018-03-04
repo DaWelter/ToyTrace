@@ -121,6 +121,19 @@ void Bdpt::NotifyPassesFinished(int pass_count)
     auto filepath = fs::temp_directory_path() / fs::unique_path(filename);
     bm.write(filepath.string());
   }
+  
+  for (auto it = debug_buffers_mis.begin(); it != debug_buffers_mis.end(); ++it)
+  {
+    int eye_idx = it->first.first;
+    int light_idx = it->first.second;
+    Spectral3ImageBuffer &buffer = it->second;
+    buffer.AddSampleCount(pass_count);
+    Image bm(buffer.xres, buffer.yres);
+    buffer.ToImage(bm, 0, buffer.yres);
+    std::string filename = strformat("bdpt-e%-l%_mis", eye_idx+1, light_idx+1)+".jpg";
+    auto filepath = fs::temp_directory_path() / fs::unique_path(filename);
+    bm.write(filepath.string());
+  }
 }
   
 }
