@@ -394,7 +394,7 @@ public:
   {
     eye_history.Reset();
     light_history.Reset();
-    const int max_path_size = 2 * (max_number_of_interactions+1)+1;
+    const int max_path_size = 2 * (max_path_node_count+1)+1;
     contribution_wrt_path_length.clear();
     contribution_wrt_path_length.resize(max_path_size, Spectral3{0.});
     number_of_contributions_wrt_path_length.clear();
@@ -422,7 +422,9 @@ public:
     BdptForwardTrace(light_history, light_medium_tracker, context);
     light_history.Finish();
     
-    // TODO Make it so that ray depth sets the total number of nodes! Current mode of setting subpath length leads to artifacts!!
+    assert (light_history.NumNodes() <= max_path_node_count);
+    assert (eye_history.NumNodes() <= max_path_node_count);
+    
     if (light_history.NumNodes()>1 && light_history.NodeFromBack(0).node_type != RW::NodeType::SCATTER)
     {
       light_history.Pop();
@@ -433,8 +435,9 @@ public:
       if (!IsHitableEmissiveNode(eye_history.Node(eye_idx)))
       {
         // FIXME: Keep track of media. This media tracker is only valid for the last light/eye node!!!
-        DirectLighting(eye_idx, eye_medium_tracker, context);
-        for (int light_idx=1; light_idx<light_history.NumNodes(); ++light_idx)
+        if (eye_idx+1 < max_path_node_count)
+          DirectLighting(eye_idx, eye_medium_tracker, context);
+        for (int light_idx=1; light_idx<std::min(light_history.NumNodes(), max_path_node_count-eye_idx-1); ++light_idx)
         {
           ConnectWithLightPath(eye_idx, light_idx, light_medium_tracker, context);
         }
@@ -596,10 +599,10 @@ public:
     
   void BdptForwardTrace(BdptDetail::SubpathHistory &path, MediumTracker &medium_tracker, const PathContext &context)
   {
-    if (this->max_number_of_interactions <= 1)
+    if (this->max_path_node_count <= 1)
       return;
     
-    int number_of_interactions = 1;    
+    int path_node_count = 1;    
     while (true)
     {
       StepResult step = TakeRandomWalkStep(
@@ -610,8 +613,9 @@ public:
       
       path.AddSegment(step.node, step.beta_factor, step.scatter_pdf, step.segment);
       
-      ++number_of_interactions;
-      bool survive = RouletteSurvival(step.beta_factor, number_of_interactions); 
+      ++path_node_count;
+
+      bool survive = SurvivalAtNthScatterNode(step.beta_factor, path_node_count); 
       if (!survive)
         break;
       
@@ -711,11 +715,9 @@ public:
     
     InitializeMediumTracker(step.node, medium_tracker);
 
-    int number_of_interactions = 0;
+    int path_node_count = 1;
     while (true)
     {
-      ++number_of_interactions;
-      
       if (this->do_sample_lights) 
       {
         // Next vertex. Sample a point on a light source. Compute geometry term. Add path weight to total weights.
@@ -751,10 +753,12 @@ public:
       
       beta *= step.beta_factor;
       
+      ++path_node_count;
+      
       if (step.node.node_type != RW::NodeType::SCATTER) // Hit a light or particle escaped the scene or aborting.
         break;   
       
-      bool survive = RouletteSurvival(beta, number_of_interactions); 
+      bool survive = SurvivalAtNthScatterNode(beta, path_node_count); 
       if (!survive)
         break;
       

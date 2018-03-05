@@ -383,7 +383,7 @@ protected:
   IntersectionCalculator intersector;
   const Scene &scene;
   double sufficiently_long_distance_to_go_outside_the_scene_bounds;
-  int max_number_of_interactions;
+  int max_path_node_count;
 private:
   ROI::TotalEnvironmentalRadianceField envlight;
 protected:
@@ -394,7 +394,7 @@ public:
   RadianceEstimatorBase(const Scene &_scene, const AlgorithmParameters &algo_params = AlgorithmParameters{})
     : sampler{}, intersector{_scene.MakeIntersectionCalculator()}, scene{_scene},     
       sufficiently_long_distance_to_go_outside_the_scene_bounds{10.*UpperBoundToBoundingBoxDiameter(_scene)},
-      max_number_of_interactions(algo_params.max_ray_depth),
+      max_path_node_count{algo_params.max_ray_depth+1},
       envlight{_scene}, light_picker{_scene, sampler}
   {
 
@@ -877,20 +877,31 @@ public:
       return RaySegment{{coord_target-length*direction, direction}, length};
   }
 
-  
-  bool RouletteSurvival(Spectral3 &beta, int number_of_interactions)
+  bool RouletteTerminationAllowedAtLength(int n)
   {
-    static constexpr int MIN_LEVEL = 3;
-    static constexpr double LOW_CONTRIBUTION = 0.5;
-    if (number_of_interactions >= max_number_of_interactions || beta.isZero())
-      return false;
-    if (number_of_interactions < MIN_LEVEL)
-      return true;
-    double p_survive = std::min(0.9, beta.maxCoeff() / LOW_CONTRIBUTION);
+    static constexpr int MIN_NODE_COUNT = 3;
+    return n > MIN_NODE_COUNT;
+  }
+  
+  bool RouletteSurvival(Spectral3 &coeff)
+  {
+    assert (coeff.maxCoeff() >= 0.);
+    // Clip at 0.9 to make the path terminate in high-albedo scenes.
+    double p_survive = std::min(0.9, coeff.maxCoeff());
     if (sampler.Uniform01() > p_survive)
       return false;
-    beta *= 1./p_survive;
+    coeff *= 1./p_survive;
     return true;
+  }
+
+  bool SurvivalAtNthScatterNode(Spectral3 &scatter_coeff, int node_count)
+  {
+    if (node_count < max_path_node_count)
+    {
+      return !RouletteTerminationAllowedAtLength(node_count) || RouletteSurvival(scatter_coeff);
+    }
+    else
+      return false;
   }
   
   
