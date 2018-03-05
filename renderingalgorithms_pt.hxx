@@ -364,10 +364,9 @@ class Bdpt : public RadianceEstimatorBase, public IRenderingAlgo
   
   BdptDetail::SubpathHistory eye_history;
   BdptDetail::SubpathHistory direct_light_history; // The alternate history ;-) .Where a random light is sampled for s=*,t=1 paths, instead of the original one. Contains only a single node.
-  BdptDetail::SubpathHistory light_history;  
+  BdptDetail::SubpathHistory light_history;
   BdptDetail::BdptMis bdptmis;
-  ToyVector<Spectral3> contribution_wrt_path_length;
-  ToyVector<int> number_of_contributions_wrt_path_length;
+  Spectral3 total_eye_measurement_contributions;
   ToyVector<Splat> splats;
   Index3 lambda_idx;
   int pixel_index;
@@ -394,11 +393,7 @@ public:
   {
     eye_history.Reset();
     light_history.Reset();
-    const int max_path_size = 2 * (max_path_node_count+1)+1;
-    contribution_wrt_path_length.clear();
-    contribution_wrt_path_length.resize(max_path_size, Spectral3{0.});
-    number_of_contributions_wrt_path_length.clear();
-    number_of_contributions_wrt_path_length.resize(max_path_size, 0);
+    total_eye_measurement_contributions = Spectral3{0.};
     splats.clear();
     
     pixel_index = _pixel_index;
@@ -448,14 +443,7 @@ public:
         HandleLightHit(context);
       }
     }
-    
-    assert(number_of_contributions_wrt_path_length[0] == 0);
-    assert(number_of_contributions_wrt_path_length[1] == 0);
-    Spectral3 path_weight_sum{0.};
-    for (int n=2; n<eye_history.NumNodes()+light_history.NumNodes()+1; ++n)
-    {
-      path_weight_sum += contribution_wrt_path_length[n];
-    }
+ 
     for (const auto &splat : splats)
     {
       assert(splat.path_length>=2);
@@ -465,7 +453,7 @@ public:
       });
     }
     
-    return Color::SpectralSelectionToRGB(path_weight_sum, lambda_idx);
+    return Color::SpectralSelectionToRGB(total_eye_measurement_contributions, lambda_idx);
   }
 
   
@@ -546,19 +534,6 @@ public:
     AddPathWeight(eye_history.NumNodes()-1, -1, mis_weight, path_weight);
   }
   
-
-//   std::pair<double, double> ConnectionPdfConversionFactors(BdptDetail::SubpathHistory &eye, BdptDetail::SubpathHistory &light, const BdptDetail::Connection &connection)
-//   {
-//     double eye_to_light_conv = 1., light_to_eye_conv = 1.;
-//     assert (connection.eye_index >= 0);
-//     if (connection.light_index >= 0)
-//     {
-//       eye_to_light_conv = PdfConversionFactorForTarget(eye.Node(connection.eye_index), light.Node(connection.light_index), connection.segment);
-//       light_to_eye_conv = PdfConversionFactorForTarget(light.Node(connection.light_index), eye.Node(connection.eye_index), connection.segment.Reversed());
-//     }
-//     return std::make_pair(eye_to_light_conv, light_to_eye_conv);
-//   }
-  
   
   double MisWeight(BdptDetail::SubpathHistory &eye, BdptDetail::SubpathHistory &light, const BdptDetail::Connection &connection)
   {
@@ -590,10 +565,9 @@ public:
     }
     else
     {
-      contribution_wrt_path_length[path_length] += mis_weight*path_weight;
+      total_eye_measurement_contributions += mis_weight*path_weight;
       AddToDebugBuffer(pixel_index, s, t, mis_weight, path_weight);
     }
-    ++number_of_contributions_wrt_path_length[path_length];
   }
   
     
