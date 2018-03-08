@@ -413,6 +413,15 @@ Spectral3 VacuumMedium::EvaluateTransmission(const RaySegment& segment, Sampler 
 }
 
 
+VolumePdfCoefficients VacuumMedium::ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const
+{
+  return VolumePdfCoefficients{
+    0.,
+    0.,
+    1.
+  };
+}
+
 
 
 HomogeneousMedium::HomogeneousMedium(const SpectralN& _sigma_s, const SpectralN& _sigma_a, int priority)
@@ -477,10 +486,31 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
 }
 
 
+inline Spectral3 HomogeneousMedium::EvaluateTransmission(double x, const Spectral3& sigma_ext) const
+{
+  return (-sigma_ext * x).exp();
+}
+
+
 Spectral3 HomogeneousMedium::EvaluateTransmission(const RaySegment& segment, Sampler &sampler, const PathContext &context) const
 {
   Spectral3 sigma_ext = Take(this->sigma_ext, context.lambda_idx);
-  return (-sigma_ext * segment.length).exp();
+  return EvaluateTransmission(segment.length, sigma_ext);
+}
+
+
+VolumePdfCoefficients HomogeneousMedium::ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const
+{
+  // We take the mean over the densities that would be appropriate for single-lambda sampling. So this is only approximate.
+  // With Peter Kutz's spectral tracking method the actual pdf is not accessible in closed form.
+   Spectral3 sigma_ext = Take(this->sigma_ext, context.lambda_idx);
+   double tr = EvaluateTransmission(segment.length, sigma_ext).mean();
+   double e  = sigma_ext.mean();
+   return VolumePdfCoefficients{
+     e*tr,
+     e*tr,
+     tr,
+   }; // Forward and backward is the same in homogeneous media.
 }
 
 
@@ -518,6 +548,16 @@ Medium::InteractionSample MonochromaticHomogeneousMedium::SampleInteractionPoint
   return smpl;
 }
 
+
+VolumePdfCoefficients MonochromaticHomogeneousMedium::ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const
+{
+  double tr = std::exp(-sigma_ext*segment.length);
+  return VolumePdfCoefficients{
+    sigma_ext*tr,
+    sigma_ext*tr,
+    tr,
+  }; // Forward and backward is the same in homogeneous media.
+}
 
 Spectral3 MonochromaticHomogeneousMedium::EvaluateTransmission(const RaySegment& segment, Sampler &sampler, const PathContext &context) const
 {

@@ -402,8 +402,6 @@ public:
 
   virtual ~RadianceEstimatorBase() {}
 
-  
-
   struct StepResult
   {
     RW::PathNode node;
@@ -420,7 +418,7 @@ public:
   };
   
 
-  StepResult TakeRandomWalkStep(const RW::PathNode &source_node, MediumTracker &medium_tracker, const PathContext &context)
+  StepResult TakeRandomWalkStep(const RW::PathNode &source_node, MediumTracker &medium_tracker, const PathContext &context, VolumePdfCoefficients *volume_pdf_coeff = nullptr)
   {
     struct TagRaySample {};
     using RaySample = Sample<Ray, Spectral3, TagRaySample>;
@@ -457,18 +455,26 @@ public:
     MaybeHandlePassageThroughSurface(source_node, ray.dir, medium_tracker);
     
     auto collision = CollisionData{ray};
-    TrackToNextInteraction(collision, medium_tracker, context);
+    TrackToNextInteraction(collision, medium_tracker, context, volume_pdf_coeff);
     
+//     node_sample.node = AllocateNode(collision, medium_tracker, context);
+//     node_sample.beta_factor *= collision.weight; 
+//     node_sample.scatter_pdf = ray_sample.pdf_or_pmf;
+//     node_sample.segment.ray = ray;
+//     node_sample.segment.length = collision.t;
+//     assert(node_sample.scatter_pdf > 0.); // Since I rolled that sample it should have non-zero probability of being generated.
+//     return node_sample;
     node_sample.node = AllocateNode(collision, medium_tracker, context);
     node_sample.beta_factor *= collision.smpl.weight; 
     node_sample.scatter_pdf = ray_sample.pdf_or_pmf;
     node_sample.segment = collision.segment;
     assert(node_sample.scatter_pdf > 0.); // Since I rolled that sample it should have non-zero probability of being generated.
     return node_sample;
+
   }
 
 
-  WeightedSegment Connection(const RW::PathNode &source_node, const MediumTracker &source_medium_tracker, const RW::PathNode &target_node, const PathContext &context, double *pdf_source, double *pdf_target)
+  WeightedSegment Connection(const RW::PathNode &source_node, const MediumTracker &source_medium_tracker, const RW::PathNode &target_node, const PathContext &context, double *pdf_source, double *pdf_target, VolumePdfCoefficients *volume_pdf_coeff = nullptr)
   {
     WeightedSegment result{};
     if (source_node.node_type == RW::NodeType::ENV && target_node.node_type == RW::NodeType::ENV)
@@ -487,7 +493,7 @@ public:
     
     segment_to_target.ShortenBothEndsBy(RAY_EPSILON);
     
-    auto transmittance = TransmittanceEstimate(segment_to_target, medium_tracker, context);
+    auto transmittance = TransmittanceEstimate(segment_to_target, medium_tracker, context, volume_pdf_coeff);
 
     bool is_wrt_solid_angle = source_node.node_type == RW::NodeType::ENV || target_node.node_type == RW::NodeType::ENV;
     double r2_factor = is_wrt_solid_angle ? 1. : 1./Sqr(segment_to_target.length);
@@ -533,7 +539,7 @@ public:
         node.node_type == RW::NodeType::SCATTER && 
         Dot(dir_of_travel, node.interaction.ray_surface.normal) < 0.)
     {
-      // By definition, intersection.normal points to where the intersection ray is comming from.
+      // By definition, intersection.normal points to where the intersection ray is coming from.
       // Thus we can determine if the sampled direction goes through the surface by looking
       // if the direction goes in the opposite direction of the normal.
       medium_tracker.goingThroughSurface(dir_of_travel, node.interaction.ray_surface);
@@ -549,7 +555,7 @@ public:
       intersector);
   }
   
-  
+
   struct CollisionData
   {
     CollisionData (const Ray &ray) :
@@ -561,6 +567,12 @@ public:
     RaySegment segment;
     HitId hit;
   };
+
+  
+  static inline bool IsNotEscaped(const CollisionData &d)
+  {
+    return (d.smpl.t < d.segment.length || d.hit);
+  }
   
   
   RW::PathNode AllocateNode(const CollisionData &collision, MediumTracker &medium_tracker, const PathContext &context) const
@@ -937,13 +949,18 @@ public:
   }
 
   
-  Spectral3 TransmittanceEstimate(RaySegment seg, MediumTracker &medium_tracker, const PathContext &context)
+  Spectral3 TransmittanceEstimate(RaySegment seg, MediumTracker &medium_tracker, const PathContext &context, VolumePdfCoefficients *volume_pdf_coeff = nullptr)
   {
     // TODO: Russian roulette.
     Spectral3 result{1.};
-    auto SegmentContribution = [&seg, &medium_tracker, &context, this](double t1, double t2) -> Spectral3
+    auto SegmentContribution = [&seg, &medium_tracker, &context, volume_pdf_coeff, this](double t1, double t2, bool first, bool last) -> Spectral3
     {
       RaySegment subseg{{seg.ray.PointAt(t1), seg.ray.dir}, t2-t1};
+      if (volume_pdf_coeff)
+      {
+        VolumePdfCoefficients local_coeff = medium_tracker.getCurrentMedium().ComputeVolumePdfCoefficients(subseg, context);
+        Accumulate(*volume_pdf_coeff, local_coeff, first, last);
+      }
       return medium_tracker.getCurrentMedium().EvaluateTransmission(subseg, sampler, context);
     };
 
@@ -955,11 +972,11 @@ public:
       result *= intersection.shader().EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, context, nullptr);
       if (result.isZero())
         return result;
-      result *= SegmentContribution(t, hit.t);
+      result *= SegmentContribution(t, hit.t, t == 0, false);
       medium_tracker.goingThroughSurface(seg.ray.dir, intersection);
       t = hit.t;
     }
-    result *= SegmentContribution(t, seg.length);
+    result *= SegmentContribution(t, seg.length, false, true);
     return result;
   }
 
@@ -967,22 +984,34 @@ public:
   void TrackToNextInteraction(
     CollisionData &collision,
     MediumTracker &medium_tracker,
-    const PathContext &context)
+    const PathContext &context,
+    VolumePdfCoefficients *volume_pdf_coeff = nullptr)
   {
     Spectral3 total_weight{1.};
-    auto &segment = collision.segment;
-    while (true)
+    RaySegment segment = collision.segment;
+    double distance_traveled = 0.;
+    for (int interfaces_crossed=0;; ++interfaces_crossed)
     {
       const Medium& medium = medium_tracker.getCurrentMedium();
       
       const auto &hit = collision.hit = intersector.First(segment.ray, segment.length);
       const auto &medium_smpl = collision.smpl = medium.SampleInteractionPoint(segment, sampler, context);
       total_weight *= medium_smpl.weight;
+      bool cont = medium_smpl.t >= segment.length && hit && hit.primitive->shader->IsPassthrough();
       
-      if (medium_smpl.t >= segment.length && hit && hit.primitive->shader->IsPassthrough())
+      if (volume_pdf_coeff)
+      {
+        RaySegment s{segment};
+        s.length = std::min(medium_smpl.t, segment.length);
+        VolumePdfCoefficients local_coeff = medium_tracker.getCurrentMedium().ComputeVolumePdfCoefficients(s, context);
+        Accumulate(*volume_pdf_coeff, local_coeff, interfaces_crossed==0, !cont);
+      }
+      
+      if (cont)
       {
         RaySurfaceIntersection intersection{hit, segment};
         medium_tracker.goingThroughSurface(segment.ray.dir, intersection);
+        distance_traveled += segment.length;
         segment.ray.org = intersection.pos;
         segment.ray.org += AntiSelfIntersectionOffset(intersection, RAY_EPSILON, segment.ray.dir);
         segment.length = LargeNumber;
@@ -990,6 +1019,8 @@ public:
       else
       {
         collision.smpl.weight = total_weight;
+        collision.segment.length = distance_traveled + segment.length;
+        collision.smpl.t += distance_traveled;
         return;
       }
     }

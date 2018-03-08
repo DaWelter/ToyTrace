@@ -32,6 +32,7 @@ const PhaseFunctions::PhaseFunction& AtmosphereTemplate<ConstituentDistribution_
 }
 
 
+// Spectral tracking scheme based on Kutz et al. (2017) "Spectral and Decomposition Tracking for Rendering Heterogeneous Volumes".
 template<class ConstituentDistribution_, class Geometry_>
 Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_>::SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const
 {
@@ -92,6 +93,7 @@ Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_
 }
 
 
+// Ratio tracking based on Kutz et al. (2017) "Spectral and Decomposition Tracking for Rendering Heterogeneous Volumes". Appendix.
 template<class ConstituentDistribution_, class Geometry_>
 Spectral3 AtmosphereTemplate<ConstituentDistribution_, Geometry_>::EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const
 {
@@ -131,6 +133,24 @@ Spectral3 AtmosphereTemplate<ConstituentDistribution_, Geometry_>::EvaluateTrans
   while(gogogo);
   return estimate;
 }
+
+
+template<class ConstituentDistribution_, class Geometry_>
+VolumePdfCoefficients AtmosphereTemplate<ConstituentDistribution_, Geometry_>::ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const
+{
+  auto lowest_point = geometry.ComputeLowestPointAlong(segment);
+  double lowest_altitude = geometry.ComputeAltitude(lowest_point);
+  double sigma_t_majorant = constituents.ComputeSigmaTMajorante(lowest_altitude, context.lambda_idx);
+  // Pretend we are in a homogeneous medium with extinction coeff sigma_t_majorant. This is a very bad approximation.
+  // But maybe it will do for MIS weighting. I got to try before implementing more elaborate approximations.
+  double tr = std::exp(-sigma_t_majorant*segment.length);
+  return VolumePdfCoefficients{
+    sigma_t_majorant*tr,
+    sigma_t_majorant*tr,
+    tr,
+  };
+}
+
 
 
 template<class ConstituentDistribution_, class Geometry_>

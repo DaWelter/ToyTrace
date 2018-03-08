@@ -1240,6 +1240,13 @@ void RenderingMediaTransmission1Helper(
 }
 
 
+void CheckVolumePdfCoefficientsForMedium(const VolumePdfCoefficients &coeff, double tr, double sigma_start, double sigma_end, double tol)
+{
+  EXPECT_NEAR(coeff.pdf_scatter_fwd, tr*sigma_end, tol);
+  EXPECT_NEAR(coeff.pdf_scatter_bwd, tr*sigma_start, tol);
+  EXPECT_NEAR(coeff.transmittance, tr, tol);
+}
+
 
 TEST(Rendering, MediaTransmission1)
 {
@@ -1334,6 +1341,7 @@ m scenes/unitcube.dae
 transform 0 0 2 0 0 0
 m scenes/unitcube.dae
 )""";
+  const double total_length = 2; // Because 2 unit cubes.
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
   Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
@@ -1343,13 +1351,19 @@ m scenes/unitcube.dae
   RaySegment seg{{{ray_offset,0.,-10.}, {0.,0.,1.}}, LargeNumber};
   medium_tracker.initializePosition(seg.ray.org, scene.MakeIntersectionCalculator());
   ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
-  auto res = rt.TransmittanceEstimate(seg, medium_tracker, PathContext{lambda_idx});
+  VolumePdfCoefficients volume_pdf_coeff{};
+  auto res = rt.TransmittanceEstimate(seg, medium_tracker, PathContext{lambda_idx}, &volume_pdf_coeff);
   
   auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, lambda_idx);
-  Spectral3 expected = (-2.*sigma_e).exp();
+  Spectral3 expected = (-total_length*sigma_e).exp();
   
   for (int i=0; i<static_size<Spectral3>(); ++i)
     ASSERT_NEAR(res[i], expected[i], 1.e-3);
+  
+  double approximated_tr = (-1.*sigma_e).exp().mean()*(-1*sigma_e).exp().mean(); 
+  // Concatentation of the approximations from the two cubes.
+  CheckVolumePdfCoefficientsForMedium(
+    volume_pdf_coeff, approximated_tr, 0, 0, 1.e-6);
 }
 
 
@@ -1367,12 +1381,37 @@ m scenes/unitcube.dae
 )""";
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
-  
   Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
+  
+  Spectral3 sigma = Color::RGBToSpectralSelection(RGB{3._rgb,3._rgb,3._rgb}, lambda_idx);
+  double cube1_start = -0.5;
+  double cube2_start = 1.5;
+  double camera_start = -10.;
+  auto AnalyticTrApprox = [=](double x) -> double
+  {
+    double first_cube_tr = (-sigma).exp().mean();
+    if (x < cube1_start) 
+      return 1.;
+    if (x < cube1_start+1.)
+      return (-(x-cube1_start)*sigma).exp().mean();
+    if (x < cube2_start)
+      return first_cube_tr;
+    if (x < cube2_start+1.)
+      return first_cube_tr*(-(x-cube2_start)*sigma).exp().mean();
+    return first_cube_tr*(-sigma).exp().mean();
+  };
+  auto AnalyticSigmaApprox = [=](double x) -> double
+  {
+    if (cube1_start < x && x < cube1_start+1) return sigma.mean();
+    if (cube2_start < x && x < cube2_start+1) return sigma.mean();
+    return 0.;
+  };
+  
+  
   RadianceEstimatorBase rt(scene);
   MediumTracker medium_tracker(scene);
   double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
-  Ray ray{{ray_offset,0.,-10.}, {0.,0.,1.}};
+  Ray ray{{ray_offset,0.,camera_start}, {0.,0.,1.}};
   medium_tracker.initializePosition(ray.org, scene.MakeIntersectionCalculator());
   ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
   
@@ -1383,10 +1422,20 @@ m scenes/unitcube.dae
   constexpr int NUM_SAMPLES = 1000;
   for (int sample_num = 0; sample_num < NUM_SAMPLES; ++sample_num)
   {
+    VolumePdfCoefficients volume_pdf_coeff{};
     RadianceEstimatorBase::CollisionData collision(ray);
     medium_tracker.initializePosition(ray.org, scene.MakeIntersectionCalculator());
-    rt.TrackToNextInteraction(collision, medium_tracker, PathContext{lambda_idx});
-    if (collision.smpl.t < collision.segment.length)
+    rt.TrackToNextInteraction(collision, medium_tracker, PathContext{lambda_idx}, &volume_pdf_coeff);
+    EXPECT_EQ(collision.segment.ray.org[2], ray.org[2]);
+    
+    {
+      double x = collision.smpl.t + camera_start;
+      double tr = AnalyticTrApprox(x);
+      double s = AnalyticSigmaApprox(x);
+      CheckVolumePdfCoefficientsForMedium(volume_pdf_coeff, tr, 0., s, 1.e-6);
+    }
+    
+    if (RadianceEstimatorBase::IsNotEscaped(collision))
     {
       weight_sum_interacted += collision.smpl.weight;
     }
