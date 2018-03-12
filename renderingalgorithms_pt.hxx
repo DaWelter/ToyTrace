@@ -23,6 +23,21 @@ using SpecularFlagContainer = ToyVector<bool>;
 using WeightContainer = ToyVector<Spectral3>;
 
 
+inline double ForwardPdfCoefficient(const RW::PathNode& end_node, const VolumePdfCoefficients &coeff)
+{
+  const bool volume_scattering = end_node.node_type == RW::NodeType::SCATTER && end_node.geom_type != RW::GeometryType::SURFACE;
+  return volume_scattering ? coeff.pdf_scatter_fwd : coeff.transmittance;
+  // Else it hit surface or escaped the scene.
+}
+
+
+inline double BackwardPdfCoefficient(const RW::PathNode& start_node, const VolumePdfCoefficients &coeff)
+{
+  const bool volume_scattering = start_node.node_type == RW::NodeType::SCATTER && start_node.geom_type != RW::GeometryType::SURFACE;
+  return volume_scattering ? coeff.pdf_scatter_bwd : coeff.transmittance;
+}
+
+
 class SubpathHistory
 {
 public:
@@ -40,6 +55,7 @@ public:
     nodes.clear();
     betas.clear();
     segments.clear();
+    is_parallel_beam = true;
   }
   
   void Start(const RW::PathNode &start, const Spectral3 &_weight, Pdf _start_pdf)
@@ -49,41 +65,31 @@ public:
     betas.push_back(_weight);
     pdfs.push_back(_start_pdf);
     segments.push_back(RaySegment{}); // For convenience
+    fwd_conversion_factors.push_back(1.);
+    bwd_conversion_factors.push_back(1.);
   }
   
   void AddSegment(const RW::PathNode &end_node, const Spectral3 &_weight, Pdf pdf_start_scatter, const VolumePdfCoefficients &volume_pdf_coeff, const RaySegment &segment)
-  {   
+  {
     nodes.push_back(end_node);
+    const int idx = nodes.size()-1;
     Spectral3  beta_at_node = betas.back()*_weight;
     betas.push_back(beta_at_node);
     pdfs.push_back(pdf_start_scatter);
     segments.push_back(segment);
+    is_parallel_beam &= pdf_start_scatter.IsFromDelta();
+    double vol_coeff = ForwardPdfCoefficient(end_node, volume_pdf_coeff);
+    double geom_coeff = randomwalk_functions.PdfConversionFactorForTarget(nodes[idx-1], nodes[idx], segments[idx], is_parallel_beam); //pdf_start_scatter.IsFromDelta());
+    fwd_conversion_factors.push_back(vol_coeff * geom_coeff);
+    vol_coeff = BackwardPdfCoefficient(nodes[idx-1], volume_pdf_coeff);
+    geom_coeff = randomwalk_functions.PdfConversionFactorForTarget(nodes[idx], nodes[idx-1], segments[idx], false);
+    bwd_conversion_factors.push_back(vol_coeff * geom_coeff);      
   }
   
   void Finish()
   {
-    fwd_conversion_factors.push_back(1.);
-    bwd_conversion_factors.push_back(1.);
-    // Fortunately I don't have to propagate this flag across connections because
-    // connections transmit light/importance only through non-specular interactions.
-     // Set to true/false at pdfs[1] at the emission event.
-    bool is_parallel_beam = true;
-    for (int i=1; i<nodes.size(); ++i)
-    {
-      is_parallel_beam &= pdfs[i].IsFromDelta();
-      double fwd_factor = randomwalk_functions.PdfConversionFactorForTarget(Node(i-1), Node(i), segments[i], is_parallel_beam);
-      fwd_conversion_factors.push_back(fwd_factor);
-    }
-    for (int i=1; i<nodes.size()-1; ++i) // Cannot handle last node because scatter pdf is unknown.
-    {
-      double bwd_factor = randomwalk_functions.PdfConversionFactorForTarget(Node(i), Node(i-1), segments[i], pdfs[i].IsFromDelta());
-      bwd_conversion_factors.push_back(bwd_factor);
-    }
-    if (nodes.size() >= 2)
-      bwd_conversion_factors.push_back(NaN); 
     fwd_conversion_factors.push_back(NaN); // Space for data of connection segment.
     pdfs.push_back(Pdf{});  // Dito.
-    
     assert (fwd_conversion_factors.size() == nodes.size() + 1);
     assert (bwd_conversion_factors.size() == nodes.size());
     assert (pdfs.size() == nodes.size() + 1);
@@ -119,27 +125,18 @@ public:
   {
     return betas[i];
   }
-  
-  bool IsSpecular(int i) const
-  {
-    return pdfs[i+1].IsFromDelta();
-  }
-  
-  const RaySegment& SegmentLeadingTo(int i) const
-  {
-    return segments[i];
-  }
-  
+
   friend class BdptMis;
   friend class BackupAndReplace;
 private:
   RadianceEstimatorBase& randomwalk_functions;
   ConversionFactorContainer fwd_conversion_factors;
   ConversionFactorContainer bwd_conversion_factors;
-  ToyVector<RaySegment> segments;
+  ToyVector<RaySegment> segments; // TODO: Might be able to get rid of this.
   PdfContainer pdfs;
   NodeContainer nodes;
   WeightContainer betas;
+  bool is_parallel_beam;
 };
 
 
@@ -173,70 +170,45 @@ class BackupAndReplace
   int node_index; 
   Pdf pdf;
   double fwd_conversion_factor;
-  double bwd_conversion_factor;
   
-  void InitBothPathsNonEmpty(const RW::PathNode &other_end_node, Pdf pdf_node_scatter, const RaySegment &segment)
+  void InitBothPathsNonEmpty(const RW::PathNode &other_end_node, Pdf pdf_node_scatter, const RaySegment &segment, const VolumePdfCoefficients &vol_pdf_coeff)
   {
     assert (node_index >= 0 && other_end_node.node_type != RW::NodeType::ZERO_CONTRIBUTION_ABORT_WALK);
     pdf = h.pdfs[node_index+1];
-    h.pdfs[node_index+1] = pdf_node_scatter; 
-
     fwd_conversion_factor = h.fwd_conversion_factors[node_index+1];
-    bwd_conversion_factor = h.bwd_conversion_factors[node_index];
+    
+    h.pdfs[node_index+1] = pdf_node_scatter; 
     h.fwd_conversion_factors[node_index+1] = h.randomwalk_functions.PdfConversionFactorForTarget(
-      h.Node(node_index), other_end_node, segment, pdf_node_scatter.IsFromDelta());
-    if (node_index > 0)
-    {
-      h.bwd_conversion_factors[node_index] = h.randomwalk_functions.PdfConversionFactorForTarget(
-        h.Node(node_index-1), h.Node(node_index), h.segments[node_index], pdf_node_scatter.IsFromDelta());
-    }
-    else
-    {
-      assert (h.bwd_conversion_factors[node_index] == 1.);
-    }
+      h.Node(node_index), other_end_node, segment, pdf_node_scatter.IsFromDelta())
+      * ForwardPdfCoefficient(other_end_node, vol_pdf_coeff);
   }
   
-  void InitOtherSideEmpty(double pdf_reverse_emission)
+  void InitEitherSideEmpty(double pdf_reverse_emission_or_other_node_creation_probability)
   {
-    assert (node_index >= 1); // Because you cannot have a start node and simultaneously hit an emitter with it. Need at least two nodes.
     pdf = h.pdfs[node_index+1];
     fwd_conversion_factor = h.fwd_conversion_factors[node_index+1];
-    bwd_conversion_factor = h.bwd_conversion_factors[node_index];
     
-    h.pdfs[node_index+1] = pdf_reverse_emission;
-    h.fwd_conversion_factors[node_index+1] = 1.;
-    h.bwd_conversion_factors[node_index] = h.randomwalk_functions.PdfConversionFactorForTarget(
-      h.Node(node_index), h.Node(node_index-1), h.segments[node_index], false);
-  }
-  
-  void InitMySideEmpty(double other_node_creation_density)
-  {
-    assert (node_index == -1);
-    h.pdfs[node_index+1] = other_node_creation_density;
+    h.pdfs[node_index+1] = pdf_reverse_emission_or_other_node_creation_probability;
     h.fwd_conversion_factors[node_index+1] = 1.;
   }
-  
+   
 public:
   BackupAndReplace(const BackupAndReplace &) = delete;
   BackupAndReplace& operator=(const BackupAndReplace &) = delete;
   
-  BackupAndReplace(SubpathHistory &_h, int _node_index, SubpathHistory &other_h, int other_node_index, Pdf pdf, const RaySegment &segment) 
+  BackupAndReplace(SubpathHistory &_h, int _node_index, SubpathHistory &other_h, int other_node_index, Pdf pdf, const RaySegment &segment, const VolumePdfCoefficients &vol_pdf_coeff)
     : h{_h}, node_index{_node_index} 
   {
     if (_node_index >= 0 && other_node_index >= 0)
-      InitBothPathsNonEmpty(other_h.Node(other_node_index), pdf, segment);
-    else if (_node_index >= 0)
-      InitOtherSideEmpty(pdf);
+      InitBothPathsNonEmpty(other_h.Node(other_node_index), pdf, segment, vol_pdf_coeff);
     else
-      InitMySideEmpty(pdf);
+      InitEitherSideEmpty(pdf);
   }
   
   ~BackupAndReplace() 
   {
     h.pdfs[node_index+1] = pdf;
     h.fwd_conversion_factors[node_index+1] = fwd_conversion_factor;
-    if (node_index >= 0)
-      h.bwd_conversion_factors[node_index] = bwd_conversion_factor;
   }
 };
 
@@ -417,7 +389,7 @@ public:
       eye_history.Start(eye_node, lambda_weights/eye_node_pdf, eye_node_pdf);
       BdptForwardTrace(
         eye_history, eye_medium_tracker,                
-        [&eye_medium_tracker, this](int node_idx) { this->eye_medium_tracker_before_node.emplace_back(eye_medium_tracker); }, 
+        [&eye_medium_tracker, this](int ) { this->eye_medium_tracker_before_node.emplace_back(eye_medium_tracker); }, 
         context);
       eye_history.Finish();
     }
@@ -447,7 +419,6 @@ public:
     {
       if (!IsHitableEmissiveNode(eye_history.Node(eye_idx)))
       {
-        // FIXME: Keep track of media. This media tracker is only valid for the last light/eye node!!!
         if (eye_idx+1 < max_path_node_count)
           DirectLighting(eye_idx, eye_medium_tracker_before_node[eye_idx], context);
         for (int light_idx=1; light_idx<std::min(light_history.NumNodes(), max_path_node_count-eye_idx-1); ++light_idx)
@@ -458,7 +429,7 @@ public:
       else
       {
         assert (eye_idx == eye_history.NumNodes()-1); // Hitting a light should terminate the walk.
-        HandleLightHit(eye_medium_tracker_before_node[eye_idx], context);
+        HandleLightHit(context);
       }
     }
  
@@ -495,7 +466,6 @@ public:
   void ConnectEyeWithOtherPath(int eye_idx, int other_idx, BdptDetail::SubpathHistory &other, const MediumTracker &eye_medium_tracker, const PathContext &context)
   {
     VolumePdfCoefficients volume_pdf_coeff{};
-    
     double eye_pdf, light_pdf;
     WeightedSegment to_light = Connection(
       eye_history.Node(eye_idx), eye_medium_tracker, other.Node(other_idx),
@@ -504,22 +474,23 @@ public:
     if (to_light.weight.isZero())
       return;
     
-    BdptDetail::Connection connection{
-      Pdf{eye_pdf},
-      Pdf{light_pdf},
-      volume_pdf_coeff,
-      eye_idx,
-      other_idx,
-      to_light.segment
-    };
+    double mis_weight = MisWeight(eye_history, other, 
+      BdptDetail::Connection{
+        Pdf{eye_pdf},
+        Pdf{light_pdf},
+        volume_pdf_coeff,
+        eye_idx,
+        other_idx,
+        to_light.segment
+      }
+    );
     
-    double mis_weight = MisWeight(eye_history, other, connection);
     Spectral3 path_weight = eye_history.Beta(eye_idx)*other.Beta(other_idx)*to_light.weight;
     AddPathWeight(eye_idx, other_idx, mis_weight, path_weight);
   }
   
   
-  void HandleLightHit(const MediumTracker &eye_medium_tracker, const PathContext &context)
+  void HandleLightHit(const PathContext &context)
   {
     assert(eye_history.NumNodes()>=2);
     int eye_idx = eye_history.NumNodes()-1;
@@ -531,26 +502,28 @@ public:
     
     VolumePdfCoefficients volume_pdf_coeff{}; // Already covered by the random walk. The SubpathHistory has the coefficients for the last segment.
     
-    BdptDetail::Connection connection{
-      Pdf{reverse_scatter_pdf},
-      GetPdfOfGeneratingSampleOnEmitter(end_node, context),
-      volume_pdf_coeff,
-      eye_history.NumNodes()-1,
-      -1,
-      RaySegment{}
-    };
+    double mis_weight = MisWeight(eye_history, light_history, 
+      BdptDetail::Connection{
+        Pdf{reverse_scatter_pdf},
+        GetPdfOfGeneratingSampleOnEmitter(end_node, context),
+        volume_pdf_coeff,
+        eye_idx,
+        -1,
+        RaySegment{}
+      }
+    );
     
-    double mis_weight = MisWeight(eye_history, light_history, connection);
-    Spectral3 path_weight = end_weight*eye_history.Beta(eye_history.NumNodes()-1);
-    AddPathWeight(eye_history.NumNodes()-1, -1, mis_weight, path_weight);
+    Spectral3 path_weight = end_weight*eye_history.Beta(eye_idx);
+    AddPathWeight(eye_idx, -1, mis_weight, path_weight);
   }
   
   
-  double MisWeight(BdptDetail::SubpathHistory &eye, BdptDetail::SubpathHistory &light, const BdptDetail::Connection &connection)
+  double MisWeight(BdptDetail::SubpathHistory &eye, BdptDetail::SubpathHistory &light, BdptDetail::Connection &&connection)
   {
     using B = BdptDetail::BackupAndReplace;
-    B eye_backup{eye, connection.eye_index, light, connection.light_index, connection.eye_pdf, connection.segment};
-    B light_backup(light, connection.light_index, eye, connection.eye_index, connection.light_pdf, connection.segment);
+    B eye_backup{eye, connection.eye_index, light, connection.light_index, connection.eye_pdf, connection.segment, connection.volume_pdf_coeff};
+    std::swap(connection.volume_pdf_coeff.pdf_scatter_bwd, connection.volume_pdf_coeff.pdf_scatter_fwd);
+    B light_backup{light, connection.light_index, eye, connection.eye_index, connection.light_pdf, connection.segment, connection.volume_pdf_coeff};
     return bdptmis.Compute(eye, light, connection);
   }
   
@@ -782,7 +755,6 @@ public:
     Spectral3 scatter_value = EvaluateScatterCoordinate(end_node, -segment_to_end.ray.dir, context, nullptr);
     if (pdf_reverse_target)
     {
-      // Does not need conversion, because is already either w.r.t. area or angle (env).
       *pdf_reverse_target = GetPdfOfGeneratingSampleOnEmitter(end_node, context);
     }
     return scatter_value;

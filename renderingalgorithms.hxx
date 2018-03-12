@@ -457,17 +457,13 @@ public:
     auto collision = CollisionData{ray};
     TrackToNextInteraction(collision, medium_tracker, context, volume_pdf_coeff);
     
-//     node_sample.node = AllocateNode(collision, medium_tracker, context);
-//     node_sample.beta_factor *= collision.weight; 
-//     node_sample.scatter_pdf = ray_sample.pdf_or_pmf;
-//     node_sample.segment.ray = ray;
-//     node_sample.segment.length = collision.t;
-//     assert(node_sample.scatter_pdf > 0.); // Since I rolled that sample it should have non-zero probability of being generated.
-//     return node_sample;
     node_sample.node = AllocateNode(collision, medium_tracker, context);
     node_sample.beta_factor *= collision.smpl.weight; 
     node_sample.scatter_pdf = ray_sample.pdf_or_pmf;
     node_sample.segment = collision.segment;
+    node_sample.segment.length = 
+      (node_sample.node.node_type==RW::NodeType::SCATTER && node_sample.node.geom_type!=RW::GeometryType::SURFACE) ?
+        collision.smpl.t : collision.segment.length;
     assert(node_sample.scatter_pdf > 0.); // Since I rolled that sample it should have non-zero probability of being generated.
     return node_sample;
 
