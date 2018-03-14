@@ -6,38 +6,53 @@
 class Spectral3ImageBuffer
 {
   int count;
-  std::vector<RGB, boost::alignment::aligned_allocator<RGB, 128> >  accumulator;
+  long splat_count;
+  ToyVector<RGB>  accumulator;
+  ToyVector<RGB>  light_accum;
 public:
   const int xres, yres;
   
   Spectral3ImageBuffer(int _xres, int _yres)
-    : xres(_xres), yres(_yres)
+    : count{0}, splat_count{0}, xres(_xres), yres(_yres)
   {
     int sz = _xres * _yres;
     assert(sz > 0);
-    count = 0;
     accumulator.resize(sz, RGB::Zero());
+    light_accum.resize(sz, RGB::Zero());
   }
   
-  void AddSampleCount(int more)
+  void AddSampleCount(int samples_per_pixel)
   {
-    count += more;
+//     int sz = xres*yres;
+//     for (int i=0; i < sz; ++i)
+//     {
+//       accumulator[i] += light_accum[i];
+//       light_accum[i] = 0.;
+//     }
+    count += samples_per_pixel;
+  }
+  
+  void Splat(int pixel_index, const RGB &value)
+  {
+    light_accum[pixel_index] += value;
+    ++splat_count;
   }
   
   void Insert(int pixel_index, const RGB &value)
   {
-    assert (pixel_index >= 0 && pixel_index < accumulator.size());
     accumulator[pixel_index] += value; 
   }
   
   void ToImage(Image &dest, int ystart, int yend) const
   {
     assert (ystart >= 0 && yend>= ystart && yend <= dest.height());
+    Color::RGBScalar splat_weight(splat_count>0 ? double(xres*yres)/(splat_count) : 0.);
     for (int y=ystart; y<yend; ++y)
     for (int x=0; x<xres; ++x)
     {
       int pixel_index = xres * y + x;
       RGB average = accumulator[pixel_index]/Color::RGBScalar(count);
+          average += splat_weight*light_accum[pixel_index];
       Image::uchar rgb[3];
       bool isfinite = average.isFinite().all();
       //bool iszero = (accumulator[pixel_index]==0.).all();

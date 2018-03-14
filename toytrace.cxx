@@ -84,13 +84,13 @@ public:
     }
   }
   
-  void FillInExtraSamples()
+  void FillInSplats()
   {
     auto &responses = algo->GetSensorResponses();
     for (const auto &r : responses)
     {
       assert (r);
-      buffer.Insert(r.unit_index, r.weight);
+      buffer.Splat(r.unit_index, r.weight);
     }
     responses.clear();
   }
@@ -342,8 +342,7 @@ int main(int argc, char *argv[])
     
     std::cout << std::endl;
     std::cout << "Rendering ..." << std::endl;
-    
-    
+        
     while (display->IsOkToKeepGoing() && samples_per_pixel_per_iteration>0)
     {
       buffer.AddSampleCount(samples_per_pixel_per_iteration);
@@ -351,6 +350,14 @@ int main(int argc, char *argv[])
       IssueRequest(workers, Worker::REQUEST_GO);
       
       int image_conversion_y_start = 0;  
+    
+      auto UpdateImageToCurrentLine = [&]() -> void
+      {
+        int pixel_index = shared_pixel_index.load();
+        int y = std::max(image_conversion_y_start, pixel_index/render_params.width-1);
+        buffer.ToImage(bm, image_conversion_y_start, std::min(render_params.height, y+1));
+        image_conversion_y_start = y;
+      };
       
       while (shared_pixel_index.load() < num_pixels && display->IsOkToKeepGoing())
       {
@@ -360,22 +367,19 @@ int main(int argc, char *argv[])
         WaitForWorkers(workers);
         
         for (auto &worker : workers)
-          worker->FillInExtraSamples();
-        
-        int pixel_index = shared_pixel_index.load();
-        int y = pixel_index/render_params.width;
-        buffer.ToImage(bm, image_conversion_y_start, std::min(render_params.height, y+1));
+          worker->FillInSplats();
 
-        IssueRequest(workers, Worker::REQUEST_GO);
-
-        image_conversion_y_start = y;      
+        UpdateImageToCurrentLine();
+        IssueRequest(workers, Worker::REQUEST_GO);        
         display->Show(bm);
       }
 
       IssueRequest(workers, Worker::REQUEST_HALT);
       WaitForWorkers(workers);
-      
-      buffer.ToImage(bm, image_conversion_y_start, render_params.height);
+
+      for (auto &worker : workers)
+        worker->FillInSplats();
+      UpdateImageToCurrentLine();
       display->Show(bm);
       bm.write(output_file.string());
       
@@ -393,47 +397,36 @@ int main(int argc, char *argv[])
   else
   {
     std::unique_ptr<IRenderingAlgo> algo = RenderAlgorithmFactory(scene, render_params);
-    if (render_params.pixel_x<0 && render_params.pixel_y<0)
-    {
-      int total_samples_per_pixel = 0;
-      int samples_per_pixel_per_iteration = 1;
 
-      while (display->IsOkToKeepGoing() && samples_per_pixel_per_iteration>0)
-      {
-        buffer.AddSampleCount(samples_per_pixel_per_iteration);
-        for (int y = 0; y < render_params.height && display->IsOkToKeepGoing(); ++y)
-        {
-          for (int x = 0; x < render_params.width; ++x)
-          {
-            int pixel_index = scene.GetCamera().PixelToUnit({x, y});
-            for (int s = 0; s < samples_per_pixel_per_iteration; ++s)
-            {
-              auto smpl = algo->MakePrettyPixel(pixel_index);
-              buffer.Insert(pixel_index, smpl);
-            }
-          }
-          for (const auto &r : algo->GetSensorResponses())
-            buffer.Insert(r.unit_index, r.weight);
-          algo->GetSensorResponses().clear();
-          buffer.ToImage(bm, y, y+1);
-          display->Show(bm);
-        }
-        algo->NotifyPassesFinished(samples_per_pixel_per_iteration);
-        total_samples_per_pixel += samples_per_pixel_per_iteration;
-        std::cout << "Iteration finished, spp = " << samples_per_pixel_per_iteration << ", total " << total_samples_per_pixel << std::endl;
-        DetermineSamplesPerPixelForNextPass(samples_per_pixel_per_iteration, total_samples_per_pixel, render_params);
-      }
-    }
-    else
+    int total_samples_per_pixel = 0;
+    int samples_per_pixel_per_iteration = 1;
+
+    while (display->IsOkToKeepGoing() && samples_per_pixel_per_iteration>0)
     {
-      buffer.AddSampleCount(1);
-      int pixel_index = scene.GetCamera().PixelToUnit(
-        {render_params.pixel_x, render_params.pixel_y});
-      auto smpl = algo->MakePrettyPixel(pixel_index);
-      buffer.Insert(pixel_index, smpl);
-      buffer.ToImage(bm, render_params.pixel_y, render_params.pixel_y+1);
-      display->Show(bm);
+      buffer.AddSampleCount(samples_per_pixel_per_iteration);
+      for (int y = 0; y < render_params.height && display->IsOkToKeepGoing(); ++y)
+      {
+        for (int x = 0; x < render_params.width; ++x)
+        {
+          int pixel_index = scene.GetCamera().PixelToUnit({x, y});
+          for (int s = 0; s < samples_per_pixel_per_iteration; ++s)
+          {
+            auto smpl = algo->MakePrettyPixel(pixel_index);
+            buffer.Insert(pixel_index, smpl);
+          }
+        }
+        for (const auto &r : algo->GetSensorResponses())
+          buffer.Splat(r.unit_index, r.weight);
+        algo->GetSensorResponses().clear();
+        buffer.ToImage(bm, y, y+1);
+        display->Show(bm);
+      }
+      algo->NotifyPassesFinished(samples_per_pixel_per_iteration);
+      total_samples_per_pixel += samples_per_pixel_per_iteration;
+      std::cout << "Iteration finished, spp = " << samples_per_pixel_per_iteration << ", total " << total_samples_per_pixel << std::endl;
+      DetermineSamplesPerPixelForNextPass(samples_per_pixel_per_iteration, total_samples_per_pixel, render_params);
     }
+
     bm.write(output_file.string());
   }
   
