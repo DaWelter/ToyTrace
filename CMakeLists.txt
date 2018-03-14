@@ -11,6 +11,7 @@ add_compile_options ("$<$<CONFIG:RELEASE>:-mfpmath=sse>")
 # Eliminate link error caused by boost/pool/simple_segregated_storage.hpp
 # https://stackoverflow.com/questions/9723793/undefined-reference-to-boostsystemsystem-category-when-compiling
 add_definitions("-DBOOST_SYSTEM_NO_DEPRECATED")
+add_definitions("-DEIGEN_DONT_VECTORIZE")
 
 if(NOT WIN32)
   find_package(X11)
