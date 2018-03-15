@@ -86,6 +86,10 @@ public:
     ymin = -b;
     xperpixel = 2.*a / xres;
     yperpixel = 2.*b / yres;
+    std::cout << "Perspective Camera Frame: " << std::endl;
+    std::cout << "up=" << frame.up << std::endl;
+    std::cout << "right=" << frame.right << std::endl;
+    std::cout << "fwd=" << frame.dir << std::endl;
 	}
 
 	double PixelPdfWrtSolidAngle(double x, double y) const

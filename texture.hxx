@@ -13,6 +13,11 @@ public:
   Texture(const boost::filesystem::path &filename)
   {
     bm.Read(filename.string());
+    if (bm.empty())
+    {
+      bm.init(1,1);
+      bm.set_pixel(0, 0, 255, 0, 0);
+    }
   }
 
   RGB GetTexel(double u, double v) const
@@ -24,9 +29,10 @@ public:
     if (v < 0) v = 1. + v;
     if (u > 1. - Epsilon) u -= Epsilon;
     if (v > 1. - Epsilon) v -= Epsilon;
-    if (bm.empty()) return RGB::Constant(1._rgb);
     int x = u * bm.width();
     int y = v * bm.height();
+    y = bm.height() - y - 1;
+    //x = bm.width() - x - 1; // Nope. I don't think this is it.
     auto rgb = bm.get_pixel_uc3(x, y);
     RGB c;
     c[0] = Color::SRGBToLinear(Color::RGBScalar(std::get<0>(rgb) / 255.0));

@@ -109,6 +109,7 @@ public:
     // To UV
     theta /= Pi;
     phi   /= 2.*Pi;
+    theta = 1.-theta;
     return Double3{phi, theta, 0.};
   }
 
