@@ -62,24 +62,6 @@ Spectral3 RGBToSpectralSelection(const RGB &rgb, const Index3 &idx);
 */
 SpectralN MaxwellBoltzmanDistribution(double temp);
 
-
-// Applies gamma correction. See https://en.wikipedia.org/wiki/SRGB
-inline RGBScalar SRGBToLinear(RGBScalar x)
-{
-  return (x <= 0.04045_rgb) ? 
-         (x/12.92_rgb) : 
-         (pow((x+0.055_rgb)/1.055_rgb, 2.4_rgb));
-}
-
-
-// Applies gamma correction. See https://en.wikipedia.org/wiki/SRGB
-inline RGBScalar LinearToSRGB(RGBScalar x)
-{    
-  return   (x <= 0.0031308_rgb) ? 
-           (12.92_rgb*x) : 
-           (1.055_rgb*pow(x, 1.0_rgb/2.4_rgb) - 0.055_rgb);
-}
-
 }
 
 using RGB = Color::RGB;
@@ -115,4 +97,54 @@ struct NumTraits<Color::RGBScalar>  : GenericNumTraits<Color::RGBScalar> // perm
     MulCost = 3
   };
 };
+} // namespace Eigen
+
+
+namespace Color
+{
+
+inline auto SRGBToRGBMatrix()
+{
+  static constexpr RGBScalar srgb_to_rgb[] = {
+    0.777286500154_rgb, 0.147934703048_rgb, -0.0844471427628_rgb,
+    0.0928808240766_rgb, 0.846114173165_rgb, 0.0943264374326_rgb,
+    0.0185756513935_rgb, 0.11169747188_rgb, 0.959129280454_rgb
+  };
+  return Eigen::Map<const Matrix33<RGBScalar>>{srgb_to_rgb};
 }
+
+
+inline auto RGBToSRGBMatrix()
+{
+  static constexpr RGBScalar rgb_to_srgb[] = {
+    1.31281756556_rgb, -0.248012105652_rgb, 0.139978826091_rgb,
+    -0.143136263175_rgb, 1.22446025105_rgb, -0.133023174571_rgb,
+    -0.00875636150541_rgb, -0.137793862347_rgb, 1.05539281831_rgb
+  };
+  return Eigen::Map<const Matrix33<RGBScalar>>{rgb_to_srgb};
+}
+
+
+// Applies gamma correction. See https://en.wikipedia.org/wiki/SRGB
+inline RGBScalar SRGBToLinear(RGBScalar x)
+{
+  return (x <= 0.04045_rgb) ? 
+         (x/12.92_rgb) : 
+         (pow((x+0.055_rgb)/1.055_rgb, 2.4_rgb));
+}
+
+
+// Applies gamma correction. See https://en.wikipedia.org/wiki/SRGB
+inline RGBScalar LinearToSRGB(RGBScalar x)
+{    
+  return   (x <= 0.0031308_rgb) ? 
+           (12.92_rgb*x) : 
+           (1.055_rgb*pow(x, 1.0_rgb/2.4_rgb) - 0.055_rgb);
+}
+
+inline RGB SRGBToRGB(const RGB &x)
+{
+  return (SRGBToRGBMatrix()*x.matrix()).array();
+}
+
+} // namespace Color

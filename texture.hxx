@@ -38,6 +38,7 @@ public:
     c[0] = Color::SRGBToLinear(Color::RGBScalar(std::get<0>(rgb) / 255.0));
     c[1] = Color::SRGBToLinear(Color::RGBScalar(std::get<1>(rgb) / 255.0));
     c[2] = Color::SRGBToLinear(Color::RGBScalar(std::get<2>(rgb) / 255.0));
+    //c = (Color::SRGBToRGBMatrix()*c.matrix()).array();
     return c;
   }
 };

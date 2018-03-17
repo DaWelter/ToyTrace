@@ -2,6 +2,7 @@
 
 #include "vec3f.hxx"
 #include "util.hxx"
+#include "spectral.hxx"
 
 class Spectral3ImageBuffer
 {
@@ -55,7 +56,7 @@ public:
           average += splat_weight*light_accum[pixel_index];
       Image::uchar rgb[3];
       bool isfinite = average.isFinite().all();
-      //bool iszero = (accumulator[pixel_index]==0.).all();
+      //average = (Color::RGBToSRGBMatrix()*average.matrix()).array();
       average = average.max(0._rgb).min(1._rgb);
       if (isfinite)
       {

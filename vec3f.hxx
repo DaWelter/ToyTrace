@@ -51,6 +51,9 @@ typedef Vec<double, 2> Float2;
 
 using Index3 = Eigen::Array<int, 3, 1>;
 
+template<typename T>
+using Matrix33 = Eigen::Matrix<T, 3, 3>;
+
 template<class T>
 constexpr int static_size()
 {

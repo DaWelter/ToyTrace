@@ -56,6 +56,11 @@ struct very_strong_typedef : public \
       return *this;
     }
     
+    constexpr strong_type operator-() const
+    {
+      return strong_type{-value_};
+    }
+    
     strong_type& operator-=(const strong_type& rhs)
     {
       value_-=rhs.value_;
