@@ -79,7 +79,7 @@ public:
     segments.push_back(segment);
     is_parallel_beam &= pdf_start_scatter.IsFromDelta();
     double vol_coeff = ForwardPdfCoefficient(end_node, volume_pdf_coeff);
-    double geom_coeff = randomwalk_functions.PdfConversionFactorForTarget(nodes[idx-1], nodes[idx], segments[idx], is_parallel_beam); //pdf_start_scatter.IsFromDelta());
+    double geom_coeff = randomwalk_functions.PdfConversionFactorForTarget(nodes[idx-1], nodes[idx], segments[idx], is_parallel_beam);
     fwd_conversion_factors.push_back(vol_coeff * geom_coeff);
     vol_coeff = BackwardPdfCoefficient(nodes[idx-1], volume_pdf_coeff);
     geom_coeff = randomwalk_functions.PdfConversionFactorForTarget(nodes[idx], nodes[idx-1], segments[idx], false);
@@ -229,7 +229,7 @@ public:
     ComputeForwardSubpathDensities(light, eye, connection.light_index, connection.eye_index, light_densities);
     FactorInNumberWeight();
     double result = ComputePowerHeuristicWeight(connection);
-    //double result = WeightByNumberOfAdmissibleTechniques();
+    //double result = WeightByNumberOfAdmissibleTechniques(); // For debugging!
     return result;
   }
 private:

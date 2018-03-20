@@ -348,15 +348,12 @@ int main(int argc, char *argv[])
       buffer.AddSampleCount(samples_per_pixel_per_iteration);
       shared_pixel_index.store(0);
       IssueRequest(workers, Worker::REQUEST_GO);
-      
-      int image_conversion_y_start = 0;  
-    
+
       auto UpdateImageToCurrentLine = [&]() -> void
       {
         int pixel_index = shared_pixel_index.load();
-        int y = std::max(image_conversion_y_start, pixel_index/render_params.width-1);
-        buffer.ToImage(bm, image_conversion_y_start, std::min(render_params.height, y+1));
-        image_conversion_y_start = y;
+        int y = std::max(0, pixel_index/render_params.width);
+        buffer.ToImage(bm, 0, std::min(render_params.height, y));
       };
       
       while (shared_pixel_index.load() < num_pixels && display->IsOkToKeepGoing())
@@ -418,7 +415,7 @@ int main(int argc, char *argv[])
         for (const auto &r : algo->GetSensorResponses())
           buffer.Splat(r.unit_index, r.weight);
         algo->GetSensorResponses().clear();
-        buffer.ToImage(bm, y, y+1);
+        buffer.ToImage(bm, 0, y+1);
         display->Show(bm);
       }
       algo->NotifyPassesFinished(samples_per_pixel_per_iteration);

@@ -24,30 +24,29 @@ public:
   
   void AddSampleCount(int samples_per_pixel)
   {
-//     int sz = xres*yres;
-//     for (int i=0; i < sz; ++i)
-//     {
-//       accumulator[i] += light_accum[i];
-//       light_accum[i] = 0.;
-//     }
     count += samples_per_pixel;
   }
   
   void Splat(int pixel_index, const RGB &value)
   {
     light_accum[pixel_index] += value;
-    ++splat_count;
   }
   
   void Insert(int pixel_index, const RGB &value)
   {
     accumulator[pixel_index] += value; 
+    // Splat count increased here because formally each sampled pixel creates a 
+    // eye connection which makes a contribution to all of the pixels. At least 
+    // formally. In reality it depends on the pixel filter support.
+    // So, after n-pixels processed, I have n samples for *each* pixel in the 
+    // light image. Hence a weight of 1/n. See below.
+    ++splat_count;
   }
   
   void ToImage(Image &dest, int ystart, int yend) const
   {
     assert (ystart >= 0 && yend>= ystart && yend <= dest.height());
-    Color::RGBScalar splat_weight(splat_count>0 ? double(xres*yres)/(splat_count) : 0.);
+    Color::RGBScalar splat_weight(splat_count>0 ? double(xres*yres)/(splat_count) : 0.); // Multiply with xres*yres because I divided it out in the path tracer code.
     for (int y=ystart; y<yend; ++y)
     for (int x=0; x<xres; ++x)
     {
