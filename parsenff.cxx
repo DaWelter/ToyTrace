@@ -38,10 +38,10 @@ class SymbolTable
 {
   Thing* currentThing;
   std::unordered_map<std::string, Thing*> things;
-  std::string name;
+  std::string name_of_this_table;
 public:
   SymbolTable(const std::string &_name, const std::string &default_name, Thing* default_thing) :
-    currentThing(default_thing), name(_name)
+    currentThing(default_thing), name_of_this_table(_name)
   {
     things[default_name] = default_thing;
   }
@@ -61,7 +61,7 @@ public:
     else
     {
       char buffer[1024];
-      std::snprintf(buffer, 1024, "Error: %s %s not defined. Define it in the NFF file prior to referencing it.", this->name.c_str(), name.c_str());
+      std::snprintf(buffer, 1024, "Error: %s %s not defined. Define it in the NFF file prior to referencing it.", this->name_of_this_table.c_str(), name.c_str());
       throw std::runtime_error(buffer);
     }
   }
@@ -171,10 +171,6 @@ fs::path NFFParser::MakeFullPath(const fs::path &filename) const
   }
   else
     return filename;
-//   if (filename.is_relative()) // Look in the directory of the parent file.
-//     return directory / filename;
-//   else
-//     return filename;
 }
 
 
@@ -866,7 +862,7 @@ public:
   AssimpReader(NFFParser &parser, Scope &scope)
     : scene{*parser.scene},
       parser{parser},
-      scope{scope}
+      outer_scope{scope}
   {
   }
   
@@ -906,20 +902,13 @@ private:
     {
       const aiMesh* mesh = aiscene->mMeshes[nd->mMeshes[mesh_idx]];
       std::printf("Mesh %i (%s), mat_idx=%i\n", mesh_idx, mesh->mName.C_Str(), mesh->mMaterialIndex);
-      DealWithTheMaterialOf(mesh);
-      ReadMesh(mesh, ndref);
+      Scope scope{outer_scope};
+      DealWithTheMaterialAssignment(scope, mesh);
+      ReadMesh(scope, mesh, ndref);
     }
   }
-  
-  void DealWithTheMaterialOf(const aiMesh* mesh)
-  {
-    if (mesh->mMaterialIndex < aiscene->mNumMaterials)
-    {
-      SetCurrentShader(aiscene->mMaterials[mesh->mMaterialIndex]);
-    }
-  }
-  
-  void ReadMesh(const aiMesh* mesh, const NodeRef &ndref)
+    
+  void ReadMesh(Scope &scope, const aiMesh* mesh, const NodeRef &ndref)
   {
     auto m = ndref.local_to_world;
     auto m_linear = aiMatrix3x3(m);
@@ -1010,7 +999,17 @@ private:
     }
   }
   
-  void SetCurrentShader(const aiMaterial *mat)
+  
+  void DealWithTheMaterialAssignment(Scope &scope, const aiMesh* mesh)
+  {
+    if (mesh->mMaterialIndex < aiscene->mNumMaterials)
+    {
+      SetCurrentShader(scope, aiscene->mMaterials[mesh->mMaterialIndex]);
+    }
+  }
+  
+  
+  void SetCurrentShader(Scope &scope, const aiMaterial *mat)
   {
 //     for (int prop_idx = 0; prop_idx < mat->mNumProperties; ++prop_idx)
 //     {
@@ -1030,7 +1029,7 @@ private:
   const aiScene *aiscene = { nullptr };
   Scene &scene;
   NFFParser &parser;
-  Scope &scope;
+  Scope &outer_scope;
 
   inline Double3 aiVector3_to_myvector(const aiVector3D &v)
   {
