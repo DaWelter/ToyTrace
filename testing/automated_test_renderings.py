@@ -360,6 +360,7 @@ class Various(object):
         self.scenes['various_litcorner2'] = 'litcorner2.nff'
         self.scenes['various_cubelight'] = 'cubelight.nff'
         self.scenes['various_texture_test'] = 'texture_test.nff'
+        self.scenes['various_off_center_rgb_cmy'] = 'off_center_rgb_cmy.nff'
         # self.common_opt = defaultdict(lambda : {'-w': 480, '-h': 320})
         # self.common_opt['various_cornel_parallel_arealight'] = {'-w': 320, '-h': 320}
         # self.common_opt['various_cornelbox_parabolic_reflector'] = {'-w': 320, '-h': 320}
