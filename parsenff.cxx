@@ -20,6 +20,7 @@
 #include <assimp/postprocess.h>
 
 #include <boost/filesystem/path.hpp>
+#include <boost/filesystem/operations.hpp>
 
 using namespace RadianceOrImportance;
 namespace fs = boost::filesystem;
@@ -138,7 +139,7 @@ private:
   void ParseMesh(const char *filename, Scope &scope);
 
   bool NextLine();
-  std::runtime_error MakeException(const std::string &msg);
+  std::runtime_error MakeException(const std::string &msg) const;
   fs::path MakeFullPath(const fs::path &filename) const;
   void AssignCurrentMaterialParams(Primitive &primitive, const Scope &scope);
 };
@@ -158,14 +159,26 @@ void NFFParser::AssignCurrentMaterialParams(Primitive& primitive, const Scope &s
 
 fs::path NFFParser::MakeFullPath(const fs::path &filename) const
 {
-  if (filename.is_relative()) // Look in the directory of the parent file.
-    return directory / filename;
+  if (filename.is_relative())
+  {
+    for (auto parent_path : render_params->search_paths)
+    {
+      auto trial = fs::path(parent_path) / filename;
+      if (fs::exists(trial))
+        return trial;
+    }
+    throw MakeException("Cannot find a file in the search paths matching the name "+filename.string());
+  }
   else
     return filename;
+//   if (filename.is_relative()) // Look in the directory of the parent file.
+//     return directory / filename;
+//   else
+//     return filename;
 }
 
 
-std::runtime_error NFFParser::MakeException(const std::string &msg)
+std::runtime_error NFFParser::MakeException(const std::string &msg) const
 {
   std::stringstream os;
   if (!filename.empty())
@@ -614,7 +627,8 @@ void NFFParser::Parse(Scope &scope)
       }
       else if(num == 6)
       {
-        auto medium = Atmosphere::MakeTabulated(planet_center, radius, datafile, scope.mediums.size());
+        auto full_datafile_path = MakeFullPath(datafile);
+        auto medium = Atmosphere::MakeTabulated(planet_center, radius, full_datafile_path.string(), scope.mediums.size());
         scope.mediums.set_and_activate(
           name, medium.release());
       }

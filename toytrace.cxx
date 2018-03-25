@@ -462,6 +462,7 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
       ("algo", po::value<std::string>()->default_value("pt"), "Rendering algorithm: pt or bdpt")
       ("pt-sample-mode", po::value<std::string>(), "Light sampling: 'bsdf' - bsdf importance sampling, 'lights' - sample lights aka. next event estimation, 'both' - both combined by MIS.")
       ("no-display", po::bool_switch()->default_value(false), "Don't open a display window")
+      ("include,I", po::value<std::vector<std::string>>(), "Include paths")
       ("output-file,o", po::value<fs::path>(), "Output file")
       ("input-file", po::value<fs::path>(), "Input file");
     po::positional_options_description pos_desc;
@@ -584,6 +585,13 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
     if (!open_display && render_params.max_samples_per_pixel < 0)
       std::cout << "WARNING: Not opening display and no sample count given. Will run until killed." << std::endl;
     display = MakeDisplay(open_display);
+    
+    if (vm.count("include"))
+    {
+      auto list_of_includes = vm["include"].as<std::vector<std::string>>();
+      for (auto p : list_of_includes)
+        render_params.search_paths.emplace_back(p);
+    }
   }
   catch(po::error &ex)
   {

@@ -4,21 +4,17 @@
 #include"image.hxx"
 #include"vec3f.hxx"
 #include"spectral.hxx"
-#include <boost/filesystem/path.hpp>
+
+namespace boost { namespace filesystem { 
+  class path;
+}}
+
 
 class Texture
 {
 	Image bm;
 public:
-  Texture(const boost::filesystem::path &filename)
-  {
-    bm.Read(filename.string());
-    if (bm.empty())
-    {
-      bm.init(1,1);
-      bm.set_pixel(0, 0, 255, 0, 0);
-    }
-  }
+  Texture(const boost::filesystem::path &filename);
 
   RGB GetTexel(double u, double v) const
   {

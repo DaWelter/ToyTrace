@@ -5,6 +5,7 @@
 #include "shader.hxx"
 #include "light.hxx"
 #include "bsptree.hxx"
+#include "util.hxx"
 
 #include <memory>
 
@@ -23,6 +24,7 @@ struct RenderingParameters
   int max_samples_per_pixel = {-1};
   std::string pt_sample_mode = {};
   std::string algo_name = {};
+  std::vector<std::string> search_paths = { "" };
 };
 
 
