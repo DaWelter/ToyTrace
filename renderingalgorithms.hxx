@@ -228,16 +228,21 @@ struct LightPicker
 namespace RandomWalk
 {
 namespace RW = RandomWalk;
-  
+
+// TODO: At least some of the data could be precomputed.
+// TODO: For improved precision it would make sense to move the scene center to the origin.
 struct EnvLightPointSamplingBeyondScene
 {
-  const double diameter = NaN;
-  const double sufficiently_long_distance_to_go_outside_the_scene_bounds = NaN;
+  double diameter;
+  double sufficiently_long_distance_to_go_outside_the_scene_bounds;
+  Double3 box_center;
   
-  EnvLightPointSamplingBeyondScene(const Scene &_scene) 
-    : diameter{UpperBoundToBoundingBoxDiameter(_scene)},
-      sufficiently_long_distance_to_go_outside_the_scene_bounds{10.*diameter}
+  EnvLightPointSamplingBeyondScene(const Scene &scene)
   {
+    Box bb = scene.GetBoundingBox();
+    box_center = 0.5*(bb.max+bb.min);
+    diameter = Length(bb.max - bb.min);
+    sufficiently_long_distance_to_go_outside_the_scene_bounds = 10.*diameter;
   }
   
   Double3 Sample(const Double3 &exitant_direction, Sampler &sampler) const
@@ -245,6 +250,7 @@ struct EnvLightPointSamplingBeyondScene
     Double3 disc_sample = SampleTrafo::ToUniformDisc(sampler.UniformUnitSquare());
     Eigen::Matrix3d frame = OrthogonalSystemZAligned(exitant_direction);
     Double3 org = 
+      box_center +
       -sufficiently_long_distance_to_go_outside_the_scene_bounds*exitant_direction
       + frame * 0.5 * diameter * disc_sample;
     return org;
