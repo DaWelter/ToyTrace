@@ -105,7 +105,7 @@ class NFFParser
 {
   Scene* scene;
   RenderingParameters *render_params;
-  fs::path    directory;
+  std::vector<fs::path> search_paths;
   fs::path    filename;
   std::string line;
   bool        line_stream_state;
@@ -128,7 +128,17 @@ public:
   {
     if (!filename.empty())
     {
-      directory = filename.parent_path();
+      this->search_paths.emplace_back(
+        filename.parent_path());
+    }
+    else
+    {
+      this->search_paths.emplace_back(fs::path(""));
+    }
+    if (render_params)
+    {
+      for (auto s: render_params->search_paths)
+        this->search_paths.emplace_back(s);
     }
     line_stream_state = true;
     peek_stream_state = (bool)std::getline(input, peek_line);
@@ -161,9 +171,9 @@ fs::path NFFParser::MakeFullPath(const fs::path &filename) const
 {
   if (filename.is_relative())
   {
-    for (auto parent_path : render_params->search_paths)
+    for (auto parent_path : this->search_paths)
     {
-      auto trial = fs::path(parent_path) / filename;
+      auto trial = parent_path / filename;
       if (fs::exists(trial))
         return trial;
     }
