@@ -71,33 +71,30 @@ DiffuseShader::DiffuseShader(const SpectralN &_reflectance, std::unique_ptr<Text
 
 Spectral3 DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
-  double n_dot_out = Dot(surface_hit.shading_normal, out_direction);
-  if (pdf)
-    *pdf = n_dot_out>0. ? n_dot_out/Pi : 0.;
-  if (n_dot_out > 0.)
+  Spectral3 ret{0.};
+  assert (Dot(surface_hit.normal, incident_dir)>=0); // Because normal is aligned such that this conditions should be true.
+  double n_dot_out = Dot(surface_hit.normal, out_direction)>0;
+  if (n_dot_out > 0.) // In/Out on same side of geometric surface?
   {
     Spectral3 kr_d_taken = Take(kr_d, context.lambda_idx);
-    return MaybeMultiplyTextureLookup(kr_d_taken, diffuse_texture.get(), surface_hit, context.lambda_idx);
+    ret = MaybeMultiplyTextureLookup(kr_d_taken, diffuse_texture.get(), surface_hit, context.lambda_idx);
   }
-  else
-    return Spectral3{0.};
+  if (pdf)
+  {
+    *pdf = n_dot_out>0. ? n_dot_out/Pi : 0.;
+  }
+  return ret;
 }
 
 
 ScatterSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
 {
-  auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
+  auto m = OrthogonalSystemZAligned(surface_hit.normal);
   Double3 v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
   double pdf = v[2]/Pi;
   Double3 out_direction = m * v;
-  Spectral3 value;
-  if (Dot(out_direction, surface_hit.normal) > 0.)
-  {
-    value = Take(kr_d, context.lambda_idx);
-    value = MaybeMultiplyTextureLookup(value, diffuse_texture.get(), surface_hit, context.lambda_idx);
-  }
-  else
-    value = 0.;
+  Spectral3 value = Take(kr_d, context.lambda_idx);
+  value = MaybeMultiplyTextureLookup(value, diffuse_texture.get(), surface_hit, context.lambda_idx);
   return ScatterSample{out_direction, value, pdf};
 }
 
