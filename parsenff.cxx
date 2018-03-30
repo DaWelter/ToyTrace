@@ -396,21 +396,20 @@ void NFFParser::Parse(Scope &scope)
 		Double3 *vertex = new Double3[vertices];
     for (int i=0;i<vertices;i++)
     {
-      if (!NextLine() ||
-          sscanf(line.c_str(),"%lg %lg %lg\n",&vertex[i][0],&vertex[i][1],&vertex[i][2]) < 3)
+      if (!NextLine() || sscanf(line.c_str(),"%lg %lg %lg\n",&vertex[i][0],&vertex[i][1],&vertex[i][2]) < 3)
         throw MakeException("Error reading Triangle");
       vertex[i] = scope.currentTransform*vertex[i];
-		}
-
-    for (int i=2;i<vertices;i++) {
-			AssignCurrentMaterialParams(
-        scene->AddPrimitive<Triangle>(
-          vertex[0],
-					vertex[i-1],
-					vertex[i]), scope);
-			}
-		delete[] vertex;
-		continue;
+    }
+    for (int i=2;i<vertices;i++) 
+    {
+        AssignCurrentMaterialParams(
+          scene->AddPrimitive<Triangle>(
+            vertex[0],
+            vertex[i-1],
+            vertex[i]), scope);
+        }
+      delete[] vertex;
+      continue;
     }
     
     /* shader parameters */
