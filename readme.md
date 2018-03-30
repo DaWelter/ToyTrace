@@ -77,6 +77,7 @@ Other projects by which this one is inspired.
 * MagicaVoxel by ephtracy (https://ephtracy.github.io/)
 * smallpt "Global Illumination in 99 lines of C++" by Kevin Beason (http://www.kevinbeason.com/smallpt/)
 * JavaScript Path Tracer by Hunter Loftis  (https://github.com/hunterloftis/pathtracer)
+* pbr: a Physically-Based 3D Renderer in Go by Hunter Loftis (https://github.com/hunterloftis/pbr)
 * Path Tracer by Michael Fogleman (https://www.michaelfogleman.com)
 
 Educational/Research/Reference Implementations
