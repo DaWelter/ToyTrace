@@ -1,7 +1,7 @@
 #include "image.hxx"
 #include "scene.hxx"
+#include "renderbuffer.hxx"
 #include "renderingalgorithms.hxx"
-#include "renderingalgorithms_pt.hxx"
 
 #include <chrono>
 #include <atomic>
@@ -11,15 +11,6 @@
 #include <boost/filesystem/path.hpp>
 
 namespace fs = boost::filesystem;
-
-
-std::unique_ptr<IRenderingAlgo> RenderAlgorithmFactory(const Scene &_scene, const RenderingParameters &_params)
-{
-  if (_params.algo_name == "bdpt")
-    return std::make_unique<Bdpt>(_scene, _params);
-  else
-    return std::make_unique<PathTracing>(_scene, _params);
-}
 
 
 class Worker

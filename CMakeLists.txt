@@ -48,9 +48,8 @@ set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx bsptree.cxx 
 add_executable(toytrace toytrace.cxx ${SOURCES})
 target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE} ${Boost_FILESYSTEM_LIBRARY_RELEASE})
 
-add_executable(tests tests.cxx ${SOURCES})
+add_executable(tests tests.cxx tests3.cxx ${SOURCES})
 add_executable(tests2 tests2.cxx)
-#add_executable(tests3 tests3.cxx)
 
 foreach(EXE tests tests2)
   target_include_directories(${EXE} PUBLIC ${GTEST_INCLUDE_DIRS})

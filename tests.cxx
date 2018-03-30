@@ -3,6 +3,8 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
+#include <iostream>
+#include <fstream>
 #include <rapidjson/document.h>
 #include <boost/filesystem.hpp>
 
@@ -13,7 +15,6 @@
 #include "sampler.hxx"
 #include "scene.hxx"
 #include "renderingalgorithms.hxx"
-#include "renderingalgorithms_pt.hxx"
 #include "sphere.hxx"
 #include "triangle.hxx"
 #include "atmosphere.hxx"
@@ -1058,36 +1059,9 @@ TEST_F(PerspectiveCameraTesting, Sampling1)
   run(5,5);
 }
 
-
-namespace 
-{
-  
-void CheckSceneParsedWithScopes(const Scene &scene)
-{
-  auto Getter = [&scene](int i) -> auto 
-  { 
-    return scene.GetPrimitive(i).CalcBounds().Center();
-  };
-  ASSERT_EQ(scene.GetNumPrimitives(), 4);
-  std::array<Double3,4> c{ 
-    Getter(0),
-    Getter(1),
-    Getter(2),
-    Getter(3)
-  };
-  // Checking the coordinates for correct application of the transform statements.
-  ASSERT_NEAR(c[0][0], 1., 1.e-3);
-  ASSERT_NEAR(c[1][0], 5., 1.e-3);
-  ASSERT_NEAR(c[2][0], 8.+11., 1.e-3); // Using the child scope transform.
-  ASSERT_NEAR(c[3][0], 14.+5., 1.e-3); // Using the parent scope transform.
-  ASSERT_EQ(scene.GetPrimitive(3).shader, scene.GetPrimitive(1).shader); // Shaders don't persist beyond scopes.
-  ASSERT_NE(scene.GetPrimitive(2).shader, scene.GetPrimitive(1).shader); // Shader within the scope was actually created and assigned.
-  ASSERT_NE(scene.GetPrimitive(2).shader, scene.GetPrimitive(0).shader); // Shader within the scope is not the default.
-  ASSERT_NE(scene.GetPrimitive(2).shader, nullptr); // And ofc it should not be null.
+namespace {
+void CheckSceneParsedWithScopes(const Scene &scene);
 }
-  
-}
-
 
 TEST(Parser, Scopes)
 {
@@ -1155,6 +1129,36 @@ s 14 15 16 0.5
 }
 
 
+namespace 
+{
+  
+void CheckSceneParsedWithScopes(const Scene &scene)
+{
+  auto Getter = [&scene](int i) -> auto 
+  { 
+    return scene.GetPrimitive(i).CalcBounds().Center();
+  };
+  ASSERT_EQ(scene.GetNumPrimitives(), 4);
+  std::array<Double3,4> c{ 
+    Getter(0),
+    Getter(1),
+    Getter(2),
+    Getter(3)
+  };
+  // Checking the coordinates for correct application of the transform statements.
+  ASSERT_NEAR(c[0][0], 1., 1.e-3);
+  ASSERT_NEAR(c[1][0], 5., 1.e-3);
+  ASSERT_NEAR(c[2][0], 8.+11., 1.e-3); // Using the child scope transform.
+  ASSERT_NEAR(c[3][0], 14.+5., 1.e-3); // Using the parent scope transform.
+  ASSERT_EQ(scene.GetPrimitive(3).shader, scene.GetPrimitive(1).shader); // Shaders don't persist beyond scopes.
+  ASSERT_NE(scene.GetPrimitive(2).shader, scene.GetPrimitive(1).shader); // Shader within the scope was actually created and assigned.
+  ASSERT_NE(scene.GetPrimitive(2).shader, scene.GetPrimitive(0).shader); // Shader within the scope is not the default.
+  ASSERT_NE(scene.GetPrimitive(2).shader, nullptr); // And ofc it should not be null.
+}
+  
+}
+
+
 
 TEST(Parser, ImportDAE)
 {
@@ -1213,250 +1217,6 @@ m scenes/cornelbox2.dae
 }
 
 
-
-void RenderingMediaTransmission1Helper(
-  const Scene &scene, 
-  const Ray &ray, 
-  const Medium **media_after_intersect, 
-  const double *intersect_pos, 
-  int NHITS)
-{
-  MediumTracker mt(scene);
-  IntersectionCalculator intersector = scene.MakeIntersectionCalculator();
-  mt.initializePosition({0, 0, -10}, intersector);
-  ASSERT_EQ(&mt.getCurrentMedium(), &scene.GetEmptySpaceMedium());
-  RaySegment seg{ray, LargeNumber};
-  std::printf("Media Trace:\n");
-  intersector.All(seg.ray, seg.length);
-  EXPECT_EQ(intersector.Hits().end()-intersector.Hits().begin(), NHITS);
-  for (int i=0; i<NHITS; ++i)
-  {
-    RaySurfaceIntersection intersection{*(intersector.Hits().begin()+i), seg};
-    mt.goingThroughSurface(seg.ray.dir, intersection);
-    std::printf("IS[%i]: pos=%f, med_expect=%p, got=%p\n", i, intersection.pos[2], media_after_intersect[i], &mt.getCurrentMedium());
-    EXPECT_NEAR(intersection.pos[2], intersect_pos[i], 1.e-6);
-    ASSERT_EQ(&mt.getCurrentMedium(), media_after_intersect[i]);
-  }
-}
-
-
-void CheckVolumePdfCoefficientsForMedium(const VolumePdfCoefficients &coeff, double tr, double sigma_start, double sigma_end, double tol)
-{
-  EXPECT_NEAR(coeff.pdf_scatter_fwd, tr*sigma_end, tol);
-  EXPECT_NEAR(coeff.pdf_scatter_bwd, tr*sigma_start, tol);
-  EXPECT_NEAR(coeff.transmittance, tr, tol);
-}
-
-
-TEST(Rendering, MediaTransmission1)
-{
-  const std::string scenestr {R"""(
-shader invisible
-medium med1 1 1 1 2 2 2
-medium med2 1 1 1 2 2 2
-
-medium med1
-s 0 0 -1 1
-
-medium med2
-s 0 0 2 1
-
-medium med1
-s 0 0 3 1
-
-medium med1
-s 0 0 6 1
-
-medium med2
-s 0 0 6 0.5
-)"""};
-  Scene scene;
-  scene.ParseNFFString(scenestr);
-  scene.BuildAccelStructure();
-  for (int i=0; i<5; ++i)
-  {
-    std::printf("Medium of prim %i = %p\n", i, scene.GetPrimitive(i).medium);
-  }
-  const Medium *vac = &scene.GetEmptySpaceMedium();
-  const Medium *m1 = scene.GetPrimitive(0).medium;
-  const Medium *m2 = scene.GetPrimitive(1).medium;
-  const Medium *media_after_intersect[] = {
-    m1, vac, m2, m2, m1, vac, m1, m2, m1, vac
-  };
-  int NHITS = sizeof(media_after_intersect)/sizeof(void*);
-  double intersect_pos[] = {
-    -2, 0,   1,  2,  3,   4,  5,  5.5,6.5, 7
-  };
-  Ray ray{{0, 0, -10}, {0, 0, 1}};
-  RenderingMediaTransmission1Helper(scene, ray, media_after_intersect, intersect_pos, NHITS);
-}
-
-
-TEST(Rendering, MediaTransmission2)
-{
-  const std::string scenestr {R"""(
-shader invisible
-medium med1 1 1 1 2 2 2
-medium med2 1 1 1 2 2 2
-
-medium med1
-transform 0 0 -1 0 0 0 2 2 2
-m scenes/unitcube.dae
-
-medium med2
-transform 0 0 2 0 0 0 2 2 2
-m scenes/unitcube.dae
-
-medium med1
-transform 0 0 3 0 0 0 2 2 2
-m scenes/unitcube.dae
-)"""};
-  Scene scene;
-  scene.ParseNFFString(scenestr);
-  scene.BuildAccelStructure();
-  const Medium *vac = &scene.GetEmptySpaceMedium();
-  const Medium *m1 = scene.GetPrimitive(0).medium;
-  const Medium *m2 = scene.GetPrimitive(12).medium;
-  const Medium *media_after_intersect[] = {
-    m1, vac, m2, m2, m1, vac
-  };
-  int NHITS = sizeof(media_after_intersect)/sizeof(void*);
-  double intersect_pos[] = {
-    -2, 0,   1,  2,  3,   4,
-  };
-  Ray ray{{0, 0, -10}, {0, 0, 1}}; // Offset to prevent hiting two adjacent triangles exactly at the interfacing edge.
-  RenderingMediaTransmission1Helper(scene, ray, media_after_intersect, intersect_pos, NHITS);
-}
-
-
-TEST(Rendering, TransmittanceEstimate)
-{
-  Scene scene;
-  const char* scenestr = R"""(
-shader invisible
-medium med1 1 1 1 2 2 2
-
-m scenes/unitcube.dae
-
-transform 0 0 2 0 0 0
-m scenes/unitcube.dae
-)""";
-  const double total_length = 2; // Because 2 unit cubes.
-  scene.ParseNFFString(scenestr);
-  scene.BuildAccelStructure();
-  Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
-  RadianceEstimatorBase rt(scene);
-  MediumTracker medium_tracker(scene);
-  double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
-  RaySegment seg{{{ray_offset,0.,-10.}, {0.,0.,1.}}, LargeNumber};
-  medium_tracker.initializePosition(seg.ray.org, scene.MakeIntersectionCalculator());
-  ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
-  VolumePdfCoefficients volume_pdf_coeff{};
-  auto res = rt.TransmittanceEstimate(seg, medium_tracker, PathContext{lambda_idx}, &volume_pdf_coeff);
-  
-  auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, lambda_idx);
-  Spectral3 expected = (-total_length*sigma_e).exp();
-  
-  for (int i=0; i<static_size<Spectral3>(); ++i)
-    ASSERT_NEAR(res[i], expected[i], 1.e-3);
-  
-  double approximated_tr = (-1.*sigma_e).exp().mean()*(-1*sigma_e).exp().mean(); 
-  // Concatentation of the approximations from the two cubes.
-  CheckVolumePdfCoefficientsForMedium(
-    volume_pdf_coeff, approximated_tr, 0, 0, 1.e-6);
-}
-
-
-TEST(Rendering, NextInteractionEstimation)
-{
-  Scene scene;
-  const char* scenestr = R"""(
-shader invisible
-medium med1 3 3 3 0 0 0
-
-m scenes/unitcube.dae
-
-transform 0 0 2 0 0 0
-m scenes/unitcube.dae
-)""";
-  scene.ParseNFFString(scenestr);
-  scene.BuildAccelStructure();
-  Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
-  
-  Spectral3 sigma = Color::RGBToSpectralSelection(RGB{3._rgb,3._rgb,3._rgb}, lambda_idx);
-  double cube1_start = -0.5;
-  double cube2_start = 1.5;
-  double camera_start = -10.;
-  auto AnalyticTrApprox = [=](double x) -> double
-  {
-    double first_cube_tr = (-sigma).exp().mean();
-    if (x < cube1_start) 
-      return 1.;
-    if (x < cube1_start+1.)
-      return (-(x-cube1_start)*sigma).exp().mean();
-    if (x < cube2_start)
-      return first_cube_tr;
-    if (x < cube2_start+1.)
-      return first_cube_tr*(-(x-cube2_start)*sigma).exp().mean();
-    return first_cube_tr*(-sigma).exp().mean();
-  };
-  auto AnalyticSigmaApprox = [=](double x) -> double
-  {
-    if (cube1_start < x && x < cube1_start+1) return sigma.mean();
-    if (cube2_start < x && x < cube2_start+1) return sigma.mean();
-    return 0.;
-  };
-  
-  
-  RadianceEstimatorBase rt(scene);
-  MediumTracker medium_tracker(scene);
-  double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
-  Ray ray{{ray_offset,0.,camera_start}, {0.,0.,1.}};
-  medium_tracker.initializePosition(ray.org, scene.MakeIntersectionCalculator());
-  ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
-  
-  int num_escaped = 0;
-  Spectral3 weight_sum_interacted{0.};
-  Spectral3 weight_sum_escaped{0.};
-  
-  constexpr int NUM_SAMPLES = 1000;
-  for (int sample_num = 0; sample_num < NUM_SAMPLES; ++sample_num)
-  {
-    VolumePdfCoefficients volume_pdf_coeff{};
-    RadianceEstimatorBase::CollisionData collision(ray);
-    medium_tracker.initializePosition(ray.org, scene.MakeIntersectionCalculator());
-    rt.TrackToNextInteraction(collision, medium_tracker, PathContext{lambda_idx}, &volume_pdf_coeff);
-    EXPECT_EQ(collision.segment.ray.org[2], ray.org[2]);
-    
-    {
-      double x = collision.smpl.t + camera_start;
-      double tr = AnalyticTrApprox(x);
-      double s = AnalyticSigmaApprox(x);
-      CheckVolumePdfCoefficientsForMedium(volume_pdf_coeff, tr, 0., s, 1.e-6);
-    }
-    
-    if (RadianceEstimatorBase::IsNotEscaped(collision))
-    {
-      weight_sum_interacted += collision.smpl.weight;
-    }
-    else
-    {
-      weight_sum_escaped += collision.smpl.weight;
-      num_escaped++;
-    }
-  }
-  weight_sum_escaped *= 1./(NUM_SAMPLES);
-  weight_sum_interacted *= 1./(NUM_SAMPLES);
-  
-  auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, lambda_idx);
-  Spectral3 expected_transmissions = (-2.*sigma_e).exp();
-  // No idea what the variance is. So I determine the acceptance threshold experimentally.
-  for (int i=0; i<static_size<Spectral3>(); ++i)
-  {
-    ASSERT_NEAR(weight_sum_escaped[i], expected_transmissions[i], 1.e-2);
-    ASSERT_NEAR(weight_sum_interacted[i], 1.-expected_transmissions[i], 1.e-2);
-  }
-}
 
 
 namespace Atmosphere

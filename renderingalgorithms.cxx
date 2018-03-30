@@ -1,5 +1,6 @@
 #include "renderingalgorithms.hxx"
-#include "renderingalgorithms_pt.hxx"
+#include "rendering_randomwalk_impl.hxx"
+#include "rendering_pathtracing_impl.hxx"
 #include "image.hxx"
 
 #include <boost/filesystem.hpp>
@@ -136,4 +137,58 @@ void Bdpt::NotifyPassesFinished(int pass_count)
   }
 }
   
+}
+
+
+
+class NormalVisualizer : public IRenderingAlgo
+{
+  ToyVector<IRenderingAlgo::SensorResponse> rgb_responses;
+  const Scene &scene;
+  IntersectionCalculator intersector;
+  Sampler sampler;
+public:
+  NormalVisualizer(const Scene &_scene, const AlgorithmParameters &_params)
+    : scene{_scene}, intersector{_scene.MakeIntersectionCalculator()}
+  {
+  }
+  
+  RGB MakePrettyPixel(int pixel_index) override
+  {
+    auto context = PathContext{Color::LambdaIdxClosestToRGBPrimaries()};
+    const auto &camera = scene.GetCamera();
+    auto smpl_pos = camera.TakePositionSample(pixel_index, sampler, context);
+    auto smpl_dir = camera.TakeDirectionSampleFrom(pixel_index, smpl_pos.coordinates, sampler, context);
+    smpl_dir.pdf_or_pmf *= smpl_pos.pdf_or_pmf;
+    smpl_dir.value *= smpl_pos.value;
+    
+    RaySegment seg{{smpl_pos.coordinates, smpl_dir.coordinates}, LargeNumber};
+    HitId hit = intersector.First(seg.ray, seg.length);
+    if (hit)
+    {
+      RaySurfaceIntersection intersection{hit, seg};
+      RGB col = (intersection.normal.array() * 0.5 + 0.5).cast<Color::RGBScalar>();
+      return col;
+    }
+    else
+    {
+      return RGB::Zero();
+    }
+  };
+  
+  ToyVector<IRenderingAlgo::SensorResponse>& GetSensorResponses() override
+  {
+    return rgb_responses;
+  }
+};
+
+
+std::unique_ptr<IRenderingAlgo> RenderAlgorithmFactory(const Scene &_scene, const RenderingParameters &_params)
+{
+  if (_params.algo_name == "bdpt")
+    return std::make_unique<Bdpt>(_scene, _params);
+  else if (_params.algo_name == "normalvis")
+    return std::make_unique<NormalVisualizer>(_scene, _params);
+  else
+    return std::make_unique<PathTracing>(_scene, _params);
 }
