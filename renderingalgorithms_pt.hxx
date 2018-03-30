@@ -347,6 +347,8 @@ class Bdpt : public RadianceEstimatorBase, public IRenderingAlgo
   ToyVector<Splat> splats;
   Index3 lambda_idx;
   int pixel_index;
+  PathContext eye_context;
+  PathContext light_context;
   
   bool enable_debug_buffers;
   BdptDetail::DebugBuffers debug_buffers;
@@ -379,31 +381,33 @@ public:
     pixel_index = _pixel_index;
     Spectral3 lambda_weights;
     std::tie(this->lambda_idx, lambda_weights) = lambda_selection_factory.WithWeights(sampler);
-    PathContext context{this->lambda_idx};
+
+    eye_context = PathContext{this->lambda_idx, TransportType::RADIANCE};
+    light_context = PathContext{this->lambda_idx, TransportType::IMPORTANCE};
 
     {
       Pdf eye_node_pdf;
-      RW::PathNode eye_node = SampleSensorEnd(pixel_index, context, eye_node_pdf);   
+      RW::PathNode eye_node = SampleSensorEnd(pixel_index, eye_context, eye_node_pdf);   
       MediumTracker eye_medium_tracker{scene};
       InitializeMediumTracker(eye_node, eye_medium_tracker);    
       eye_history.Start(eye_node, lambda_weights/eye_node_pdf, eye_node_pdf);
       BdptForwardTrace(
         eye_history, eye_medium_tracker,                
         [&eye_medium_tracker, this](int ) { this->eye_medium_tracker_before_node.emplace_back(eye_medium_tracker); }, 
-        context);
+        eye_context);
       eye_history.Finish();
     }
     
     {
       Pdf light_node_pdf;
-      RW::PathNode light_node = SampleEmissiveEnd(context, light_node_pdf);    
+      RW::PathNode light_node = SampleEmissiveEnd(light_context, light_node_pdf);    
       MediumTracker light_medium_tracker{scene};
       InitializeMediumTracker(light_node, light_medium_tracker);
       light_history.Start(light_node, Spectral3{1./light_node_pdf}, light_node_pdf);
       BdptForwardTrace(
         light_history, light_medium_tracker, 
         [](int ) {}, 
-        context);
+        light_context);
       light_history.Finish();
     }
     
@@ -420,16 +424,16 @@ public:
       if (!IsHitableEmissiveNode(eye_history.Node(eye_idx)))
       {
         if (eye_idx+1 < max_path_node_count)
-          DirectLighting(eye_idx, eye_medium_tracker_before_node[eye_idx], context);
+          DirectLighting(eye_idx, eye_medium_tracker_before_node[eye_idx]);
         for (int light_idx=1; light_idx<std::min(light_history.NumNodes(), max_path_node_count-eye_idx-1); ++light_idx)
         {
-          ConnectWithLightPath(eye_idx, light_idx,  eye_medium_tracker_before_node[eye_idx], context);
+          ConnectWithLightPath(eye_idx, light_idx,  eye_medium_tracker_before_node[eye_idx]);
         }
       }
       else
       {
         assert (eye_idx == eye_history.NumNodes()-1); // Hitting a light should terminate the walk.
-        HandleLightHit(context);
+        HandleLightHit();
       }
     }
  
@@ -445,31 +449,31 @@ public:
     return Color::SpectralSelectionToRGB(total_eye_measurement_contributions, lambda_idx);
   }
   
-  void DirectLighting(int eye_idx, const MediumTracker &eye_medium_tracker, const PathContext &context)
+  void DirectLighting(int eye_idx, const MediumTracker &eye_medium_tracker)
   {
     Pdf pdf_sample_light;
-    RW::PathNode light_node = SampleEmissiveEnd(context, pdf_sample_light); 
+    RW::PathNode light_node = SampleEmissiveEnd(light_context, pdf_sample_light); 
     direct_light_history.Reset();
     direct_light_history.Start(light_node, Spectral3{1./pdf_sample_light}, pdf_sample_light);
     direct_light_history.Finish();
     
-    ConnectEyeWithOtherPath(eye_idx, 0, direct_light_history, eye_medium_tracker, context);
+    ConnectEyeWithOtherPath(eye_idx, 0, direct_light_history, eye_medium_tracker);
   }
   
   
-  void ConnectWithLightPath(int eye_idx, int light_idx, const MediumTracker &eye_medium_tracker, const PathContext &context)
+  void ConnectWithLightPath(int eye_idx, int light_idx, const MediumTracker &eye_medium_tracker)
   {
-    ConnectEyeWithOtherPath(eye_idx, light_idx, light_history, eye_medium_tracker, context);
+    ConnectEyeWithOtherPath(eye_idx, light_idx, light_history, eye_medium_tracker);
   }
   
   
-  void ConnectEyeWithOtherPath(int eye_idx, int other_idx, BdptDetail::SubpathHistory &other, const MediumTracker &eye_medium_tracker, const PathContext &context)
+  void ConnectEyeWithOtherPath(int eye_idx, int other_idx, BdptDetail::SubpathHistory &other, const MediumTracker &eye_medium_tracker)
   {
     VolumePdfCoefficients volume_pdf_coeff{};
     double eye_pdf, light_pdf;
-    WeightedSegment to_light = Connection(
+    WeightedSegment to_light = CalculateConnection(
       eye_history.Node(eye_idx), eye_medium_tracker, other.Node(other_idx),
-      context, &eye_pdf, &light_pdf, &volume_pdf_coeff);
+      eye_context, light_context, &eye_pdf, &light_pdf, &volume_pdf_coeff);
     
     if (to_light.weight.isZero())
       return;
@@ -486,26 +490,26 @@ public:
     );
     
     Spectral3 path_weight = eye_history.Beta(eye_idx)*other.Beta(other_idx)*to_light.weight;
-    AddPathWeight(eye_idx, other_idx, mis_weight, path_weight);
+    AddPathContribution(eye_idx, other_idx, mis_weight, path_weight);
   }
   
   
-  void HandleLightHit(const PathContext &context)
+  void HandleLightHit()
   {
     assert(eye_history.NumNodes()>=2);
     int eye_idx = eye_history.NumNodes()-1;
     const auto &end_node = eye_history.NodeFromBack(0);
     
     double reverse_scatter_pdf = 0.;
-    Spectral3 end_weight = EvaluateScatterCoordinate(
-      end_node, -end_node.incident_dir, context, &reverse_scatter_pdf);
+    Spectral3 end_weight = EvaluateScatterCoordinateOfEmitter(
+      end_node, -end_node.incident_dir, light_context, &reverse_scatter_pdf);
     
     VolumePdfCoefficients volume_pdf_coeff{}; // Already covered by the random walk. The SubpathHistory has the coefficients for the last segment.
     
     double mis_weight = MisWeight(eye_history, light_history, 
       BdptDetail::Connection{
         Pdf{reverse_scatter_pdf},
-        GetPdfOfGeneratingSampleOnEmitter(end_node, context),
+        GetPdfOfGeneratingSampleOnEmitter(end_node, light_context),
         volume_pdf_coeff,
         eye_idx,
         -1,
@@ -514,7 +518,7 @@ public:
     );
     
     Spectral3 path_weight = end_weight*eye_history.Beta(eye_idx);
-    AddPathWeight(eye_idx, -1, mis_weight, path_weight);
+    AddPathContribution(eye_idx, -1, mis_weight, path_weight);
   }
   
   
@@ -528,7 +532,7 @@ public:
   }
   
   
-  void AddPathWeight(int s, int t, double mis_weight, const Spectral3 &path_weight)
+  void AddPathContribution(int s, int t, double mis_weight, const Spectral3 &path_weight)
   {
     int path_length = s+t+2; // +2 Because s and t are 0-based indices.
     assert(path_length >= 2);
@@ -589,8 +593,7 @@ public:
     }    
   }
 
-  
-  // TODO: Duplicated code. Same as in PathTracing. But interface classes should not have state. In particular not with multi-inheritance. -> Need better interface!
+
   ToyVector<IRenderingAlgo::SensorResponse>& GetSensorResponses() override
   {
     return rgb_responses;
@@ -668,7 +671,8 @@ public:
     sensor_connection_unit = -1;
     
     auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
-    PathContext context{lambda_selection.first};
+    PathContext context{lambda_selection.first, TransportType::RADIANCE};
+    PathContext light_context{context}; light_context.transport = IMPORTANCE;
     MediumTracker medium_tracker{scene};
     
     Spectral3 path_sample_values{0.};
@@ -691,7 +695,7 @@ public:
         Pdf pdf_light;
         RW::PathNode light_node = SampleEmissiveEnd(context, pdf_light);
         double pdf_scatter = NaN;
-        WeightedSegment to_light = Connection(step.node, medium_tracker, light_node, context, &pdf_scatter, nullptr);
+        WeightedSegment to_light = CalculateConnection(step.node, medium_tracker, light_node, context, light_context, &pdf_scatter, nullptr);
         double pdf_of_light_due_to_scatter = pdf_scatter*PdfConversionFactorForTarget(step.node, light_node, to_light.segment, false);
         double mis_weight = MisWeight(
           pdf_light, // Maybe this needs multiplication with pmf to select the unit_index.

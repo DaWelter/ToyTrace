@@ -6,13 +6,20 @@
 #include "sampler.hxx"
 #include "ray.hxx"
 
+enum TransportType : char 
+{
+  RADIANCE,
+  IMPORTANCE
+};
 
 struct PathContext
 {
-  explicit PathContext(const Index3 &_lambda_idx)
-    : lambda_idx(_lambda_idx)
+  PathContext() = default;
+  explicit PathContext(const Index3 &_lambda_idx, TransportType _transport = RADIANCE )
+    : lambda_idx(_lambda_idx), transport(_transport)
   {}
-  Index3 lambda_idx;
+  Index3 lambda_idx {};
+  TransportType transport { RADIANCE };
 };
 
 

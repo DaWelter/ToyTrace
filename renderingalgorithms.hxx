@@ -476,38 +476,38 @@ public:
   }
 
 
-  WeightedSegment Connection(const RW::PathNode &source_node, const MediumTracker &source_medium_tracker, const RW::PathNode &target_node, const PathContext &context, double *pdf_source, double *pdf_target, VolumePdfCoefficients *volume_pdf_coeff = nullptr)
+  WeightedSegment CalculateConnection(const RW::PathNode &eye_node, const MediumTracker &eye_medium_tracker, const RW::PathNode &light_node, const PathContext &eye_context, const PathContext &light_context, double *pdf_source, double *pdf_target, VolumePdfCoefficients *volume_pdf_coeff = nullptr)
   {
     WeightedSegment result{};
-    if (source_node.node_type == RW::NodeType::ENV && target_node.node_type == RW::NodeType::ENV)
+    if (eye_node.node_type == RW::NodeType::ENV && light_node.node_type == RW::NodeType::ENV)
       return result;
 
-    RaySegment &segment_to_target = result.segment = CalculateSegmentToTarget(source_node, target_node);
+    RaySegment &segment_to_light = result.segment = CalculateSegmentToTarget(eye_node, light_node);
 
-    Spectral3 scatter_factor = Evaluate(source_node, target_node, segment_to_target, context, pdf_source);
-    Spectral3 target_scatter_factor = Evaluate(target_node, source_node, segment_to_target.Reversed(), context, pdf_target);
+    Spectral3 scatter_factor = Evaluate(eye_node, segment_to_light, eye_context, pdf_source);
+    Spectral3 target_scatter_factor = Evaluate(light_node, segment_to_light.Reversed(), light_context, pdf_target);
 
     if (scatter_factor.isZero() || target_scatter_factor.isZero())
       return result;
 
-    MediumTracker medium_tracker = source_medium_tracker;
-    MaybeHandlePassageThroughSurface(source_node, segment_to_target.ray.dir, medium_tracker);
+    MediumTracker medium_tracker = eye_medium_tracker;
+    MaybeHandlePassageThroughSurface(eye_node, segment_to_light.ray.dir, medium_tracker);
     
-    segment_to_target.ShortenBothEndsBy(RAY_EPSILON);
+    segment_to_light.ShortenBothEndsBy(RAY_EPSILON);
     
-    auto transmittance = TransmittanceEstimate(segment_to_target, medium_tracker, context, volume_pdf_coeff);
+    auto transmittance = TransmittanceEstimate(segment_to_light, medium_tracker, eye_context, volume_pdf_coeff);
 
-    bool is_wrt_solid_angle = source_node.node_type == RW::NodeType::ENV || target_node.node_type == RW::NodeType::ENV;
-    double r2_factor = is_wrt_solid_angle ? 1. : 1./Sqr(segment_to_target.length);
+    bool is_wrt_solid_angle = eye_node.node_type == RW::NodeType::ENV || light_node.node_type == RW::NodeType::ENV;
+    double r2_factor = is_wrt_solid_angle ? 1. : 1./Sqr(segment_to_light.length);
     
     result.weight = r2_factor * transmittance * scatter_factor * target_scatter_factor;
-    result.segment = segment_to_target;
+    result.segment = segment_to_light;
     return result;
   }
 
   
-  // Source node sends radiance/importance to target node. How much? TODO: remove target node parameter?!
-  inline Spectral3 Evaluate(const RW::PathNode &source_node, const RW::PathNode &, const RaySegment &segment_to_target, const PathContext &context, double *source_scatter_pdf)
+  // Source node sends radiance/importance to target node. How much?
+  inline Spectral3 Evaluate(const RW::PathNode &source_node, const RaySegment &segment_to_target, const PathContext &context, double *source_scatter_pdf)
   {
     assert(source_node.node_type != RW::NodeType::ENV || (segment_to_target.ray.dir == source_node.coordinates()));
     Spectral3 scatter_value = EvaluateScatterCoordinate(source_node, segment_to_target.ray.dir, context, source_scatter_pdf);
@@ -702,7 +702,9 @@ public:
     if (node.geom_type == GeometryType::SURFACE)
     {
       const RaySurfaceIntersection &intersection = node.interaction.ray_surface;
-      return intersection.shader().SampleBSDF(reverse_incident_dir, intersection, sampler, context);
+      auto smpl = intersection.shader().SampleBSDF(reverse_incident_dir, intersection, sampler, context);
+      smpl.value *= BsdfCorrectionFactor(reverse_incident_dir, intersection, smpl.coordinates, context.transport);
+      return smpl;
     }
     else // is Volume
     {
@@ -711,6 +713,7 @@ public:
       return smpl.as<ScatterSample>();
     }
   }
+  
   
   ScatterSample SampleScatterCoordinateOfEmitter(const PathNode &node, const PathContext &context)
   {
@@ -755,13 +758,16 @@ public:
       return EvaluateScatterCoordinateOfEmitter(node, out_direction, context, pdf);
   }
   
+ 
   Spectral3 EvaluateScatterCoordinateOfScatterer(const PathNode &node, const Double3 &out_direction, const PathContext &context, double *pdf)
   {
     const Double3 reverse_incident_dir = -node.incident_dir;
     if (node.geom_type == GeometryType::SURFACE)
     {
       const RaySurfaceIntersection &intersection = node.interaction.ray_surface;
-      return intersection.shader().EvaluateBSDF(reverse_incident_dir, intersection, out_direction, context, pdf);
+      auto  fs = intersection.shader().EvaluateBSDF(reverse_incident_dir, intersection, out_direction, context, pdf);
+      fs *= BsdfCorrectionFactor(reverse_incident_dir, intersection, out_direction, context.transport);
+      return fs;
     }
     else // is Volume
     {
@@ -770,6 +776,20 @@ public:
     }
   }
 
+
+  /* Straight forwardly following Cpt 5.3 Veach's thesis.
+   * Except that maybe my conventions are somewhat different. (Are they?) Here, in/out directions refer to the random walk.
+   * The correction factor is formed with the incident direction of light as per Eq. 5.17.
+   */
+  static double BsdfCorrectionFactor(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &intersection, const Double3 &exitant_dir, TransportType transport)
+  {
+    const Double3 &dir = transport==RADIANCE ? exitant_dir : reverse_incident_dir;
+    double correction = std::abs(Dot(intersection.shading_normal, dir))/
+                        (std::abs(Dot(intersection.normal, dir))+Epsilon);
+    return correction;
+  }
+   
+  
   Spectral3 EvaluateScatterCoordinateOfEmitter(const PathNode &node, const Double3 &out_direction, const PathContext &context, double *pdf)
   {
     if (node.node_type == NodeType::CAMERA)
@@ -924,6 +944,8 @@ public:
     // By definition the factor is 1 for Volumes.
     if (node.geom_type == RW::GeometryType::SURFACE)
     {
+      // TODO: Refactor code so that this formula goes together with BSDF corrections
+      // into a common "kernel" following Veach Fig. 5.8.
       ASSERT_NORMALIZED(node.geometry_normal());
       return std::abs(Dot(node.geometry_normal(), exitant_dir));
     }
