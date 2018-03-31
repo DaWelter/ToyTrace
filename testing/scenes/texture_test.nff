@@ -1,0 +1,16 @@
+v
+from 0 2 0
+at 0 0 0
+up 0 0 1
+resolution 120 120
+angle 30
+
+lddirection 0 -1 0  4 4 4
+lddome 0 1 0 2 2 2
+lddome 0 -1 0 2 2 2
+
+diffuse mat 1 1 1 1
+diffusetexture worldmap_640px.jpg
+
+transform 0 0 0 0 0 0 1 1 1
+m unitrectangle.obj

@@ -1,0 +1,39 @@
+v
+from 2 2 0
+at 0 0 0
+up 0 1 0
+resolution 320 160
+angle 50
+
+lddirection 0 -1 0 10 10 10
+
+
+diffuse mat1 1 1 1 0.1
+
+transform 0 -0.5 0 0 1.57 0
+p 4
+100 100 0
+-100 100 0
+-100 -100 0
+100 -100 0
+
+
+shader invisible
+medium notsodense 0.2 0.2 0.2 0.01 0.01 0.01
+
+transform 0 0 -1 0 0 0
+m unitcube.dae
+
+transform 0 0 1 0 0 0
+m unitcube.dae
+
+
+# Smaller cubes contained in the big ones
+
+medium prettydense 1 1 1 0.1 0.1 0.1
+
+transform 0 0 -1 0 0 0 0.5 0.5 0.5
+m unitcube.dae
+
+transform 0 0 1 0 0 0 0.5 0.5 0.5
+m unitcube.dae

@@ -1,0 +1,43 @@
+v
+from 0.87 1.05 -2.56
+at -0.1 0 0
+up 0 1 0
+resolution 400 200
+angle 55
+
+{
+larea arealight1 uniform 1. 1. 1. 20.
+diffuse black  1 1 1 0.
+
+transform -2 1.9 2 0 1.57 0 2. 1 2.
+include unitrectangle.nff
+transform -2 1.9 -2 0 1.57 0 2. 1 2.
+include unitrectangle.nff
+transform 2 1.9 -2 0 1.57 0 2. 1 2.
+include unitrectangle.nff
+transform 2 1.9 2 0 1.57 0 2. 1 2.
+include unitrectangle.nff
+}
+
+diffuse boxmat 1 0.95 0.9 0.9
+diffusetexture checkerboard_bright.png
+m material_test_scene.obj
+
+
+specularreflective test 1. 1. 1. 0.5
+s 0.9 0.2 -0.1 0.2
+glossy test 1. 1. 1. 0.5 0.1
+s 0.3 0.2 -0.1 0.2
+glossy test 1. 1. 1. 0.5 0.2
+s -0.3 0.2 -0.1 0.2
+glossy test 1. 1. 1. 0.5 0.5
+s -0.9 0.2 -0.1 0.2
+
+speculardensedielectric test 0.8 0. 0. 0.01
+s 0.9 0.2 -0.7 0.2
+speculardensedielectric test 0.8 0. 0. 0.05
+s 0.3 0.2 -0.7 0.2
+speculardensedielectric test 0.8 0. 0. 0.1
+s -0.3 0.2 -0.7 0.2
+speculardensedielectric test 0.8 0. 0. 0.2
+s -0.9 0.2 -0.7 0.2

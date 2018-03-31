@@ -1,0 +1,35 @@
+v
+from 0 0.5 1.4
+at 0 0.5 0
+up 0 1 0
+resolution 240 240
+angle 40
+
+{
+larea arealight1 uniform 1. 1. 1. 1000000
+diffuse black  1 1 1 0.
+s 0.4 0.8 -0.5 0.00125
+larea none
+}
+
+diffuse white  1 1 1 0.8
+diffuse red    1 0 0 0.8
+diffuse green  0 1 0 0.8
+diffuse blue   1 1 1 0.8
+
+transform
+m cornelbox.dae
+
+glossy spheremat 1 1 1 0.8 0.1
+s 0.3 0.2 -0.5 0.2
+
+diffuse boxmat 1 1 1 0.4
+transform
+m box_in_cornelbox.dae
+
+{
+transform 0.03 0.8 -0.5 3.141592653589793 0 0
+specularreflective mirror1 1. 1. 1. 0.9
+specularreflective mirror2 1. 1. 1. 0.9
+m cornelbox_mirror_assembly_high_res.obj
+}

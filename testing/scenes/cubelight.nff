@@ -1,0 +1,12 @@
+v
+from 0 1 1
+at 0 0.5 0
+up 0 1 0
+resolution 120 120
+angle 80
+
+{
+larea arealight2 uniform 1 1 1 5
+diffuse black  1 1 1 0.
+m unitcube.dae
+}

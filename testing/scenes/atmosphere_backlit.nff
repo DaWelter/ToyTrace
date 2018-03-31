@@ -1,0 +1,10 @@
+v
+from 0 0 6340
+at -10 0 6339
+up 0 0 1
+resolution 320 320
+angle 20
+
+lsun 1 0 0.1 200
+
+include atmosphere_textured.nff

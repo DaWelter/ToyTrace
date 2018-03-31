@@ -1,0 +1,33 @@
+v
+from 5 -2 2
+at 0 0 0.5
+up 0 0 1
+resolution 320 320
+angle 40
+
+lddirection 0 2 -1 2 2 1 
+lddome 0 0 1 0.2 0.2 0.2
+lddome 0 0 -1 0.1 0.1 0.1
+
+{
+transform 0 0 0 0 0 0 4 4 1
+diffuse mat1 1 1 1 0.8
+p 4
+1 1 -0.5
+-1 1 -0.5
+-1 -1 -0.5
+1 -1 -0.5
+}
+
+{
+specularreflective mirror1 1. 1. 1. 0.9
+transform 0 2 1
+m unitdisc_24_xz.obj
+}
+
+
+diffuse flakesmaterial  0 1 0 0.5
+s 0 0 0 0.5
+
+
+

@@ -1,0 +1,27 @@
+v
+from 0 1 -8
+at 0 -0.33 0
+up 0 1 0
+resolution 480 320
+angle 30
+
+#diffuse bg 1 1 1 0.4
+specularreflective roughness0 1. 1. 1. 0.5
+glossy roughness1 1. 1. 1. 0.5 0.02
+glossy roughness2 1. 1. 1. 0.5 0.1
+glossy roughness3 1. 1. 1. 0.5 0.5
+
+m veach_mis_scene.obj
+
+{
+diffuse black  1 1 1 0.
+
+larea lightsize3 uniform 1 0 0 20.
+s -1.5 0 4 0.5
+larea lightsize2 uniform 0 1 0 250.
+s -0.1 0 4 0.2
+larea lightsize1 uniform 0 1 0 500.
+s 0.8 0 4 0.1
+larea lightsize0 uniform 0 0 1 2000
+s 1.5 0 4 0.05
+}

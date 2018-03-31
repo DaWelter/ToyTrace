@@ -1,0 +1,31 @@
+v
+from 0 0 -1
+at 0 0 0
+up 0 1 0
+resolution 256 256
+angle 90
+
+lddirection 0 -1 0 1 1 1
+
+
+transform 0 -0.5 0 0 1.57 0
+p 4
+100 100 0
+-100 100 0
+-100 -100 0
+100 -100 0
+
+
+shader invisible
+medium notsodense 0.2 0.2 0.2 0.01 0.01 0.01
+
+# Centered at camera
+transform 0 0 -1 0 0 0  
+m unitcube.dae
+
+#transform 0 0 1 0 0 0
+#m unitcube.dae
+
+medium prettydense 3 3 3 1 1 1
+transform 0 0 1 0 0 0 0.5 0.5 0.5
+m unitcube.dae

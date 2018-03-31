@@ -1,0 +1,46 @@
+v
+from 0 0.5 1.4
+at 0 0.5 0
+up 0 1 0
+resolution 240 240
+angle 40
+
+{
+transform 0 1.00 -0.55 0 0 0 0.3 0.02 0.3
+larea arealight2 uniform 1 1 1 20
+m unitcube.dae
+}
+
+{
+transform 0.40 0.8 -0.55 0 0 0 0.03 0.03 0.03
+larea arealight1 parallel 1. 0. 0. 1000
+diffuse black  1 1 1 0.
+p 4
+0 -1 -1
+0 -1 1
+0 1 1
+0 1 -1
+larea none
+}
+
+{ # The mirror
+transform 0.0 0.8 -0.55 0 0 -0.785 0.005 0.15 0.15
+#glossy mirror1 1 1 1 0.99 0.001
+specularreflective mirror1 1. 1. 1. 0.9
+m unitcube.dae
+}
+
+diffuse white  1 1 1 0.5
+diffuse red    1 1 1 0.5
+diffuse green  1 1 1 0.5
+diffuse blue   1 1 1 0.5
+
+transform
+m cornelbox.dae
+
+glossy spheremat 1 1 1 0.8 0.1
+s 0.3 0.15 -0.5 0.15
+
+diffuse boxmat 1 1 1 0.8
+transform
+m box_in_cornelbox.dae

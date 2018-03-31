@@ -1,0 +1,10 @@
+transform 0 0 0 1.0 0. 3.14
+diffuse groundmat  1 1 1 0.95
+diffusetexture worldmap_640px.jpg
+
+s 0 0 0 6300
+
+shader invisible
+tabulatedatmosphere atmos 0 0 0 6300 earth_atmosphere_collision_coefficients.json
+#simpleatmosphere atmos 0 0 0 6300
+s 0 0 0 6500

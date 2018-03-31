@@ -1,0 +1,28 @@
+v
+from 0 0 -35
+at 0 -0.15 0
+up 0 1 0
+resolution 480 320
+angle 5
+
+#specularreflective roughness0 1. 1. 1. 0.5
+#specularreflective roughness1 1. 1. 1. 0.5
+#specularreflective roughness2 1. 1. 1. 0.5
+specularreflective roughness3 1. 1. 1. 0.5
+
+glossy roughness0 1. 1. 1. 0.5 0.5
+glossy roughness1 1. 1. 1. 0.5 0.1
+glossy roughness2 1. 1. 1. 0.5 0.02
+#glossy roughness3 1. 1. 1. 0.5 0.5
+
+{
+transform 0 0 5
+m veach_mis_scene_distant.obj
+}
+
+lsun -2 -2 -100 0.1
+lddirection -0.5 -2 -100 0.05 0.00 0.00
+lddirection 0.5 -2 -100 0.00 0.05 0.00
+lsun 2 -2 -100 0.1
+
+lddome 0 1 0 0.01 0.1 0.3

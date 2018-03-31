@@ -1,0 +1,74 @@
+# Testing light tracing when the scene is located 
+# far off the origin.
+# Also testing spectral to rgb reduction.
+
+v
+from -50 50 -70
+at -10 0 -25
+up 0 1 0
+resolution 300 300
+angle 20
+
+lddirection  -0.587 -0.752 -0.299 0.3 0.3 0.3
+
+# Lights
+diffuse black  1 1 1 0.
+{
+transform -14 1 -25
+larea arealight1 uniform 1 0 0 20.
+m unitcube.dae
+
+transform -10 1 -25
+larea arealight1 uniform 0 1 0 20.
+m unitcube.dae
+
+transform -6 1 -25
+larea arealight1 uniform 0 0 1 20.
+m unitcube.dae
+
+transform -14 1 -21
+larea arealight1 uniform 1 1 0 20.
+m unitcube.dae
+
+transform -10 1 -21
+larea arealight1 uniform 1 0 1 20.
+m unitcube.dae
+
+transform -6 1 -21
+larea arealight1 uniform 0 1 1 20.
+m unitcube.dae
+}
+
+
+{
+transform -14 1 -29
+diffuse r  1 0 0 0.9
+m unitcube.dae
+
+transform -10 1 -29
+diffuse g  0 1 0 0.9
+m unitcube.dae
+
+transform -6 1 -29
+diffuse b  0 0 1 0.9
+m unitcube.dae
+
+transform -14 1 -33
+diffuse y  1 1 0 0.9
+m unitcube.dae
+
+transform -10 1 -33
+diffuse m  1 0 1 0.9
+m unitcube.dae
+
+transform -6 1 -33
+diffuse c  0 1 1 0.9
+m unitcube.dae
+}
+
+
+
+# Ground
+diffuse gray1 1 1 1 0.9
+transform -10 0 -25 0 0 0 30 1 30
+m unitrectangle.obj

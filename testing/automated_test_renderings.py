@@ -51,7 +51,7 @@ def toytrace(scene, output_file, opts, name = "UNKNOWN"):
         input_file = os.path.join('scenes',scene)
     else:
         input_file = '-'
-    cmd = [the_exe, '--no-display', '-I', 'scenes', '-I', '../scenes', '--input-file', input_file, '--output-file', output_file]
+    cmd = [the_exe, '--no-display', '-I', 'scenes', '--input-file', input_file, '--output-file', output_file]
     cmd += opts
     print cmd
     #current_dir = os.getcwd()
