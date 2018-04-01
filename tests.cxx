@@ -103,7 +103,10 @@ TEST(Spectral, RGBConversion)
   {
     SpectralN s = RGBToSpectrum(trial);
     for (int i=0; i<s.size(); ++i)
+    {
       EXPECT_GE(s[i], 0.);
+      EXPECT_LE(s[i], 1.01);
+    }
     RGB back = SpectrumToRGB(s);
     EXPECT_NEAR(value(trial[0]), value(back[0]), 1.3e-2);
     EXPECT_NEAR(value(trial[1]), value(back[1]), 1.3e-2);
