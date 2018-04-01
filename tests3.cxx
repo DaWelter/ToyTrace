@@ -99,15 +99,15 @@ medium med2 1 1 1 2 2 2
 
 medium med1
 transform 0 0 -1 0 0 0 2 2 2
-m scenes/unitcube.dae
+m testing/scenes/unitcube.dae
 
 medium med2
 transform 0 0 2 0 0 0 2 2 2
-m scenes/unitcube.dae
+m testing/scenes/unitcube.dae
 
 medium med1
 transform 0 0 3 0 0 0 2 2 2
-m scenes/unitcube.dae
+m testing/scenes/unitcube.dae
 )"""};
   Scene scene;
   scene.ParseNFFString(scenestr);
@@ -134,10 +134,10 @@ TEST(Rendering, TransmittanceEstimate)
 shader invisible
 medium med1 1 1 1 2 2 2
 
-m scenes/unitcube.dae
+m testing/scenes/unitcube.dae
 
 transform 0 0 2 0 0 0
-m scenes/unitcube.dae
+m testing/scenes/unitcube.dae
 )""";
   const double total_length = 2; // Because 2 unit cubes.
   scene.ParseNFFString(scenestr);
@@ -172,10 +172,10 @@ TEST(Rendering, NextInteractionEstimation)
 shader invisible
 medium med1 3 3 3 0 0 0
 
-m scenes/unitcube.dae
+m testing/scenes/unitcube.dae
 
 transform 0 0 2 0 0 0
-m scenes/unitcube.dae
+m testing/scenes/unitcube.dae
 )""";
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();

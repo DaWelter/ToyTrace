@@ -31,7 +31,6 @@ message(STATUS "CImg: ${CImg_INCLUDE_DIR}")
 
 find_package(JPEG)
 find_package(PNG)
-
 find_path(Rapidjson_INCLUDE_DIR
   NAMES rapidjson/rapidjson.h
   PATHS
@@ -44,11 +43,13 @@ message(STATUS "Rapidjson: ${Rapidjson_INCLUDE_DIR}")
 include_directories(${PNG_INCLUDE_DIR} ${JPEG_INCLUDE_DIR} ${CImg_INCLUDE_DIR} ${Rapidjson_INCLUDE_DIR})
 link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSIMP_LIBRARY} ${X11_LIBRARIES})
 
-set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx bsptree.cxx phasefunctions.cxx atmosphere.cxx spectral.cxx primitive.cxx renderingalgorithms.cxx light.cxx texture.cxx)
+set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx bsptree.cxx 
+            phasefunctions.cxx atmosphere.cxx spectral.cxx primitive.cxx renderingalgorithms.cxx 
+            light.cxx texture.cxx)
 add_executable(toytrace toytrace.cxx ${SOURCES})
 target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE} ${Boost_FILESYSTEM_LIBRARY_RELEASE})
 
-add_executable(tests tests.cxx tests3.cxx ${SOURCES})
+add_executable(tests tests.cxx tests3.cxx tests_sampling.cxx ${SOURCES})
 add_executable(tests2 tests2.cxx)
 
 foreach(EXE tests tests2)
