@@ -235,137 +235,41 @@ TEST_F(RandomSamplingFixture, TriangleSampling)
 }
 
 
-class PhasefunctionTests : public testing::Test
+class CubeMap
 {
-public:
-  Sampler sampler;
-  static constexpr int Nbins = 9;
-  std::ofstream output;  // If really deperate!
-
   // Use a cube mapping of 6 uniform grids to the 6 side faces of a cube projected to the unit sphere.
-  using CubeBinDouble = std::array<std::array<std::array<double, Nbins>, Nbins>, 6>;
-  using CubeVertexDouble = std::array<std::array<std::array<double, Nbins+1>, Nbins+1>, 6>;
-    
-  void TestPfSampling(const PhaseFunctions::PhaseFunction &pf, const Double3 &reverse_incident_dir, int num_samples, double number_of_sigmas_threshold)
+  const int bins_per_axis;
+public:
+  CubeMap(int _bins_per_axis) :
+    bins_per_axis{_bins_per_axis}
+  {}
+  
+  int TotalNumBins() const
   {
-    /* I want to check if the sampling frequency of some solid angle areas match the probabilities
-     * returned by the Evaluate function. I further want to validate the normalization constraint. */
-    auto bin_probabilities = ComputeBinProbabilities(pf, reverse_incident_dir);
-    Spectral3 integral{0.};
-    int bin_sample_count[6][Nbins][Nbins] = {}; // Zero initialize?
-    for (int snum = 0; snum<num_samples; ++snum)
-    {
-      auto smpl = pf.SampleDirection(reverse_incident_dir, sampler);
-      int side, i, j;
-      CalcCubeIndices(smpl.coordinates, side, i, j);
-      i = std::max(0, std::min(i, Nbins-1));
-      j = std::max(0, std::min(j, Nbins-1));
-      bin_sample_count[side][i][j] += 1.;
-      integral += smpl.value / smpl.pdf_or_pmf;
-      if (output.is_open())
-        output << smpl.coordinates[0] << " " << smpl.coordinates[1] << " " << smpl.coordinates[2] << " " << smpl.pdf_or_pmf << std::endl;
-    }
-    integral /= num_samples; // Due to the normalization contraint, this integral should equal 1.
-    EXPECT_NEAR(integral[0], 1., 0.01);
-    EXPECT_NEAR(integral[1], 1., 0.01);
-    EXPECT_NEAR(integral[2], 1., 0.01);
-    for (int side = 0; side < 6; ++side)
-    {
-      for (int i = 0; i<Nbins; ++i)
-      {
-        for (int j = 0; j<Nbins; ++j)
-        {
-          CheckNumberOfSamplesInBin(
-            nullptr, //strconcat(side,"[",i,",",j,"]").c_str(),
-            bin_sample_count[side][i][j], 
-            num_samples, 
-            bin_probabilities[side][i][j],
-            number_of_sigmas_threshold);
-        }
-      }
-    }
-  }
- 
- 
-  CubeBinDouble ComputeBinProbabilities(const PhaseFunctions::PhaseFunction &pf, const Double3 &reverse_incident_dir)
-  {
-    // Cube projection.
-    // +/-x,y,z which makes 6 grid, one per side face, and i,j indices of the corresponding grid.
-    CubeVertexDouble bin_corner_densities;
-    CubeBinDouble bin_probabilities;
-    for (int side = 0; side < 6; ++side)
-    {
-      for (int i = 0; i<=Nbins; ++i)
-      {
-        for (int j=0; j<=Nbins; ++j)
-        {
-          Double3 corner = CalcCubeGridVertex(side, i, j);
-          pf.Evaluate(reverse_incident_dir, corner, &bin_corner_densities[side][i][j]);
-          if (output.is_open())
-            output << corner[0] << " " << corner[1] << " " << corner[2] << " " << bin_corner_densities[side][i][j] << std::endl;
-        }
-      }
-    }
-    if (output.is_open())
-      output << std::endl;
-
-    double total_probability = 0.;
-    double total_solid_angle = 0.;
-    for (int side = 0; side < 6; ++side)
-    {
-      for (int i = 0; i<Nbins; ++i)
-      {
-        for (int j = 0; j<Nbins; ++j)
-        {
-          Double3 w[2][2] = {
-            { 
-              CalcCubeGridVertex(side, i, j),
-              CalcCubeGridVertex(side, i, j+1) 
-            },
-            {
-              CalcCubeGridVertex(side, i+1, j),
-              CalcCubeGridVertex(side, i+1, j+1)
-            }
-          };
-          // Crude approximation of the surface integral over pieces of the unit sphere.
-          // https://en.wikipedia.org/wiki/Surface_integral
-          Double3 du = 0.5 * (w[1][0]+w[1][1] - w[0][0]-w[0][1]);
-          Double3 dv = 0.5 * (w[0][1]+w[1][1] - w[0][0]-w[1][0]);
-          double spanned_solid_angle = Length(Cross(du,dv));
-          bin_probabilities[side][i][j] = 0.25 * spanned_solid_angle *
-            (bin_corner_densities[side][i][j] + 
-             bin_corner_densities[side][i+1][j] + 
-             bin_corner_densities[side][i+1][j+1] + 
-             bin_corner_densities[side][i][j+1]);
-          total_probability += bin_probabilities[side][i][j];
-          total_solid_angle += spanned_solid_angle;
-        }
-      }
-    }
-    EXPECT_NEAR(total_solid_angle, UnitSphereSurfaceArea, 0.1);
-    EXPECT_NEAR(total_probability, 1.0, 0.01);
-//    // Renormalize to make probabilities sum to one.
-//    // This accounts for inaccuracies through which
-//    // the sum of the original probabilities deviated from 1.
-//    for (int side = 0; side < 6; ++side)
-//    {
-//      for (int i = 0; i<Nbins; ++i)
-//      {
-//        for (int j = 0; j<Nbins; ++j)
-//        {
-//          bin_probabilities[side][i][j] /= total_probability;
-//        }
-//      }
-//    }
-    return bin_probabilities;
+    return bins_per_axis*bins_per_axis*6;
   }
   
-  
-  Double3 CalcCubeGridVertex(int side, int i, int j)
+  Double2 VertexToUV(int i, int j) const
   {
-    double delta = 1./Nbins;
+    assert (i >= 0 && i <= bins_per_axis);
+    assert (j >= 0 && j <= bins_per_axis);
+    double delta = 1./bins_per_axis;
     double u = 2.*i*delta-1.;
     double v = 2.*j*delta-1.;
+    return Double2{u, v};
+  }
+  
+  std::tuple<Double2, Double2> CellToUVBounds(int i, int j)
+  {
+    return std::make_tuple(
+      VertexToUV(i, j),
+      VertexToUV(i+1, j+1));
+  }
+  
+  Double3 UVToOmega(int side, Double2 uv) const
+  {
+    double u = uv[0];
+    double v=  uv[1];
     Double3 x;
     switch (side)
     {
@@ -387,9 +291,9 @@ public:
     return Normalized(x);
   }
   
-  
-  void CalcCubeIndices(const Double3 &w, int &side, int &i, int &j)
+  std::tuple<int, int, int> OmegaToCell(const Double3 &w) const
   {
+    int side, i, j;
     double u, v, z;
     int max_abs_axis;
     z = w.array().abs().maxCoeff(&max_abs_axis);
@@ -409,46 +313,184 @@ public:
       case 5:
         u = w[0]; v = w[1]; z = -w[2]; break;
       default:
-        FAIL();
+        assert(!"Should not get here!");
     }
-    ASSERT_GT(z, 0.);
+    assert(z > 0.);
     u /= z;
     v /= z;
-    i = (u+1.)*0.5*Nbins;
-    j = (v+1.)*0.5*Nbins;
+    i = (u+1.)*0.5*bins_per_axis;
+    j = (v+1.)*0.5*bins_per_axis;
+    return std::make_tuple(side, i, j);
+  }
+  
+  int CellToIndex(int side, int i, int j) const
+  {
+    assert (i >= 0 && i < bins_per_axis);
+    assert (j >= 0 && j < bins_per_axis);
+    assert (side >= 0 && side < 6);
+    const int num_per_side = bins_per_axis*bins_per_axis;
+    return side*num_per_side + i*bins_per_axis + j;
+  }
+  
+  std::tuple<int, int, int> IndexToCell(int idx) const
+  {
+    const int num_per_side = bins_per_axis*bins_per_axis;
+    assert (idx >= 0 && idx < num_per_side*6);
+    int side = idx / num_per_side;
+    idx %= num_per_side;
+    int i = idx / bins_per_axis;
+    idx %= bins_per_axis;
+    int j = idx;
+    assert (i >= 0 && i < bins_per_axis);
+    assert (j >= 0 && j < bins_per_axis);
+    assert (side >= 0 && side < 6);
+    return std::make_tuple(side, i, j);
   }
 };
 
 
-TEST_F(PhasefunctionTests, CubeGridMapping)
+TEST(CubeMap, IndexMapping)
 {
   // I need a test for the test!
+  const int SZ = 9;
+  CubeMap cm{SZ};
+  
   for (int side = 0; side < 6; ++side)
   {
     std::cout << "Corners of side " << side << std::endl;
-    std::cout << CalcCubeGridVertex(side, 0, 0) << std::endl;
-    std::cout << CalcCubeGridVertex(side, Nbins, 0) << std::endl;
-    std::cout << CalcCubeGridVertex(side, Nbins, Nbins) << std::endl;
-    std::cout << CalcCubeGridVertex(side, 0, Nbins) << std::endl;
+    std::cout << cm.UVToOmega(side, cm.VertexToUV(0, 0)) << std::endl;
+    std::cout << cm.UVToOmega(side, cm.VertexToUV(SZ, 0)) << std::endl;
+    std::cout << cm.UVToOmega(side, cm.VertexToUV(SZ, SZ)) << std::endl;
+    std::cout << cm.UVToOmega(side, cm.VertexToUV(0, SZ)) << std::endl;
 
-    for (int i = 0; i<Nbins; ++i)
+    for (int i = 0; i<SZ; ++i)
     {
-      for (int j=0; j<Nbins; ++j)
+      for (int j=0; j<SZ; ++j)
       {
-        Double3 center = 0.25 * (
-            CalcCubeGridVertex(side, i, j) +
-            CalcCubeGridVertex(side, i+1, j) +
-            CalcCubeGridVertex(side, i+1, j+1) +
-            CalcCubeGridVertex(side, i, j+1));
-        int side_, i_, j_;
-        CalcCubeIndices(center, side_, i_, j_);
-        EXPECT_EQ(side_, side);
-        EXPECT_EQ(i, i_);
-        EXPECT_EQ(j, j_);
+        int idx = cm.CellToIndex(side, i, j);
+        int _side, _i, _j;
+        std::tie(_side, _i, _j) = cm.IndexToCell(idx);
+        EXPECT_EQ(_side, side);
+        EXPECT_EQ(_i, i);
+        EXPECT_EQ(_j, j);
+        
+        Double2 uv0, uv1;
+        std::tie(uv0, uv1) = cm.CellToUVBounds(i, j);
+        Double2 uv_center = 0.5*(uv0 + uv1);
+        Double3 omega = cm.UVToOmega(side, uv_center);
+        ASSERT_NORMALIZED(omega);
+        std::tie(_side, _i, _j) = cm.OmegaToCell(omega);
+        EXPECT_EQ(side, _side);
+        EXPECT_EQ(i, _i);
+        EXPECT_EQ(j, _j);
       }
     }
   }
 }
+
+
+class PhasefunctionTests : public testing::Test
+{
+public:
+  CubeMap cubemap;
+  Sampler sampler;
+  static constexpr int Nbins = 9;
+  std::ofstream output;  // If really deperate!
+
+  PhasefunctionTests()
+    : cubemap{Nbins}
+  {
+  }
+  
+  void TestPfSampling(const PhaseFunctions::PhaseFunction &pf, const Double3 &reverse_incident_dir, int num_samples, double number_of_sigmas_threshold)
+  {
+    /* I want to check if the sampling frequency of some solid angle areas match the probabilities
+     * returned by the Evaluate function. I further want to validate the normalization constraint. */
+    auto bin_probabilities = ComputeBinProbabilities(pf, reverse_incident_dir);
+    Spectral3 integral{0.};
+    std::vector<int> bin_sample_count(cubemap.TotalNumBins(), 0);
+    for (int snum = 0; snum<num_samples; ++snum)
+    {
+      auto smpl = pf.SampleDirection(reverse_incident_dir, sampler);
+      int side, i, j;
+      std::tie(side, i, j) = cubemap.OmegaToCell(smpl.coordinates);
+      int idx = cubemap.CellToIndex(side, i, j);
+      bin_sample_count[idx] += 1;
+      integral += smpl.value / smpl.pdf_or_pmf;
+      if (output.is_open())
+        output << smpl.coordinates[0] << " " << smpl.coordinates[1] << " " << smpl.coordinates[2] << " " << smpl.pdf_or_pmf << std::endl;
+    }
+    integral /= num_samples; // Due to the normalization contraint, this integral should equal 1.
+    EXPECT_NEAR(integral[0], 1., 0.01);
+    EXPECT_NEAR(integral[1], 1., 0.01);
+    EXPECT_NEAR(integral[2], 1., 0.01);
+    for (int i=0; i<cubemap.TotalNumBins(); ++i)
+    {
+      CheckNumberOfSamplesInBin(
+        nullptr, //strconcat(side,"[",i,",",j,"]").c_str(),
+        bin_sample_count[i], 
+        num_samples, 
+        bin_probabilities[i],
+        number_of_sigmas_threshold);
+    }
+  }
+ 
+ 
+  std::vector<double> ComputeBinProbabilities(const PhaseFunctions::PhaseFunction &pf, const Double3 &reverse_incident_dir)
+  {
+    // Cube projection.
+    // +/-x,y,z which makes 6 grid, one per side face, and i,j indices of the corresponding grid.
+    std::vector<double> bin_probabilities(cubemap.TotalNumBins(), 0.);
+
+    double total_probability = 0.;
+    double total_solid_angle = 0.;
+    for (int side = 0; side < 6; ++side)
+    {
+      for (int i = 0; i<Nbins; ++i)
+      {
+        for (int j = 0; j<Nbins; ++j)
+        {
+          int idx = cubemap.CellToIndex(side, i, j);
+          
+          Double2 uv0, uv1;
+          std::tie(uv0, uv1) = cubemap.CellToUVBounds(i, j);
+          Double2 uv_center = 0.5*(uv0 + uv1);
+          Double3 omega = cubemap.UVToOmega(side, uv_center);
+          
+          Double3 w[2][2] = {
+            { 
+              cubemap.UVToOmega(side, Double2(uv0[0], uv0[1])),
+              cubemap.UVToOmega(side, Double2(uv1[0], uv0[1])),
+            },
+            {
+              cubemap.UVToOmega(side, Double2(uv0[0], uv1[1])),
+              cubemap.UVToOmega(side, Double2(uv1[0], uv1[1])),
+            }
+          };
+          // Crude approximation of the surface integral over pieces of the unit sphere.
+          // https://en.wikipedia.org/wiki/Surface_integral
+          Double3 du = 0.5 * (w[1][0]+w[1][1] - w[0][0]-w[0][1]);
+          Double3 dv = 0.5 * (w[0][1]+w[1][1] - w[0][0]-w[1][0]);
+          double spanned_solid_angle = Length(Cross(du,dv));
+          
+          pf.Evaluate(reverse_incident_dir, omega, &bin_probabilities[idx]);
+          bin_probabilities[idx] *= spanned_solid_angle;
+                      
+          total_probability += bin_probabilities[idx];
+          total_solid_angle += spanned_solid_angle;
+        }
+      }
+    }
+    EXPECT_NEAR(total_solid_angle, UnitSphereSurfaceArea, 0.1);
+    EXPECT_NEAR(total_probability, 1.0, 0.01);
+    return std::move(bin_probabilities);
+  }
+  
+
+};
+
+
+
 
 
 TEST_F(PhasefunctionTests, Uniform)
@@ -490,6 +532,8 @@ TEST_F(PhasefunctionTests, SimpleCombined)
   PhaseFunctions::SimpleCombined pf{{.1, .2, .3}, pf1, {.3, .4, .5}, pf2};
   TestPfSampling(pf, Double3{0,0,1}, 10000, 3.5);
 }
+
+
 
 
 class StratifiedFixture : public testing::Test
@@ -574,7 +618,6 @@ TEST(TestMath, TowerSampling)
     CheckNumberOfSamplesInBin(strconcat("Bin[",i,"]").c_str(), bins[i], Nsamples, probs[i]);
   }
 }
-
 
 
 TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
