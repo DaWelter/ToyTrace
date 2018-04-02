@@ -29,6 +29,8 @@ find_path(CImg_INCLUDE_DIR
 )
 message(STATUS "CImg: ${CImg_INCLUDE_DIR}")
 
+set(Cubature_DIR "external/cubature")
+
 find_package(JPEG)
 find_package(PNG)
 find_path(Rapidjson_INCLUDE_DIR
@@ -49,11 +51,11 @@ set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx bsptree.cxx
 add_executable(toytrace toytrace.cxx ${SOURCES})
 target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE} ${Boost_FILESYSTEM_LIBRARY_RELEASE})
 
-add_executable(tests tests.cxx tests3.cxx tests_sampling.cxx ${SOURCES})
+add_executable(tests tests.cxx tests3.cxx tests_sampling.cxx ${Cubature_DIR}/hcubature.c ${SOURCES})
 add_executable(tests2 tests2.cxx)
 
 foreach(EXE tests tests2)
-  target_include_directories(${EXE} PUBLIC ${GTEST_INCLUDE_DIRS})
+  target_include_directories(${EXE} PUBLIC ${GTEST_INCLUDE_DIRS} ${Cubature_DIR})
   target_link_libraries(${EXE} ${GTEST_LIBRARIES}  ${Boost_FILESYSTEM_LIBRARY_RELEASE} pthread)
 endforeach()
 

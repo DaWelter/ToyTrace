@@ -1,0 +1,3 @@
+[submodule "external/cubature"]
+	path = external/cubature
+	url = https://github.com/stevengj/cubature.git
