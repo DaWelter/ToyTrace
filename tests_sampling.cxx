@@ -5,6 +5,8 @@
 #include <iostream>
 #include <fstream>
 
+#include <boost/math/distributions/chi_squared.hpp>
+
 #include "ray.hxx"
 #include "sampler.hxx"
 #include "sphere.hxx"
@@ -45,6 +47,37 @@ void CheckNumberOfSamplesInBin(const char *name, int num_smpl_in_bin, int total_
   if (name)
     std::cout << "Expected in " << name << ": " << mean << "+/-" << sigma << " Actual: " << num_smpl_in_bin << " of " << total_num_smpl << std::endl;
   EXPECT_NEAR(num_smpl_in_bin, mean, sigma*number_of_sigmas_threshold);
+}
+
+
+double ChiSquaredProbability(const int *counts, const double *probabilities, int num_bins)
+{
+  int num_samples = 0;
+  for (int i=0; i<num_bins; ++i)
+  {
+    if (probabilities[i] > 0.)
+    {
+      EXPECT_GE(counts[i], 5);
+      num_samples += counts[i];
+    }
+  }
+  double chi_sqr = 0.;
+  for (int i=0; i<num_bins; ++i)
+  {
+    if (probabilities[i] > 0.)
+    {
+      double expected = probabilities[i]*num_samples;
+      chi_sqr += Sqr(counts[i]-expected)/expected;
+    }
+  }
+
+  // https://www.boost.org/doc/libs/1_66_0/libs/math/doc/html/math_toolkit/dist_ref/dists/chi_squared_dist.html
+  // https://www.boost.org/doc/libs/1_66_0/libs/math/doc/html/math_toolkit/dist_ref/nmp.html#math_toolkit.dist_ref.nmp.cdf
+  boost::math::chi_squared_distribution<double> distribution(num_bins-1);
+  double prob_observe_ge_chi_sqr = cdf(complement(distribution, chi_sqr));
+  
+  //EXPECT_GE(prob_observe_ge_chi_sqr, p_threshold);
+  return prob_observe_ge_chi_sqr;
 }
 
 
@@ -262,6 +295,7 @@ public:
     return bins_per_axis*bins_per_axis*6;
   }
   
+  // i,j indices of the grid vertices.
   Double2 VertexToUV(int i, int j) const
   {
     assert (i >= 0 && i <= bins_per_axis);
@@ -272,6 +306,7 @@ public:
     return Double2{u, v};
   }
   
+  // Normally, like here, i,j are indices of the grid cells.
   std::tuple<Double2, Double2> CellToUVBounds(int i, int j)
   {
     return std::make_tuple(
@@ -477,39 +512,37 @@ TEST(Cubature, SphereSurfacArea)
 }
 
 
-
 class PhasefunctionTests : public testing::Test
 {
+  /* I want to check if the sampling frequency of some solid angle areas match the probabilities
+    * returned by the Evaluate function. I further want to validate the normalization constraint. */
 public:
   CubeMap cubemap;
   Sampler sampler;
   static constexpr int Nbins = 4;
-  std::ofstream output;  // If really deperate!
+  std::ofstream output;  // If really desperate!
 
+  std::vector<int> bin_sample_count;
+  std::vector<double> bin_probabilities;
+  Spectral3 integral;
+  int num_samples;
+  
   PhasefunctionTests()
     : cubemap{Nbins}
+  {}
+  
+  
+  void GenerateStatistics(const PhaseFunctions::PhaseFunction &pf, const Double3 &reverse_incident_dir, int num_samples)
   {
+    this->num_samples = num_samples;
+    DoSampling(pf, reverse_incident_dir, num_samples);
+    ComputeBinProbabilities(pf, reverse_incident_dir);
   }
   
-  void TestPfSampling(const PhaseFunctions::PhaseFunction &pf, const Double3 &reverse_incident_dir, int num_samples, double number_of_sigmas_threshold)
+  
+  void TestCountsDeviationFromSigma(double number_of_sigmas_threshold)
   {
-    /* I want to check if the sampling frequency of some solid angle areas match the probabilities
-     * returned by the Evaluate function. I further want to validate the normalization constraint. */
-    auto bin_probabilities = ComputeBinProbabilities(pf, reverse_incident_dir);
-    Spectral3 integral{0.};
-    std::vector<int> bin_sample_count(cubemap.TotalNumBins(), 0);
-    for (int snum = 0; snum<num_samples; ++snum)
-    {
-      auto smpl = pf.SampleDirection(reverse_incident_dir, sampler);
-      int side, i, j;
-      std::tie(side, i, j) = cubemap.OmegaToCell(smpl.coordinates);
-      int idx = cubemap.CellToIndex(side, i, j);
-      bin_sample_count[idx] += 1;
-      integral += smpl.value / smpl.pdf_or_pmf;
-      if (output.is_open())
-        output << smpl.coordinates[0] << " " << smpl.coordinates[1] << " " << smpl.coordinates[2] << " " << smpl.pdf_or_pmf << std::endl;
-    }
-    integral /= num_samples; // If the pf is correctly normalized, this estimator should converge to 1 with number of samples.
+    // If the pf is correctly normalized, this estimator should converge to 1 with number of samples.
     EXPECT_NEAR(integral[0], 1., 0.01);
     EXPECT_NEAR(integral[1], 1., 0.01);
     EXPECT_NEAR(integral[2], 1., 0.01);
@@ -525,14 +558,38 @@ public:
         number_of_sigmas_threshold);
     }
   }
- 
- 
-  std::vector<double> ComputeBinProbabilities(const PhaseFunctions::PhaseFunction &pf, const Double3 &reverse_incident_dir)
-  {
-    // Cube projection.
-    // +/-x,y,z which makes 6 grid, one per side face, and i,j indices of the corresponding grid.
-    std::vector<double> bin_probabilities(cubemap.TotalNumBins(), 0.);
+  
 
+  void TestChiSqr(double p_threshold)
+  {
+    double chi_sqr_probability = ChiSquaredProbability(&bin_sample_count[0], &bin_probabilities[0], cubemap.TotalNumBins());
+    std::cout << "chi sqr probability = " << chi_sqr_probability << std::endl;
+    EXPECT_GE(chi_sqr_probability, p_threshold);
+  }
+ 
+ 
+  void DoSampling(const PhaseFunctions::PhaseFunction &pf, const Double3 &reverse_incident_dir, int num_samples)
+  {
+    this->bin_sample_count = std::vector<int>(cubemap.TotalNumBins(), 0);
+    this->integral = Spectral3{0.};  
+    for (int snum = 0; snum<num_samples; ++snum)
+    {
+      auto smpl = pf.SampleDirection(reverse_incident_dir, sampler);
+      int side, i, j;
+      std::tie(side, i, j) = cubemap.OmegaToCell(smpl.coordinates);
+      int idx = cubemap.CellToIndex(side, i, j);
+      bin_sample_count[idx] += 1;
+      integral += smpl.value / smpl.pdf_or_pmf;
+      if (output.is_open())
+        output << smpl.coordinates[0] << " " << smpl.coordinates[1] << " " << smpl.coordinates[2] << " " << smpl.pdf_or_pmf << std::endl;
+    }
+    integral /= num_samples;
+  }
+ 
+ 
+  void ComputeBinProbabilities(const PhaseFunctions::PhaseFunction &pf, const Double3 &reverse_incident_dir)
+  {
+    this->bin_probabilities = std::vector<double>(cubemap.TotalNumBins(), 0.);
     double total_probability = 0.;
     double total_solid_angle = 0.;
     for (int side = 0; side < 6; ++side)
@@ -542,7 +599,6 @@ public:
         for (int j = 0; j<Nbins; ++j)
         {
           int idx = cubemap.CellToIndex(side, i, j);
-          
           // Integrating this gives me the probability of a sample falling
           // into the current bin. The integration is carried out on a square in
           // R^2, hence the scale factor J from the Jacobian of the variable transform.
@@ -553,18 +609,15 @@ public:
             pf.Evaluate(reverse_incident_dir, omega, &pdf);
             return pdf*cubemap.UVtoJ(x);
           };
-          
           Double2 start, end;
           std::tie(start, end) = cubemap.CellToUVBounds(i, j);       
           double prob = Integral2D(probabilityDensityTimesJ, start, end, 1.e-3, 1.e-2);
-
           bin_probabilities[idx] = prob;
           total_probability += bin_probabilities[idx];
         }
       }
     }
     EXPECT_NEAR(total_probability, 1.0, 0.001);
-    return std::move(bin_probabilities);
   }
 };
 
@@ -575,7 +628,9 @@ public:
 TEST_F(PhasefunctionTests, Uniform)
 {
   PhaseFunctions::Uniform pf;
-  TestPfSampling(pf, Double3{0,0,1}, 10000, 3.5);
+  this->GenerateStatistics(pf, Double3{0,0,1}, 20000);
+  this->TestCountsDeviationFromSigma(3.5);
+  this->TestChiSqr(0.05);
 }
 
 
@@ -583,7 +638,9 @@ TEST_F(PhasefunctionTests, Rayleigh)
 {
   // output.open("PhasefunctionTests.Rayleight.txt");
   PhaseFunctions::Rayleigh pf;
-  TestPfSampling(pf, Double3{0,0,1}, 10000, 3.5);
+  this->GenerateStatistics(pf, Double3{0,0,1}, 20000);
+  this->TestCountsDeviationFromSigma(3.5);
+  this->TestChiSqr(0.05);
 }
 
 
@@ -591,7 +648,9 @@ TEST_F(PhasefunctionTests, HenleyGreenstein)
 {
   //output.open("PhasefunctionTests.HenleyGreenstein.txt");
   PhaseFunctions::HenleyGreenstein pf(0.4);
-  TestPfSampling(pf, Double3{0,0,1}, 10000, 4.0);
+  this->GenerateStatistics(pf, Double3{0,0,1}, 20000);
+  this->TestCountsDeviationFromSigma(4.);
+  this->TestChiSqr(0.05);
 }
 
 
@@ -600,7 +659,9 @@ TEST_F(PhasefunctionTests, Combined)
   PhaseFunctions::HenleyGreenstein pf1{0.4};
   PhaseFunctions::Uniform pf2;
   PhaseFunctions::Combined pf{{1., 1., 1.}, {.1, .2, .3}, pf1, {.3, .4, .5}, pf2};
-  TestPfSampling(pf, Double3{0,0,1}, 10000, 3.5);
+  this->GenerateStatistics(pf, Double3{0,0,1}, 20000);
+  this->TestCountsDeviationFromSigma(3.5);
+  this->TestChiSqr(0.05);
 }
 
 
@@ -609,7 +670,9 @@ TEST_F(PhasefunctionTests, SimpleCombined)
   PhaseFunctions::HenleyGreenstein pf1{0.4};
   PhaseFunctions::Uniform pf2;
   PhaseFunctions::SimpleCombined pf{{.1, .2, .3}, pf1, {.3, .4, .5}, pf2};
-  TestPfSampling(pf, Double3{0,0,1}, 10000, 3.5);
+  this->GenerateStatistics(pf, Double3{0,0,1}, 20000);
+  this->TestCountsDeviationFromSigma(3.5);
+  this->TestChiSqr(0.05);
 }
 
 
