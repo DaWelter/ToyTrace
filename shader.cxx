@@ -73,7 +73,7 @@ Spectral3 DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurf
 {
   Spectral3 ret{0.};
   assert (Dot(surface_hit.normal, incident_dir)>=0); // Because normal is aligned such that this conditions should be true.
-  double n_dot_out = Dot(surface_hit.normal, out_direction)>0;
+  double n_dot_out = Dot(surface_hit.normal, out_direction);
   if (n_dot_out > 0.) // In/Out on same side of geometric surface?
   {
     Spectral3 kr_d_taken = Take(kr_d, context.lambda_idx);
