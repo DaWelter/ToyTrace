@@ -456,7 +456,19 @@ int f1d(unsigned ndim, const double *x, void *fdata_,
   *fval = (*callable)(xm);
   return 0;
 }
-  
+
+template<class Func>
+int fnd(unsigned ndim, const double *x, void *fdata_,
+        unsigned fdim, double *fval)
+{
+  auto* callable = static_cast<Func*>(fdata_);
+  assert(ndim == 2);
+  Eigen::Map<const Eigen::Vector2d> xm{x};
+  const auto value = ((*callable)(xm)).eval();
+  std::copy(value.data(), value.data()+fdim, fval);
+  return 0;
+}
+
 } // namespace cubature_wrapper
 
 
@@ -471,6 +483,18 @@ double Integral2D(Func func, Double2 start, Double2 end, double absError, double
     throw std::runtime_error("Cubature failed!");
   return result;
 }
+
+template<class Func>
+auto MultivariateIntegral2D(Func func, Double2 start, Double2 end, double absError, double relError) -> decltype(func(Double2{}))
+{
+  using R  = decltype(func(Double2{}));
+  R result, error;
+  int status = hcubature(result.size(), cubature_wrapper::fnd<Func>, &func, 2, start.data(), end.data(), 0, absError, relError, ERROR_L2, result.data(), error.data());
+  if (status != 0)
+    throw std::runtime_error("Cubature failed!");
+  return result;
+}
+
 } // namespace
 
 
@@ -486,6 +510,25 @@ TEST(Cubature, Integral)
   
   double exact = 8./3.;
   ASSERT_NEAR(result, exact, 1.e-2);
+}
+
+TEST(Cubature, MultivariateIntegral)
+{
+  auto func = [](const Double2 x) -> Eigen::Array2d
+  {
+    double f1 = x[0]*x[0] + x[1]*x[1];
+    double f2 = 1.;
+    Eigen::Array2d a; a << f1, f2;
+    return a;
+  };
+  
+  Eigen::Array2d result = MultivariateIntegral2D(
+    func, Double2(-1,-1), Double2(1,1), 0.01, 0.01);
+  
+  double exact1 = 8./3.;
+  double exact2 = 4.;
+  ASSERT_NEAR(result[0], exact1, 1.e-2);
+  ASSERT_NEAR(result[1], exact2, 1.e-2);
 }
 
 
@@ -512,7 +555,7 @@ TEST(Cubature, SphereSurfacArea)
 }
 
 
-class PhasefunctionTests : public testing::Test
+class ScatterTests : public testing::Test
 {
   /* I want to check if the sampling frequency of some solid angle areas match the probabilities
     * returned by the Evaluate function. I further want to validate the normalization constraint. */
@@ -522,30 +565,34 @@ public:
   static constexpr int Nbins = 4;
   std::ofstream output;  // If really desperate!
 
+  // Filled by member functions.
   std::vector<int> bin_sample_count;
   std::vector<double> bin_probabilities;
-  Spectral3 integral;
+  double total_probability;
+  Spectral3 integral_estimate;
+  Spectral3 integral_cubature;
   int num_samples;
   
-  PhasefunctionTests()
+  ScatterTests()
     : cubemap{Nbins}
   {}
   
+  // Template Method Design Pattern ?!
+  // Override that in derived classes for Phasefunction and BSDF, respectively.
+  virtual double ProbabilityDensity(const Double3 &omega) const = 0;
+  virtual Spectral3 ScatterFunction(const Double3 &omega) const = 0;
+  virtual ScatterSample MakeScatterSample() = 0;
   
-  void GenerateStatistics(const PhaseFunctions::PhaseFunction &pf, const Double3 &reverse_incident_dir, int num_samples)
+  void RunAllCalculations(int num_samples)
   {
-    this->num_samples = num_samples;
-    DoSampling(pf, reverse_incident_dir, num_samples);
-    ComputeBinProbabilities(pf, reverse_incident_dir);
+    DoSampling(num_samples);
+    ComputeBinProbabilities();
+    ComputeCubatureIntegral();
   }
   
   
   void TestCountsDeviationFromSigma(double number_of_sigmas_threshold)
   {
-    // If the pf is correctly normalized, this estimator should converge to 1 with number of samples.
-    EXPECT_NEAR(integral[0], 1., 0.01);
-    EXPECT_NEAR(integral[1], 1., 0.01);
-    EXPECT_NEAR(integral[2], 1., 0.01);
     for (int idx=0; idx<cubemap.TotalNumBins(); ++idx)
     {
       int side, i, j;
@@ -566,32 +613,47 @@ public:
     std::cout << "chi sqr probability = " << chi_sqr_probability << std::endl;
     EXPECT_GE(chi_sqr_probability, p_threshold);
   }
+  
+  void CheckIntegral(double tolerance, boost::optional<Spectral3> by_value = boost::none)
+  {
+    // TODO: Deal with Dirac-delta! Running the test on a scatter function that has a Dirac delta will remind me of it ...
+    for (int i=0; i<integral_cubature.size(); ++i)
+    {
+      EXPECT_NEAR(integral_cubature[i], integral_estimate[i], tolerance);
+      if (by_value)
+        EXPECT_NEAR(integral_estimate[i], (*by_value)[i], tolerance);
+    }
+  }
  
- 
-  void DoSampling(const PhaseFunctions::PhaseFunction &pf, const Double3 &reverse_incident_dir, int num_samples)
+  void DoSampling(int num_samples)
   {
     this->bin_sample_count = std::vector<int>(cubemap.TotalNumBins(), 0);
-    this->integral = Spectral3{0.};  
+    this->integral_estimate = Spectral3{0.};  
+    this->num_samples = num_samples;
     for (int snum = 0; snum<num_samples; ++snum)
     {
-      auto smpl = pf.SampleDirection(reverse_incident_dir, sampler);
+      auto smpl = this->MakeScatterSample();
+      if (IsFromPdf(smpl))
+      {
+        double pdf_crossvalidate = this->ProbabilityDensity(smpl.coordinates);
+        ASSERT_NEAR(PdfValue(smpl), pdf_crossvalidate, 1.e-6);
+      }
       int side, i, j;
       std::tie(side, i, j) = cubemap.OmegaToCell(smpl.coordinates);
       int idx = cubemap.CellToIndex(side, i, j);
       bin_sample_count[idx] += 1;
-      integral += smpl.value / smpl.pdf_or_pmf;
+      integral_estimate += smpl.value / smpl.pdf_or_pmf;
       if (output.is_open())
         output << smpl.coordinates[0] << " " << smpl.coordinates[1] << " " << smpl.coordinates[2] << " " << smpl.pdf_or_pmf << std::endl;
     }
-    integral /= num_samples;
+    integral_estimate /= num_samples;
   }
  
  
-  void ComputeBinProbabilities(const PhaseFunctions::PhaseFunction &pf, const Double3 &reverse_incident_dir)
+  void ComputeBinProbabilities()
   {
     this->bin_probabilities = std::vector<double>(cubemap.TotalNumBins(), 0.);
-    double total_probability = 0.;
-    double total_solid_angle = 0.;
+    this->total_probability = 0.;
     for (int side = 0; side < 6; ++side)
     {
       for (int i = 0; i<Nbins; ++i)
@@ -605,8 +667,7 @@ public:
           auto probabilityDensityTimesJ = [&](const Double2 x) -> double
           {
             Double3 omega = cubemap.UVToOmega(side, x);
-            double pdf;
-            pf.Evaluate(reverse_incident_dir, omega, &pdf);
+            double pdf = this->ProbabilityDensity(omega);
             return pdf*cubemap.UVtoJ(x);
           };
           Double2 start, end;
@@ -619,18 +680,77 @@ public:
     }
     EXPECT_NEAR(total_probability, 1.0, 0.001);
   }
+  
+  
+  void ComputeCubatureIntegral()
+  {
+    this->integral_cubature = 0.;
+    for (int idx=0; idx<cubemap.TotalNumBins(); ++idx)
+    {
+      int side, i, j;
+      std::tie(side, i, j) = cubemap.IndexToCell(idx);
+      auto functionValueTimesJ = [&](const Double2 x) -> Eigen::Array3d
+      {
+        Double3 omega = cubemap.UVToOmega(side, x);
+        Spectral3 val = this->ScatterFunction(omega);
+        return val*cubemap.UVtoJ(x);
+      };
+      Double2 start, end;
+      std::tie(start, end) = cubemap.CellToUVBounds(i, j);       
+      Eigen::Array3d cell_integral = MultivariateIntegral2D(functionValueTimesJ, start, end, 1.e-3, 1.e-2);
+      this->integral_cubature += cell_integral;
+    }
+  }
 };
 
 
+class PhasefunctionTests : public ScatterTests
+{
+private:
+  const PhaseFunctions::PhaseFunction *pf;
+  Double3 reverse_incident_dir;
+  
+public:
+  void RunAllCalculations(const PhaseFunctions::PhaseFunction &pf, const Double3 &reverse_incident_dir, int num_samples)
+  {
+    this->pf = &pf;
+    this->reverse_incident_dir = reverse_incident_dir;
+    ScatterTests::RunAllCalculations(num_samples);
+  }
+  
+  void CheckIntegral(double tolerance)
+  {
+    ScatterTests::CheckIntegral(tolerance, Spectral3{1.});
+  }
+  
+private:
+  double ProbabilityDensity(const Double3 &omega) const override
+  {
+    double ret;
+    pf->Evaluate(reverse_incident_dir, omega, &ret);
+    return ret;
+  }
+  
+  Spectral3 ScatterFunction(const Double3 &omega) const override
+  {
+    return pf->Evaluate(reverse_incident_dir, omega, nullptr);
+  }
+  
+  ScatterSample MakeScatterSample() override
+  {
+    return pf->SampleDirection(reverse_incident_dir, sampler);
+  }
+};
 
 
 
 TEST_F(PhasefunctionTests, Uniform)
 {
   PhaseFunctions::Uniform pf;
-  this->GenerateStatistics(pf, Double3{0,0,1}, 20000);
+  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
   this->TestCountsDeviationFromSigma(3.5);
   this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001);
 }
 
 
@@ -638,9 +758,10 @@ TEST_F(PhasefunctionTests, Rayleigh)
 {
   // output.open("PhasefunctionTests.Rayleight.txt");
   PhaseFunctions::Rayleigh pf;
-  this->GenerateStatistics(pf, Double3{0,0,1}, 20000);
+  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
   this->TestCountsDeviationFromSigma(3.5);
   this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001);
 }
 
 
@@ -648,9 +769,10 @@ TEST_F(PhasefunctionTests, HenleyGreenstein)
 {
   //output.open("PhasefunctionTests.HenleyGreenstein.txt");
   PhaseFunctions::HenleyGreenstein pf(0.4);
-  this->GenerateStatistics(pf, Double3{0,0,1}, 20000);
+  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
   this->TestCountsDeviationFromSigma(4.);
   this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001);
 }
 
 
@@ -659,9 +781,10 @@ TEST_F(PhasefunctionTests, Combined)
   PhaseFunctions::HenleyGreenstein pf1{0.4};
   PhaseFunctions::Uniform pf2;
   PhaseFunctions::Combined pf{{1., 1., 1.}, {.1, .2, .3}, pf1, {.3, .4, .5}, pf2};
-  this->GenerateStatistics(pf, Double3{0,0,1}, 20000);
+  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
   this->TestCountsDeviationFromSigma(3.5);
   this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001);
 }
 
 
@@ -670,11 +793,78 @@ TEST_F(PhasefunctionTests, SimpleCombined)
   PhaseFunctions::HenleyGreenstein pf1{0.4};
   PhaseFunctions::Uniform pf2;
   PhaseFunctions::SimpleCombined pf{{.1, .2, .3}, pf1, {.3, .4, .5}, pf2};
-  this->GenerateStatistics(pf, Double3{0,0,1}, 20000);
+  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
   this->TestCountsDeviationFromSigma(3.5);
   this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001);
 }
 
+
+
+class ShaderTests : public ScatterTests
+{
+private:
+  const Shader *sh = nullptr;
+  Double3 reverse_incident_dir;
+  RaySurfaceIntersection intersection;
+  PathContext context;
+  std::unique_ptr<TexturedSmoothTriangle> triangle;
+  
+public:  
+  void RunAllCalculations(const Shader &sh, const Double3 &reverse_incident_dir, int num_samples)
+  {
+    Init(sh, reverse_incident_dir);
+    ScatterTests::RunAllCalculations(num_samples);
+  }
+  
+private:
+  void Init(const Shader &sh, const Double3 &reverse_incident_dir)
+  {
+    this->sh = &sh;
+    this->reverse_incident_dir = reverse_incident_dir;
+    Double3 normal{0, 0, 1};
+    triangle = std::make_unique<TexturedSmoothTriangle>(
+      Double3{ -1, -1, 0}, Double3{ 1, -1, 0 }, Double3{ 0, 1, 0 },
+      normal, normal, normal,
+      Double3{0, 0, 0}, Double3{1, 0, 0}, Double3{0.5, 1, 0});
+    RaySegment seg{{{0, 0, 1}, {0, 0, -1}}, LargeNumber};
+    HitId hit;
+    bool ok = triangle->Intersect(seg.ray, seg.length, hit);
+    intersection = RaySurfaceIntersection{hit, seg};
+    context = PathContext{Color::LambdaIdxClosestToRGBPrimaries()};
+  }
+  
+  double ProbabilityDensity(const Double3 &omega) const override
+  {
+    double ret = NaN;
+    sh->EvaluateBSDF(reverse_incident_dir, intersection, omega, context, &ret);
+    return ret;
+  }
+  
+  Spectral3 ScatterFunction(const Double3 &omega) const override
+  {
+    Spectral3 value = sh->EvaluateBSDF(reverse_incident_dir, intersection, omega, context, nullptr);
+    value *= std::abs(Dot(omega, intersection.shading_normal));
+    return value;
+  }
+  
+  ScatterSample MakeScatterSample() override
+  {
+    auto smpl = sh->SampleBSDF(reverse_incident_dir, intersection, sampler, context);
+    smpl.value *= std::abs(Dot(smpl.coordinates, intersection.shading_normal));
+    return smpl;
+  }
+};
+
+
+TEST_F(ShaderTests, DiffuseShader)
+{
+  DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
+  this->RunAllCalculations(sh, Double3{0,0,1}, 20000);
+  this->TestCountsDeviationFromSigma(3.5);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001, Spectral3{0.5});
+}
 
 
 
