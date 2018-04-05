@@ -584,12 +584,14 @@ public:
   virtual double ProbabilityDensity(const Double3 &omega) const = 0;
   virtual Spectral3 ScatterFunction(const Double3 &omega) const = 0;
   virtual ScatterSample MakeScatterSample() = 0;
+  virtual void CheckSymmetry() = 0;
   
   void RunAllCalculations(int num_samples)
   {
     DoSampling(num_samples);
     ComputeBinProbabilities();
     ComputeCubatureIntegral();
+    CheckSymmetry();
   }
   
   
@@ -600,7 +602,7 @@ public:
       int side, i, j;
       std::tie(side, i, j) = cubemap.IndexToCell(idx);
       CheckNumberOfSamplesInBin(
-        strconcat(side,"[",i,",",j,"]").c_str(), //nullptr, //
+        nullptr, //strconcat(side,"[",i,",",j,"]").c_str(),
         bin_sample_count[idx], 
         num_samples, 
         bin_probabilities[idx],
@@ -635,10 +637,14 @@ public:
     for (int snum = 0; snum<num_samples; ++snum)
     {
       auto smpl = this->MakeScatterSample();
-      if (IsFromPdf(smpl))
+      if (IsFromPdf(smpl) && snum<100)
       {
         double pdf_crossvalidate = this->ProbabilityDensity(smpl.coordinates);
         ASSERT_NEAR(PdfValue(smpl), pdf_crossvalidate, 1.e-6);
+        Spectral3 val_crossvalidate = this->ScatterFunction(smpl.coordinates);
+        ASSERT_NEAR(smpl.value[0], val_crossvalidate[0], 1.e-6);
+        ASSERT_NEAR(smpl.value[1], val_crossvalidate[1], 1.e-6);
+        ASSERT_NEAR(smpl.value[2], val_crossvalidate[2], 1.e-6);
       }
       int side, i, j;
       std::tie(side, i, j) = cubemap.OmegaToCell(smpl.coordinates);
@@ -703,6 +709,32 @@ public:
       this->integral_cubature += cell_integral;
     }
   }
+  
+  
+  // Supply function returning pdf and scatter function value.
+  // Need this because no access to reverse_incident_dir. Also
+  // ScatterFunction might have |wi.shadingnormal| term backed in
+  // which we do not want here!
+  //void CheckSymmetry(
+    //std::function<std::pair<double, Spectral3> (const Double3 &wi, const Double3 &wo)> func)
+  template<class Func>
+  void CheckSymmetryImpl(Func func)
+  {
+    const int NUM_SAMPLES = 100;
+    for (int snum = 0; snum<NUM_SAMPLES; ++snum)
+    {
+      Double3 wi = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
+      Double3 wo = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
+      double pdf_val, pdf_rev;
+      Spectral3 f_val, f_rev;
+      std::tie(pdf_val, f_val) = func(wi, wo);
+      std::tie(pdf_rev, f_rev) = func(wo, wi);
+      EXPECT_NEAR(pdf_val, pdf_rev, 1.e-6);
+      EXPECT_NEAR(f_val[0], f_rev[0], 1.e-6);
+      EXPECT_NEAR(f_val[1], f_rev[1], 1.e-6);
+      EXPECT_NEAR(f_val[2], f_rev[2], 1.e-6);
+    }
+  }
 };
 
 
@@ -723,6 +755,16 @@ public:
   void CheckIntegral(double tolerance)
   {
     ScatterTests::CheckIntegral(tolerance, Spectral3{1.});
+  }
+  
+  void CheckSymmetry() override
+  {
+    CheckSymmetryImpl([&](const Double3 &wi, const Double3 &wo) -> std::pair<double, Spectral3>
+    {
+      double pdf = NaN;
+      auto ret = pf->Evaluate(wi, wo, &pdf);
+      return std::make_pair(pdf, ret);
+    });
   }
   
 private:
@@ -808,32 +850,38 @@ class ShaderTests : public ScatterTests
 private:
   const Shader *sh = nullptr;
   Double3 reverse_incident_dir;
+  Double3 shading_normal;
   RaySurfaceIntersection intersection;
   PathContext context;
   std::unique_ptr<TexturedSmoothTriangle> triangle;
   
 public:  
-  void RunAllCalculations(const Shader &sh, const Double3 &reverse_incident_dir, int num_samples)
+  void RunAllCalculations(const Shader &sh, const Double3 &reverse_incident_dir, const Double3 &shading_normal, int num_samples)
   {
-    Init(sh, reverse_incident_dir);
+    Init(sh, reverse_incident_dir, shading_normal);
     ScatterTests::RunAllCalculations(num_samples);
   }
   
 private:
-  void Init(const Shader &sh, const Double3 &reverse_incident_dir)
+  void Init(const Shader &sh, const Double3 &reverse_incident_dir, const Double3 &shading_normal)
   {
     this->sh = &sh;
     this->reverse_incident_dir = reverse_incident_dir;
     Double3 normal{0, 0, 1};
     triangle = std::make_unique<TexturedSmoothTriangle>(
       Double3{ -1, -1, 0}, Double3{ 1, -1, 0 }, Double3{ 0, 1, 0 },
-      normal, normal, normal,
+      shading_normal, shading_normal, shading_normal,
       Double3{0, 0, 0}, Double3{1, 0, 0}, Double3{0.5, 1, 0});
-    RaySegment seg{{{0, 0, 1}, {0, 0, -1}}, LargeNumber};
+    context = PathContext{Color::LambdaIdxClosestToRGBPrimaries()};
+    intersection = MakeIntersection(reverse_incident_dir);
+  }
+  
+  RaySurfaceIntersection MakeIntersection(Double3 reverse_incident_dir)
+  {
+    RaySegment seg{{reverse_incident_dir, -reverse_incident_dir}, LargeNumber};
     HitId hit;
     bool ok = triangle->Intersect(seg.ray, seg.length, hit);
-    intersection = RaySurfaceIntersection{hit, seg};
-    context = PathContext{Color::LambdaIdxClosestToRGBPrimaries()};
+    return RaySurfaceIntersection{hit, seg};
   }
   
   double ProbabilityDensity(const Double3 &omega) const override
@@ -853,17 +901,68 @@ private:
   ScatterSample MakeScatterSample() override
   {
     auto smpl = sh->SampleBSDF(reverse_incident_dir, intersection, sampler, context);
+    if (Dot(smpl.coordinates, intersection.normal)<0.)
+      EXPECT_TRUE(smpl.value.isZero());
     smpl.value *= std::abs(Dot(smpl.coordinates, intersection.shading_normal));
     return smpl;
+  }
+  
+  void CheckSymmetry() override
+  {    
+    CheckSymmetryImpl([&](const Double3 &wi, const Double3 &wo) -> std::pair<double, Spectral3>
+    {
+      // Making a new intersection is needed because the shader expects the first direction to be aligned with the normals.
+      RaySurfaceIntersection intersection = MakeIntersection(wi);
+      Spectral3 ret = sh->EvaluateBSDF(wi, intersection, wo, context, nullptr);
+      // Shader pdf's are in general not symmetric. Therefore I just return 0 here.
+      return std::make_pair(0., ret);
+    });
   }
 };
 
 
-TEST_F(ShaderTests, DiffuseShader)
+TEST_F(ShaderTests, DiffuseShader1)
 {
+  auto reversed_incident_dir = Normalized(Double3{0,0,1});
+  auto shading_normal = Double3{0,0,1};
   DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
-  this->RunAllCalculations(sh, Double3{0,0,1}, 2000);
-  this->TestCountsDeviationFromSigma(3.5);
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 2000);
+  this->TestCountsDeviationFromSigma(3.);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001, Spectral3{0.5});
+}
+
+TEST_F(ShaderTests, DiffuseShader2)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,1,1});
+  auto shading_normal = Double3{0,0,1};
+  DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 2000);
+  this->TestCountsDeviationFromSigma(3.);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001, Spectral3{0.5});
+}
+
+TEST_F(ShaderTests, DiffuseShader3)
+{
+  // NOTE: High variant because the pdf distributes samples according to geometric normal. Hence many samples needed for integral to converge!
+  auto reversed_incident_dir = Normalized(Double3{0,0,1});
+  auto shading_normal = Normalized(Double3{0,10,1});
+  DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 50000);
+  this->TestCountsDeviationFromSigma(3.);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001, Spectral3{0.5});
+}
+
+
+TEST_F(ShaderTests, DiffuseShader4)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,10,1});
+  auto shading_normal = Normalized(Double3{0,1,1});
+  DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 50000);
+  this->TestCountsDeviationFromSigma(3.);
   this->TestChiSqr(0.05);
   this->CheckIntegral(0.001, Spectral3{0.5});
 }
