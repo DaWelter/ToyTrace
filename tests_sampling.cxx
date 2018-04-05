@@ -52,6 +52,7 @@ void CheckNumberOfSamplesInBin(const char *name, int num_smpl_in_bin, int total_
 
 double ChiSquaredProbability(const int *counts, const double *probabilities, int num_bins)
 {
+  int num_nonzero_bins = 0;
   int num_samples = 0;
   for (int i=0; i<num_bins; ++i)
   {
@@ -59,6 +60,7 @@ double ChiSquaredProbability(const int *counts, const double *probabilities, int
     {
       EXPECT_GE(counts[i], 5);
       num_samples += counts[i];
+      ++num_nonzero_bins;
     }
   }
   double chi_sqr = 0.;
@@ -73,7 +75,7 @@ double ChiSquaredProbability(const int *counts, const double *probabilities, int
 
   // https://www.boost.org/doc/libs/1_66_0/libs/math/doc/html/math_toolkit/dist_ref/dists/chi_squared_dist.html
   // https://www.boost.org/doc/libs/1_66_0/libs/math/doc/html/math_toolkit/dist_ref/nmp.html#math_toolkit.dist_ref.nmp.cdf
-  boost::math::chi_squared_distribution<double> distribution(num_bins-1);
+  boost::math::chi_squared_distribution<double> distribution(num_nonzero_bins-1);
   double prob_observe_ge_chi_sqr = cdf(complement(distribution, chi_sqr));
   
   //EXPECT_GE(prob_observe_ge_chi_sqr, p_threshold);
@@ -598,7 +600,7 @@ public:
       int side, i, j;
       std::tie(side, i, j) = cubemap.IndexToCell(idx);
       CheckNumberOfSamplesInBin(
-        nullptr, //strconcat(side,"[",i,",",j,"]").c_str(),
+        strconcat(side,"[",i,",",j,"]").c_str(), //nullptr, //
         bin_sample_count[idx], 
         num_samples, 
         bin_probabilities[idx],
@@ -860,7 +862,7 @@ private:
 TEST_F(ShaderTests, DiffuseShader)
 {
   DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
-  this->RunAllCalculations(sh, Double3{0,0,1}, 20000);
+  this->RunAllCalculations(sh, Double3{0,0,1}, 2000);
   this->TestCountsDeviationFromSigma(3.5);
   this->TestChiSqr(0.05);
   this->CheckIntegral(0.001, Spectral3{0.5});
