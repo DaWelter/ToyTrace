@@ -50,28 +50,38 @@ void CheckNumberOfSamplesInBin(const char *name, int num_smpl_in_bin, int total_
 }
 
 
-double ChiSquaredProbability(const int *counts, const double *probabilities, int num_bins)
+double ChiSquaredProbability(const int *counts, const double *weights, int num_bins)
 {
+  double probability_renormalization = 0.;
   int num_nonzero_bins = 0;
   int num_samples = 0;
   for (int i=0; i<num_bins; ++i)
   {
-    if (probabilities[i] > 0.)
+    if (weights[i] > 0.)
     {
       EXPECT_GE(counts[i], 5);
       num_samples += counts[i];
       ++num_nonzero_bins;
+      probability_renormalization += weights[i];
+    }
+    else
+    {
+      EXPECT_EQ(counts[i], 0);
     }
   }
+  probability_renormalization = probability_renormalization>0. ? 1./probability_renormalization : 0.;
   double chi_sqr = 0.;
   for (int i=0; i<num_bins; ++i)
   {
-    if (probabilities[i] > 0.)
+    if (weights[i] > 0.)
     {
-      double expected = probabilities[i]*num_samples;
+      double expected = weights[i]*probability_renormalization*num_samples;
       chi_sqr += Sqr(counts[i]-expected)/expected;
     }
   }
+
+  if (num_nonzero_bins <= 0)
+    return 1.;
 
   // https://www.boost.org/doc/libs/1_66_0/libs/math/doc/html/math_toolkit/dist_ref/dists/chi_squared_dist.html
   // https://www.boost.org/doc/libs/1_66_0/libs/math/doc/html/math_toolkit/dist_ref/nmp.html#math_toolkit.dist_ref.nmp.cdf
@@ -79,7 +89,7 @@ double ChiSquaredProbability(const int *counts, const double *probabilities, int
   double prob_observe_ge_chi_sqr = cdf(complement(distribution, chi_sqr));
   
   //EXPECT_GE(prob_observe_ge_chi_sqr, p_threshold);
-  return prob_observe_ge_chi_sqr;
+  return prob_observe_ge_chi_sqr;  
 }
 
 
@@ -373,8 +383,12 @@ public:
     assert(z > 0.);
     u /= z;
     v /= z;
+    assert(u >= -1.001 && u <= 1.001);
+    assert(v >= -1.001 && v <= 1.001);
     i = (u+1.)*0.5*bins_per_axis;
     j = (v+1.)*0.5*bins_per_axis;
+    i = std::max(0, std::min(bins_per_axis-1, i));
+    j = std::max(0, std::min(bins_per_axis-1, j));
     return std::make_tuple(side, i, j);
   }
   
@@ -572,7 +586,9 @@ public:
   std::vector<double> bin_probabilities;
   double total_probability;
   Spectral3 integral_estimate;
+  Spectral3 integral_estimate_delta;
   Spectral3 integral_cubature;
+  double probability_of_delta_peaks;
   int num_samples;
   
   ScatterTests()
@@ -620,13 +636,18 @@ public:
   
   void CheckIntegral(double tolerance, boost::optional<Spectral3> by_value = boost::none)
   {
-    // TODO: Deal with Dirac-delta! Running the test on a scatter function that has a Dirac delta will remind me of it ...
     for (int i=0; i<integral_cubature.size(); ++i)
     {
       EXPECT_NEAR(integral_cubature[i], integral_estimate[i], tolerance);
       if (by_value)
-        EXPECT_NEAR(integral_estimate[i], (*by_value)[i], tolerance);
+      {
+        // As a user of the test, I probably only know the combined albedo of 
+        // specular and diffuse/glossy parts. So take that for comparison.
+        Spectral3 total_reflected = integral_estimate + integral_estimate_delta;
+        EXPECT_NEAR(total_reflected[i], (*by_value)[i], tolerance);
+      }
     }
+    EXPECT_NEAR(total_probability, 1.-probability_of_delta_peaks, 1.e-3);
   }
  
   void DoSampling(int num_samples)
@@ -634,27 +655,60 @@ public:
     this->bin_sample_count = std::vector<int>(cubemap.TotalNumBins(), 0);
     this->integral_estimate = Spectral3{0.};  
     this->num_samples = num_samples;
+    this->probability_of_delta_peaks = 0.;
+    std::vector<Double3> delta_peaks;
+    auto CheckDeltaPeakNewAndMemorize = [&delta_peaks](const Double3 &v) -> bool 
+    {
+      auto it = std::find_if(delta_peaks.begin(), delta_peaks.end(), [&](const Double3 &v) { return v.cwiseEqual(v).all(); });
+      bool is_new = it == delta_peaks.end();
+      if (is_new) delta_peaks.push_back(v);
+      return is_new;
+    };
+    auto SampleIndex = [this](const ScatterSample &smpl) ->  int
+    {
+      int side, i, j;
+      std::tie(side, i, j) = cubemap.OmegaToCell(smpl.coordinates);
+      return cubemap.CellToIndex(side, i, j);
+    };
+    auto CrossValidate = [this](const ScatterSample &smpl) -> void
+    {
+      // Do pdf and scatter function values in the smpl struct match what comes out of member functions?
+      double pdf_crossvalidate = this->ProbabilityDensity(smpl.coordinates);
+      ASSERT_NEAR(PdfValue(smpl), pdf_crossvalidate, 1.e-6);
+      Spectral3 val_crossvalidate = this->ScatterFunction(smpl.coordinates);
+      ASSERT_NEAR(smpl.value[0], val_crossvalidate[0], 1.e-6);
+      ASSERT_NEAR(smpl.value[1], val_crossvalidate[1], 1.e-6);
+      ASSERT_NEAR(smpl.value[2], val_crossvalidate[2], 1.e-6);
+    };
+    
     for (int snum = 0; snum<num_samples; ++snum)
     {
       auto smpl = this->MakeScatterSample();
+
       if (IsFromPdf(smpl) && snum<100)
+        CrossValidate(smpl);
+      // Can only integrate the non-delta density. 
+      // Keep track of delta-peaks separately.
+      if (IsFromPdf(smpl))
       {
-        double pdf_crossvalidate = this->ProbabilityDensity(smpl.coordinates);
-        ASSERT_NEAR(PdfValue(smpl), pdf_crossvalidate, 1.e-6);
-        Spectral3 val_crossvalidate = this->ScatterFunction(smpl.coordinates);
-        ASSERT_NEAR(smpl.value[0], val_crossvalidate[0], 1.e-6);
-        ASSERT_NEAR(smpl.value[1], val_crossvalidate[1], 1.e-6);
-        ASSERT_NEAR(smpl.value[2], val_crossvalidate[2], 1.e-6);
+        int idx = SampleIndex(smpl);
+        bin_sample_count[idx] += 1;
+        integral_estimate += smpl.value / smpl.pdf_or_pmf; 
       }
-      int side, i, j;
-      std::tie(side, i, j) = cubemap.OmegaToCell(smpl.coordinates);
-      int idx = cubemap.CellToIndex(side, i, j);
-      bin_sample_count[idx] += 1;
-      integral_estimate += smpl.value / smpl.pdf_or_pmf;
+      else
+      {
+        // I can ofc integrate by MC.
+        integral_estimate_delta += smpl.value / smpl.pdf_or_pmf;
+        // "pdf_or_pmf" is the probability of selecting the delta-peak.
+        if (CheckDeltaPeakNewAndMemorize(smpl.coordinates))
+          probability_of_delta_peaks += PmfValue(smpl);
+      }
+
       if (output.is_open())
         output << smpl.coordinates[0] << " " << smpl.coordinates[1] << " " << smpl.coordinates[2] << " " << smpl.pdf_or_pmf << std::endl;
     }
     integral_estimate /= num_samples;
+    integral_estimate_delta /= num_samples;
   }
  
  
@@ -678,6 +732,7 @@ public:
             double pdf = this->ProbabilityDensity(omega);
             return pdf*cubemap.UVtoJ(x);
           };
+          // By design, only diffuse/glossy components will be captured by this.
           Double2 start, end;
           std::tie(start, end) = cubemap.CellToUVBounds(i, j);       
           double prob = Integral2D(probabilityDensityTimesJ, start, end, 1.e-3, 1.e-2);
@@ -686,7 +741,6 @@ public:
         }
       }
     }
-    EXPECT_NEAR(total_probability, 1.0, 0.001);
   }
   
   
@@ -787,64 +841,6 @@ private:
 };
 
 
-
-TEST_F(PhasefunctionTests, Uniform)
-{
-  PhaseFunctions::Uniform pf;
-  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
-  this->TestCountsDeviationFromSigma(3.5);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001);
-}
-
-
-TEST_F(PhasefunctionTests, Rayleigh)
-{
-  // output.open("PhasefunctionTests.Rayleight.txt");
-  PhaseFunctions::Rayleigh pf;
-  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
-  this->TestCountsDeviationFromSigma(3.5);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001);
-}
-
-
-TEST_F(PhasefunctionTests, HenleyGreenstein)
-{
-  //output.open("PhasefunctionTests.HenleyGreenstein.txt");
-  PhaseFunctions::HenleyGreenstein pf(0.4);
-  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
-  this->TestCountsDeviationFromSigma(4.);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001);
-}
-
-
-TEST_F(PhasefunctionTests, Combined)
-{
-  PhaseFunctions::HenleyGreenstein pf1{0.4};
-  PhaseFunctions::Uniform pf2;
-  PhaseFunctions::Combined pf{{1., 1., 1.}, {.1, .2, .3}, pf1, {.3, .4, .5}, pf2};
-  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
-  this->TestCountsDeviationFromSigma(3.5);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001);
-}
-
-
-TEST_F(PhasefunctionTests, SimpleCombined)
-{
-  PhaseFunctions::HenleyGreenstein pf1{0.4};
-  PhaseFunctions::Uniform pf2;
-  PhaseFunctions::SimpleCombined pf{{.1, .2, .3}, pf1, {.3, .4, .5}, pf2};
-  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
-  this->TestCountsDeviationFromSigma(3.5);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001);
-}
-
-
-
 class ShaderTests : public ScatterTests
 {
 private:
@@ -921,6 +917,65 @@ private:
 };
 
 
+
+
+TEST_F(PhasefunctionTests, Uniform)
+{
+  PhaseFunctions::Uniform pf;
+  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
+  this->TestCountsDeviationFromSigma(3.5);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001);
+}
+
+
+TEST_F(PhasefunctionTests, Rayleigh)
+{
+  // output.open("PhasefunctionTests.Rayleight.txt");
+  PhaseFunctions::Rayleigh pf;
+  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
+  this->TestCountsDeviationFromSigma(3.5);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001);
+}
+
+
+TEST_F(PhasefunctionTests, HenleyGreenstein)
+{
+  //output.open("PhasefunctionTests.HenleyGreenstein.txt");
+  PhaseFunctions::HenleyGreenstein pf(0.4);
+  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
+  this->TestCountsDeviationFromSigma(4.);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001);
+}
+
+
+TEST_F(PhasefunctionTests, Combined)
+{
+  PhaseFunctions::HenleyGreenstein pf1{0.4};
+  PhaseFunctions::Uniform pf2;
+  PhaseFunctions::Combined pf{{1., 1., 1.}, {.1, .2, .3}, pf1, {.3, .4, .5}, pf2};
+  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
+  this->TestCountsDeviationFromSigma(3.5);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001);
+}
+
+
+TEST_F(PhasefunctionTests, SimpleCombined)
+{
+  PhaseFunctions::HenleyGreenstein pf1{0.4};
+  PhaseFunctions::Uniform pf2;
+  PhaseFunctions::SimpleCombined pf{{.1, .2, .3}, pf1, {.3, .4, .5}, pf2};
+  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
+  this->TestCountsDeviationFromSigma(3.5);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001);
+}
+
+
+
 TEST_F(ShaderTests, DiffuseShader1)
 {
   auto reversed_incident_dir = Normalized(Double3{0,0,1});
@@ -962,6 +1017,57 @@ TEST_F(ShaderTests, DiffuseShader4)
   auto shading_normal = Normalized(Double3{0,1,1});
   DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
   this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 50000);
+  this->TestCountsDeviationFromSigma(3.);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001, Spectral3{0.5});
+}
+
+
+TEST_F(ShaderTests, SpecularReflectiveShader1)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,0,1});
+  auto shading_normal = Double3{0,0,1};
+  SpecularReflectiveShader sh(Color::SpectralN{0.5});
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 2000);
+  this->TestCountsDeviationFromSigma(3.);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001, Spectral3{0.5});
+}
+
+TEST_F(ShaderTests, SpecularReflectiveShader2)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,1,1});
+  auto shading_normal = Double3{0,0,1};
+  SpecularReflectiveShader sh(Color::SpectralN{0.5});
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 2000);
+  this->TestCountsDeviationFromSigma(3.);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.001, Spectral3{0.5});
+}
+
+TEST_F(ShaderTests, SpecularReflectiveShader3)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,0,1});
+  auto shading_normal = Normalized(Double3{0,10,1});
+  SpecularReflectiveShader sh(Color::SpectralN{0.5});
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 5000);
+  this->TestCountsDeviationFromSigma(3.);
+  this->TestChiSqr(0.05);
+  // This is a pathological case, where due to the strongly perturbed
+  // shading normal, the incident direction is specularly reflected
+  // below the geometric surface. I don't know what I can do but to
+  // assign zero reflected radiance. Thus sane rendering algorithms
+  // would not consider this path any further.
+  this->CheckIntegral(0.001, Spectral3{0.0});
+}
+
+
+TEST_F(ShaderTests, SpecularReflectiveShader4)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,10,1});
+  auto shading_normal = Normalized(Double3{0,1,1});
+  SpecularReflectiveShader sh(Color::SpectralN{0.5});
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 5000);
   this->TestCountsDeviationFromSigma(3.);
   this->TestChiSqr(0.05);
   this->CheckIntegral(0.001, Spectral3{0.5});
