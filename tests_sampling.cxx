@@ -50,36 +50,47 @@ void CheckNumberOfSamplesInBin(const char *name, int num_smpl_in_bin, int total_
 }
 
 
-double ChiSquaredProbability(const int *counts, const double *weights, int num_bins)
+// On low_expected_num_samples_cutoff: Chi-Sqr test only works if there is good statistics available, i.e. each bin
+// should have at least 5 or so samples in it. With the cutoff I can simply ignore bins where the expected number of
+// samples is too low.
+double ChiSquaredProbability(const int *counts, const double *weights, int num_bins, double low_expected_num_samples_cutoff = 5)
 {
-  double probability_renormalization = 0.;
   int num_nonzero_bins = 0;
-  int num_samples = 0;
+  
+  int num_samples = std::accumulate(counts, counts+num_bins, 0);
+  double probability_normalization = std::accumulate(weights, weights+num_bins, 0.);
+  auto IsAdmissibleBin = [=](int i) -> bool
+  {
+    return weights[i]*num_samples > low_expected_num_samples_cutoff*probability_normalization;
+  };
+  // Note: num_samples and probability_normalization is captured in IsAdmissibleBin. I can change those vars
+  // now but it won't change the output of IsAdmissibleBin! Which is what I need.
+
   for (int i=0; i<num_bins; ++i)
   {
-    if (weights[i] > 0.)
+    if (IsAdmissibleBin(i))
     {
-      EXPECT_GE(counts[i], 5);
       num_samples += counts[i];
+      probability_normalization += weights[i];
       ++num_nonzero_bins;
-      probability_renormalization += weights[i];
-    }
-    else
-    {
-      EXPECT_EQ(counts[i], 0);
     }
   }
-  probability_renormalization = probability_renormalization>0. ? 1./probability_renormalization : 0.;
+  probability_normalization = probability_normalization>0. ? 1./probability_normalization : 0.;
   double chi_sqr = 0.;
   for (int i=0; i<num_bins; ++i)
   {
-    if (weights[i] > 0.)
+    if (IsAdmissibleBin(i))
     {
-      double expected = weights[i]*probability_renormalization*num_samples;
+      double expected = weights[i]*probability_normalization*num_samples;
       chi_sqr += Sqr(counts[i]-expected)/expected;
     }
   }
 
+  if (num_nonzero_bins <= num_bins/2)
+  {
+    std::cout << "Warning: Chi-Sqr Test where only " << num_nonzero_bins << " of " << num_bins << " bins are used. Other bins have expected number of samples lower than " << low_expected_num_samples_cutoff << "." << std::endl;
+  }
+  
   if (num_nonzero_bins <= 0)
     return 1.;
 
@@ -638,14 +649,15 @@ public:
   {
     for (int i=0; i<integral_cubature.size(); ++i)
     {
+      // As a user of the test, I probably only know the combined albedo of 
+      // specular and diffuse/glossy parts. So take that for comparison.
+      Spectral3 total_reflected = integral_estimate + integral_estimate_delta;
       EXPECT_NEAR(integral_cubature[i], integral_estimate[i], tolerance);
       if (by_value)
       {
-        // As a user of the test, I probably only know the combined albedo of 
-        // specular and diffuse/glossy parts. So take that for comparison.
-        Spectral3 total_reflected = integral_estimate + integral_estimate_delta;
         EXPECT_NEAR(total_reflected[i], (*by_value)[i], tolerance);
       }
+      EXPECT_LE(total_reflected[i], 1.+tolerance);
     }
     EXPECT_NEAR(total_probability, 1.-probability_of_delta_peaks, 1.e-3);
   }
@@ -975,6 +987,8 @@ TEST_F(PhasefunctionTests, SimpleCombined)
 }
 
 
+// Materials ...
+// TODO: Certainly all that repetition is not very nice ...
 
 TEST_F(ShaderTests, DiffuseShader1)
 {
@@ -1010,7 +1024,6 @@ TEST_F(ShaderTests, DiffuseShader3)
   this->CheckIntegral(0.001, Spectral3{0.5});
 }
 
-
 TEST_F(ShaderTests, DiffuseShader4)
 {
   auto reversed_incident_dir = Normalized(Double3{0,10,1});
@@ -1021,6 +1034,8 @@ TEST_F(ShaderTests, DiffuseShader4)
   this->TestChiSqr(0.05);
   this->CheckIntegral(0.001, Spectral3{0.5});
 }
+
+
 
 
 TEST_F(ShaderTests, SpecularReflectiveShader1)
@@ -1061,7 +1076,6 @@ TEST_F(ShaderTests, SpecularReflectiveShader3)
   this->CheckIntegral(0.001, Spectral3{0.0});
 }
 
-
 TEST_F(ShaderTests, SpecularReflectiveShader4)
 {
   auto reversed_incident_dir = Normalized(Double3{0,10,1});
@@ -1072,6 +1086,104 @@ TEST_F(ShaderTests, SpecularReflectiveShader4)
   this->TestChiSqr(0.05);
   this->CheckIntegral(0.001, Spectral3{0.5});
 }
+
+
+
+// Test case for SpecularDenseDielectric selected with almost unnaturally
+// high albedo of the diffuse layer. That is to uncover potential violation
+// in energy conservation. (Too high re-emission might otherwise be masked
+// by reflectivity factor.
+TEST_F(ShaderTests, SpecularDenseDielectricShader1)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,0,1});
+  auto shading_normal = Double3{0,0,1};
+  SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
+  this->TestCountsDeviationFromSigma(3.);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.005);
+}
+
+TEST_F(ShaderTests, SpecularDenseDielectricShader2)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,1,1});
+  auto shading_normal = Double3{0,0,1};
+  SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
+  this->TestCountsDeviationFromSigma(3.);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.005);
+}
+
+TEST_F(ShaderTests, SpecularDenseDielectricShader3)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,0,1});
+  auto shading_normal = Normalized(Double3{0,10,1});
+  SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
+  this->TestCountsDeviationFromSigma(3.5);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.005);
+}
+
+TEST_F(ShaderTests, SpecularDenseDielectricShader4)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,10,1});
+  auto shading_normal = Normalized(Double3{0,1,1});
+  SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
+  this->TestCountsDeviationFromSigma(3.5);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.005);
+}
+
+
+
+TEST_F(ShaderTests, MicrofacetShader1)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,0,1});
+  auto shading_normal = Double3{0,0,1};
+  MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
+  this->TestCountsDeviationFromSigma(3.);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.005);
+}
+
+TEST_F(ShaderTests, MicrofacetShader2)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,1,1});
+  auto shading_normal = Double3{0,0,1};
+  MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
+  this->TestCountsDeviationFromSigma(3.);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.005);
+}
+
+TEST_F(ShaderTests, MicrofacetShader3)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,0,1});
+  auto shading_normal = Normalized(Double3{0,10,1});
+  MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
+  this->TestCountsDeviationFromSigma(3.5);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.005);
+}
+
+TEST_F(ShaderTests, MicrofacetShader4)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,10,1});
+  auto shading_normal = Normalized(Double3{0,1,1});
+  MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
+  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
+  this->TestCountsDeviationFromSigma(3.5);
+  this->TestChiSqr(0.05);
+  this->CheckIntegral(0.005);
+}
+
+
 
 
 
