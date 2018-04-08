@@ -5,7 +5,12 @@
 #include <iostream>
 #include <fstream>
 
+#include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/prettywriter.h>
+
 #include <boost/math/distributions/chi_squared.hpp>
+#include <boost/numeric/interval.hpp>
 
 #include "ray.hxx"
 #include "sampler.hxx"
@@ -17,36 +22,49 @@
 
 #include "cubature.h"
 
-
-// Throw a one with probability p and zero with probability 1-p.
-// Let this be reflected by random variable X \in {0, 1}.
-// What is the expectation E[X] and std deviation sqrt(Var[X])?
-std::pair<double, double> MeanAndSigmaOfThrowingOneWithPandZeroOtherwise(double p)
+//http://mathworld.wolfram.com/BinomialDistribution.html
+std::tuple<double, double> BinomialDistributionMeanStdev(int n, double p)
 {
-  // Expected hit indication = 1 * P + 0 * (1-P) = P
-  // Variance of single throw = (1-P)^2 * P + (0-P)^2 * (1-P) = P - 2 PP + PPP + PP - PPP = P - PP
-  return std::make_pair(p, std::sqrt(p-p*p));
+  assert(p >= 0.);
+  return std::make_tuple(p*n, std::sqrt(n*p*(1.-p)));
 }
 
-// For a sample average <X_i> = 1/N sum_i X_i, 
-// <X_i> is a random variable itself. It has some distribution
-// around the true expectation E[X]. The standard deviation 
-// of this distribution is:
-double SigmaOfAverage(int N, double sample_sigma)
+std::tuple<double, double> BinomialDistributionMeanStdev(int _n, double _p, double _p_err)
 {
-  return sample_sigma/std::sqrt(N);
+  assert(_p >= 0. && _p_err >= 0.);
+  using namespace boost::numeric;
+  using namespace interval_lib;
+  using I = interval<double>;
+  double pl = std::max(0., _p-_p_err);
+  double ph = std::min(1., _p+_p_err);
+  I p{pl, ph};
+  I n{_n, _n};
+  I mean = p*n;
+  I stddev = sqrt(n*p*(1.-p));
+  double uncertainty = stddev.upper() + 0.5*(mean.upper()-mean.lower());
+  return std::make_tuple(_p*_n, uncertainty);
 }
 
 
-void CheckNumberOfSamplesInBin(const char *name, int num_smpl_in_bin, int total_num_smpl, double p_of_bin, double number_of_sigmas_threshold=3.)
+TEST(BinomialDistribution, WithIntervals)
+{
+  double mean1, stddev1;
+  double mean2, stddev2;
+  std::tie(mean1, stddev1) = BinomialDistributionMeanStdev(10, 0.6);
+  std::tie(mean2, stddev2) = BinomialDistributionMeanStdev(10, 0.6, 0.);
+  EXPECT_NEAR(mean1, mean2, 1.e-9);
+  EXPECT_NEAR(stddev1, stddev2, 1.e-9);
+}
+
+
+void CheckNumberOfSamplesInBin(const char *name, int num_smpl_in_bin, int total_num_smpl, double p_of_bin, double number_of_sigmas_threshold=3., double p_of_bin_error = 0.)
 {
   double mean, sigma;
-  std::tie(mean, sigma) = MeanAndSigmaOfThrowingOneWithPandZeroOtherwise(p_of_bin);
-  mean *= total_num_smpl;
-  sigma = SigmaOfAverage(total_num_smpl, sigma * total_num_smpl);
+  std::tie(mean, sigma) = BinomialDistributionMeanStdev(total_num_smpl, p_of_bin, p_of_bin_error);
+  std::stringstream additional_output;
   if (name)
-    std::cout << "Expected in " << name << ": " << mean << "+/-" << sigma << " Actual: " << num_smpl_in_bin << " of " << total_num_smpl << std::endl;
-  EXPECT_NEAR(num_smpl_in_bin, mean, sigma*number_of_sigmas_threshold);
+    additional_output << "Expected in " << name << ": " << mean << "+/-" << sigma << " Actual: " << num_smpl_in_bin << " of " << total_num_smpl << std::endl;
+  EXPECT_NEAR(num_smpl_in_bin, mean, sigma*number_of_sigmas_threshold) << additional_output.str();
 }
 
 
@@ -86,7 +104,7 @@ double ChiSquaredProbability(const int *counts, const double *weights, int num_b
     }
   }
 
-  if (num_nonzero_bins <= num_bins/2)
+  if (num_nonzero_bins <= num_bins * 0.4)
   {
     std::cout << "Warning: Chi-Sqr Test where only " << num_nonzero_bins << " of " << num_bins << " bins are used. Other bins have expected number of samples lower than " << low_expected_num_samples_cutoff << "." << std::endl;
   }
@@ -103,6 +121,48 @@ double ChiSquaredProbability(const int *counts, const double *weights, int num_b
   return prob_observe_ge_chi_sqr;  
 }
 
+
+
+namespace rj
+{
+
+using namespace rapidjson;
+
+using Alloc = rapidjson::Document::AllocatorType; // For some reason I must supply an "allocator" almost everywhere. Why? Who knows?!
+
+rapidjson::Value Array3ToJSON(const Eigen::Array<double, 3, 1> &v, Alloc &alloc)
+{
+  rj::Value json_vec(rj::kArrayType);
+  json_vec.PushBack(rj::Value(v[0]).Move(), alloc).
+            PushBack(rj::Value(v[1]).Move(), alloc).
+            PushBack(rj::Value(v[2]).Move(), alloc);
+  return json_vec;
+}
+
+
+rapidjson::Value ScatterSampleToJSON(const ScatterSample &smpl, Alloc &alloc)
+{
+  rj::Value json_smpl(rj::kObjectType);
+  json_smpl.AddMember("pdf", (double)smpl.pdf_or_pmf, alloc);
+  rj::Value json_vec = Array3ToJSON(smpl.value, alloc);
+  json_smpl.AddMember("value", json_vec, alloc);
+  json_vec = Array3ToJSON(smpl.coordinates.array(), alloc);
+  json_smpl.AddMember("coord", json_vec, alloc);
+  return json_smpl;
+}
+
+
+void Write(rj::Document &doc, const std::string &filename)
+{
+  rj::StringBuffer buffer;
+  rj::PrettyWriter<rj::StringBuffer> writer(buffer);
+  doc.Accept(writer);
+  
+  std::ofstream os(filename.c_str());
+  os.write(buffer.GetString(), std::strlen(buffer.GetString()));
+}
+
+}
 
 
 
@@ -501,24 +561,29 @@ int fnd(unsigned ndim, const double *x, void *fdata_,
 
 namespace 
 {
+
 template<class Func>
-double Integral2D(Func func, Double2 start, Double2 end, double absError, double relError)
+auto Integral2D(Func func, Double2 start, Double2 end, double absError, double relError, int max_eval = 0, double *error_estimate = nullptr)
 {
   double result, error;
-  int status = hcubature(1, cubature_wrapper::f1d<Func>, &func, 2, start.data(), end.data(), 0, absError, relError, ERROR_L2, &result, &error);
+  int status = hcubature(1, cubature_wrapper::f1d<Func>, &func, 2, start.data(), end.data(), max_eval, absError, relError, ERROR_L2, &result, &error);
   if (status != 0)
     throw std::runtime_error("Cubature failed!");
+  if (error_estimate)
+    *error_estimate = error;
   return result;
 }
 
 template<class Func>
-auto MultivariateIntegral2D(Func func, Double2 start, Double2 end, double absError, double relError) -> decltype(func(Double2{}))
+auto MultivariateIntegral2D(Func func, Double2 start, Double2 end, double absError, double relError, int max_eval = 0, decltype(func(Double2{})) *error_estimate = nullptr)
 {
   using R  = decltype(func(Double2{}));
   R result, error;
-  int status = hcubature(result.size(), cubature_wrapper::fnd<Func>, &func, 2, start.data(), end.data(), 0, absError, relError, ERROR_L2, result.data(), error.data());
+  int status = hcubature(result.size(), cubature_wrapper::fnd<Func>, &func, 2, start.data(), end.data(), max_eval, absError, relError, ERROR_L2, result.data(), error.data());
   if (status != 0)
     throw std::runtime_error("Cubature failed!");
+  if (error_estimate)
+    *error_estimate = error;
   return result;
 }
 
@@ -582,40 +647,52 @@ TEST(Cubature, SphereSurfacArea)
 }
 
 
-class ScatterTests : public testing::Test
+class Scatterer
+{
+public:
+  virtual ~Scatterer() {};
+  virtual double ProbabilityDensity(const Double3 &wi, const Double3 &wo) const = 0;
+  virtual Spectral3 ScatterFunction(const Double3 &wi, const Double3 &wo) const = 0;
+  virtual Spectral3 ReflectedRadiance(const Double3 &wi, const Double3 &wo) const = 0;
+  virtual ScatterSample MakeScatterSample(const Double3 &wi, Sampler &sampler) const = 0;
+  virtual bool IsSymmetric() const = 0;
+};
+
+
+class ScatterTests
 {
   /* I want to check if the sampling frequency of some solid angle areas match the probabilities
     * returned by the Evaluate function. I further want to validate the normalization constraint. */
-public:
+protected:
   CubeMap cubemap;
   Sampler sampler;
   static constexpr int Nbins = 4;
-  std::ofstream output;  // If really desperate!
-
+  Double3 reverse_incident_dir {NaN};
+  const Scatterer &scatterer;
+  
   // Filled by member functions.
   std::vector<int> bin_sample_count;
   std::vector<double> bin_probabilities;
+  std::vector<double> bin_probabilities_error; // Numerical integration error.
   double total_probability;
+  double total_probability_error; // Numerical integration error.
   Spectral3 integral_estimate;
   Spectral3 integral_estimate_delta;
   Spectral3 integral_cubature;
+  Spectral3 integral_cubature_error; // Numerical integration error.
   double probability_of_delta_peaks;
-  int num_samples;
+  int num_samples {0};  
   
-  ScatterTests()
-    : cubemap{Nbins}
+public:
+  ScatterTests(const Scatterer &_scatterer)
+    : cubemap{Nbins}, scatterer{_scatterer}
   {}
   
-  // Template Method Design Pattern ?!
-  // Override that in derived classes for Phasefunction and BSDF, respectively.
-  virtual double ProbabilityDensity(const Double3 &omega) const = 0;
-  virtual Spectral3 ScatterFunction(const Double3 &omega) const = 0;
-  virtual ScatterSample MakeScatterSample() = 0;
-  virtual void CheckSymmetry() = 0;
-  
-  void RunAllCalculations(int num_samples)
+  void RunAllCalculations(const Double3 &_reverse_incident_dir, int _num_samples)
   {
-    DoSampling(num_samples);
+    this->reverse_incident_dir = _reverse_incident_dir;
+    this->num_samples = _num_samples;
+    DoSampling();
     ComputeBinProbabilities();
     ComputeCubatureIntegral();
     CheckSymmetry();
@@ -629,11 +706,12 @@ public:
       int side, i, j;
       std::tie(side, i, j) = cubemap.IndexToCell(idx);
       CheckNumberOfSamplesInBin(
-        nullptr, //strconcat(side,"[",i,",",j,"]").c_str(),
+        strconcat(side,"[",i,",",j,"]").c_str(), 
         bin_sample_count[idx], 
         num_samples, 
         bin_probabilities[idx],
-        number_of_sigmas_threshold);
+        number_of_sigmas_threshold,
+        bin_probabilities_error[idx]);
     }
   }
   
@@ -641,7 +719,6 @@ public:
   void TestChiSqr(double p_threshold)
   {
     double chi_sqr_probability = ChiSquaredProbability(&bin_sample_count[0], &bin_probabilities[0], cubemap.TotalNumBins());
-    std::cout << "chi sqr probability = " << chi_sqr_probability << std::endl;
     EXPECT_GE(chi_sqr_probability, p_threshold);
   }
   
@@ -652,21 +729,21 @@ public:
       // As a user of the test, I probably only know the combined albedo of 
       // specular and diffuse/glossy parts. So take that for comparison.
       Spectral3 total_reflected = integral_estimate + integral_estimate_delta;
-      EXPECT_NEAR(integral_cubature[i], integral_estimate[i], tolerance);
+      EXPECT_NEAR(integral_cubature[i], integral_estimate[i], tolerance + integral_cubature_error[i]);
       if (by_value)
       {
         EXPECT_NEAR(total_reflected[i], (*by_value)[i], tolerance);
       }
       EXPECT_LE(total_reflected[i], 1.+tolerance);
     }
-    EXPECT_NEAR(total_probability, 1.-probability_of_delta_peaks, 1.e-3);
+    EXPECT_NEAR(total_probability, 1.-probability_of_delta_peaks, total_probability_error);
   }
  
-  void DoSampling(int num_samples)
+  void DoSampling()
   {
     this->bin_sample_count = std::vector<int>(cubemap.TotalNumBins(), 0);
     this->integral_estimate = Spectral3{0.};  
-    this->num_samples = num_samples;
+    this->integral_estimate_delta = Spectral3{0.};
     this->probability_of_delta_peaks = 0.;
     std::vector<Double3> delta_peaks;
     auto CheckDeltaPeakNewAndMemorize = [&delta_peaks](const Double3 &v) -> bool 
@@ -685,9 +762,9 @@ public:
     auto CrossValidate = [this](const ScatterSample &smpl) -> void
     {
       // Do pdf and scatter function values in the smpl struct match what comes out of member functions?
-      double pdf_crossvalidate = this->ProbabilityDensity(smpl.coordinates);
+      double pdf_crossvalidate = scatterer.ProbabilityDensity(reverse_incident_dir, smpl.coordinates);
       ASSERT_NEAR(PdfValue(smpl), pdf_crossvalidate, 1.e-6);
-      Spectral3 val_crossvalidate = this->ScatterFunction(smpl.coordinates);
+      Spectral3 val_crossvalidate = scatterer.ReflectedRadiance(reverse_incident_dir, smpl.coordinates);
       ASSERT_NEAR(smpl.value[0], val_crossvalidate[0], 1.e-6);
       ASSERT_NEAR(smpl.value[1], val_crossvalidate[1], 1.e-6);
       ASSERT_NEAR(smpl.value[2], val_crossvalidate[2], 1.e-6);
@@ -695,8 +772,7 @@ public:
     
     for (int snum = 0; snum<num_samples; ++snum)
     {
-      auto smpl = this->MakeScatterSample();
-
+      auto smpl = scatterer.MakeScatterSample(reverse_incident_dir, sampler);
       if (IsFromPdf(smpl) && snum<100)
         CrossValidate(smpl);
       // Can only integrate the non-delta density. 
@@ -715,9 +791,6 @@ public:
         if (CheckDeltaPeakNewAndMemorize(smpl.coordinates))
           probability_of_delta_peaks += PmfValue(smpl);
       }
-
-      if (output.is_open())
-        output << smpl.coordinates[0] << " " << smpl.coordinates[1] << " " << smpl.coordinates[2] << " " << smpl.pdf_or_pmf << std::endl;
     }
     integral_estimate /= num_samples;
     integral_estimate_delta /= num_samples;
@@ -726,39 +799,42 @@ public:
  
   void ComputeBinProbabilities()
   {
+    constexpr int MAX_NUM_FUNC_EVALS = 100000;
     this->bin_probabilities = std::vector<double>(cubemap.TotalNumBins(), 0.);
+    this->bin_probabilities_error = std::vector<double>(cubemap.TotalNumBins(), 0.);
     this->total_probability = 0.;
-    for (int side = 0; side < 6; ++side)
+    this->total_probability_error = 0.;
+    for (int idx=0; idx<cubemap.TotalNumBins(); ++idx)
     {
-      for (int i = 0; i<Nbins; ++i)
+      int side, i, j;
+      std::tie(side, i, j) = cubemap.IndexToCell(idx);
+      // Integrating this gives me the probability of a sample falling
+      // into the current bin. The integration is carried out on a square in
+      // R^2, hence the scale factor J from the Jacobian of the variable transform.
+      auto probabilityDensityTimesJ = [&](const Double2 x) -> double
       {
-        for (int j = 0; j<Nbins; ++j)
-        {
-          int idx = cubemap.CellToIndex(side, i, j);
-          // Integrating this gives me the probability of a sample falling
-          // into the current bin. The integration is carried out on a square in
-          // R^2, hence the scale factor J from the Jacobian of the variable transform.
-          auto probabilityDensityTimesJ = [&](const Double2 x) -> double
-          {
-            Double3 omega = cubemap.UVToOmega(side, x);
-            double pdf = this->ProbabilityDensity(omega);
-            return pdf*cubemap.UVtoJ(x);
-          };
-          // By design, only diffuse/glossy components will be captured by this.
-          Double2 start, end;
-          std::tie(start, end) = cubemap.CellToUVBounds(i, j);       
-          double prob = Integral2D(probabilityDensityTimesJ, start, end, 1.e-3, 1.e-2);
-          bin_probabilities[idx] = prob;
-          total_probability += bin_probabilities[idx];
-        }
-      }
+        Double3 omega = cubemap.UVToOmega(side, x);
+        double pdf = scatterer.ProbabilityDensity(reverse_incident_dir, omega);
+        return pdf*cubemap.UVtoJ(x);
+      };
+      // By design, only diffuse/glossy components will be captured by this.
+      Double2 start, end;
+      std::tie(start, end) = cubemap.CellToUVBounds(i, j);       
+      double err = NaN;
+      double prob = Integral2D(probabilityDensityTimesJ, start, end, 1.e-3, 1.e-2, MAX_NUM_FUNC_EVALS, &err);
+      bin_probabilities[idx] = prob;
+      bin_probabilities_error[idx] = err;
+      total_probability += bin_probabilities[idx];
+      total_probability_error += err;
     }
   }
   
   
   void ComputeCubatureIntegral()
   {
+    constexpr int MAX_NUM_FUNC_EVALS = 100000;
     this->integral_cubature = 0.;
+    this->integral_cubature_error = 0.;
     for (int idx=0; idx<cubemap.TotalNumBins(); ++idx)
     {
       int side, i, j;
@@ -766,325 +842,490 @@ public:
       auto functionValueTimesJ = [&](const Double2 x) -> Eigen::Array3d
       {
         Double3 omega = cubemap.UVToOmega(side, x);
-        Spectral3 val = this->ScatterFunction(omega);
+        Spectral3 val = scatterer.ReflectedRadiance(reverse_incident_dir, omega);
         return val*cubemap.UVtoJ(x);
       };
       Double2 start, end;
       std::tie(start, end) = cubemap.CellToUVBounds(i, j);       
-      Eigen::Array3d cell_integral = MultivariateIntegral2D(functionValueTimesJ, start, end, 1.e-3, 1.e-2);
+      Eigen::Array3d err{NaN};
+      Eigen::Array3d cell_integral = MultivariateIntegral2D(functionValueTimesJ, start, end, 1.e-3, 1.e-2, MAX_NUM_FUNC_EVALS, &err);
       this->integral_cubature += cell_integral;
+      this->integral_cubature_error += err;
     }
   }
   
-  
-  // Supply function returning pdf and scatter function value.
-  // Need this because no access to reverse_incident_dir. Also
-  // ScatterFunction might have |wi.shadingnormal| term backed in
-  // which we do not want here!
-  //void CheckSymmetry(
-    //std::function<std::pair<double, Spectral3> (const Double3 &wi, const Double3 &wo)> func)
-  template<class Func>
-  void CheckSymmetryImpl(Func func)
+  void CheckSymmetry()
   {
     const int NUM_SAMPLES = 100;
     for (int snum = 0; snum<NUM_SAMPLES; ++snum)
     {
       Double3 wi = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
       Double3 wo = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
-      double pdf_val, pdf_rev;
-      Spectral3 f_val, f_rev;
-      std::tie(pdf_val, f_val) = func(wi, wo);
-      std::tie(pdf_rev, f_rev) = func(wo, wi);
-      EXPECT_NEAR(pdf_val, pdf_rev, 1.e-6);
+      if (scatterer.IsSymmetric())
+      {
+        double pdf_val = scatterer.ProbabilityDensity(wi, wo); 
+        double pdf_rev = scatterer.ProbabilityDensity(wo, wi);
+        EXPECT_NEAR(pdf_val, pdf_rev, 1.e-6);
+      }
+      Spectral3 f_val = scatterer.ScatterFunction(wi, wo);
+      Spectral3 f_rev = scatterer.ScatterFunction(wo, wi);
       EXPECT_NEAR(f_val[0], f_rev[0], 1.e-6);
       EXPECT_NEAR(f_val[1], f_rev[1], 1.e-6);
       EXPECT_NEAR(f_val[2], f_rev[2], 1.e-6);
     }
   }
+
+  
+  rj::Value CubemapToJSON(rj::Alloc &alloc);
+  void DumpVisualization(const std::string filename);
 };
 
 
-class PhasefunctionTests : public ScatterTests
+class PhasefunctionScatterer : public Scatterer
 {
-private:
-  const PhaseFunctions::PhaseFunction *pf;
-  Double3 reverse_incident_dir;
-  
+  const PhaseFunctions::PhaseFunction &pf;
 public:
-  void RunAllCalculations(const PhaseFunctions::PhaseFunction &pf, const Double3 &reverse_incident_dir, int num_samples)
+  PhasefunctionScatterer(const PhaseFunctions::PhaseFunction &_pf)
+    : pf{_pf}
   {
-    this->pf = &pf;
-    this->reverse_incident_dir = reverse_incident_dir;
-    ScatterTests::RunAllCalculations(num_samples);
   }
   
-  void CheckIntegral(double tolerance)
-  {
-    ScatterTests::CheckIntegral(tolerance, Spectral3{1.});
-  }
-  
-  void CheckSymmetry() override
-  {
-    CheckSymmetryImpl([&](const Double3 &wi, const Double3 &wo) -> std::pair<double, Spectral3>
-    {
-      double pdf = NaN;
-      auto ret = pf->Evaluate(wi, wo, &pdf);
-      return std::make_pair(pdf, ret);
-    });
-  }
-  
-private:
-  double ProbabilityDensity(const Double3 &omega) const override
+  double ProbabilityDensity(const Double3 &wi, const Double3 &wo) const override
   {
     double ret;
-    pf->Evaluate(reverse_incident_dir, omega, &ret);
+    pf.Evaluate(wi, wo, &ret);
     return ret;
   }
   
-  Spectral3 ScatterFunction(const Double3 &omega) const override
+  Spectral3 ScatterFunction(const Double3 &wi, const Double3 &wo) const override
   {
-    return pf->Evaluate(reverse_incident_dir, omega, nullptr);
+    return pf.Evaluate(wi, wo, nullptr);
   }
   
-  ScatterSample MakeScatterSample() override
+  Spectral3 ReflectedRadiance(const Double3 &wi, const Double3 &wo) const override
   {
-    return pf->SampleDirection(reverse_incident_dir, sampler);
+    return ScatterFunction(wi, wo);
+  }
+  
+  ScatterSample MakeScatterSample(const Double3 &wi, Sampler &sampler) const override
+  {
+    return pf.SampleDirection(wi, sampler);
+  }
+  
+  bool IsSymmetric() const override
+  {
+    return true;
+  }
+};
+
+
+class PhaseFunctionTests : public ScatterTests
+{
+    PhasefunctionScatterer pf_wrapper;
+  public:
+    PhaseFunctionTests(const PhaseFunctions::PhaseFunction &_pf)
+      :  ScatterTests{pf_wrapper}, pf_wrapper{_pf}
+    {
+    }
+};
+
+
+class ShaderScatterer : public Scatterer
+{
+  const Shader &sh;
+  PathContext context;
+  std::unique_ptr<TexturedSmoothTriangle> triangle;
+  
+  mutable RaySurfaceIntersection last_intersection;
+  mutable Double3 last_incident_dir;
+  
+  RaySurfaceIntersection& MakeIntersection(const Double3 &reverse_incident_dir) const
+  {
+    if (last_incident_dir != reverse_incident_dir)
+    {
+      RaySegment seg{{reverse_incident_dir, -reverse_incident_dir}, LargeNumber};
+      HitId hit;
+      bool ok = triangle->Intersect(seg.ray, seg.length, hit);
+      last_intersection = RaySurfaceIntersection{hit, seg};
+      last_incident_dir = reverse_incident_dir;
+    }
+    return last_intersection;
+  }
+  
+public:
+  ShaderScatterer(const Shader &_sh, const Double3 &shading_normal = Double3{0., 0., 1.})
+    : sh{_sh},
+      last_incident_dir{NaN}
+  {
+    SetShadingNormal(shading_normal);
+    context = PathContext{Color::LambdaIdxClosestToRGBPrimaries()};
+  }
+  
+  
+  void SetShadingNormal(const Double3 &shading_normal)
+  {
+    Double3 normal{0, 0, 1};
+    triangle = std::make_unique<TexturedSmoothTriangle>(
+      Double3{ -1, -1, 0}, Double3{ 1, -1, 0 }, Double3{ 0, 1, 0 },
+      shading_normal, shading_normal, shading_normal,
+      Double3{0, 0, 0}, Double3{1, 0, 0}, Double3{0.5, 1, 0});
+    last_incident_dir = Double3{NaN}; // Force regeneration of intersection!
+  }
+  
+  
+  double ProbabilityDensity(const Double3 &wi, const Double3 &wo) const override
+  {
+    double ret = NaN;
+    auto &intersection = MakeIntersection(wi);
+    sh.EvaluateBSDF(wi, intersection, wo, context, &ret);
+    return ret;
+  }
+  
+  Spectral3 ScatterFunction(const Double3 &wi, const Double3 &wo) const override
+  {
+    auto &intersection = MakeIntersection(wi);
+    return sh.EvaluateBSDF(wi, intersection, wo, context, nullptr);
+
+  }
+  
+  Spectral3 ReflectedRadiance(const Double3 &wi, const Double3 &wo) const override
+  {
+    auto &intersection = MakeIntersection(wi);
+    auto value = sh.EvaluateBSDF(wi, intersection, wo, context, nullptr);
+    value *= std::abs(Dot(wo, intersection.shading_normal));
+    return value;
+  }
+  
+  ScatterSample MakeScatterSample(const Double3 &wi, Sampler &sampler) const override
+  {
+    auto &intersection = MakeIntersection(wi);
+    auto smpl = sh.SampleBSDF(wi, intersection, sampler, context);
+    smpl.value *= std::abs(Dot(smpl.coordinates, intersection.shading_normal));
+    return smpl;
+  }
+  
+  bool IsSymmetric() const override
+  {
+    return false;
   }
 };
 
 
 class ShaderTests : public ScatterTests
 {
-private:
-  const Shader *sh = nullptr;
-  Double3 reverse_incident_dir;
-  Double3 shading_normal;
-  RaySurfaceIntersection intersection;
-  PathContext context;
-  std::unique_ptr<TexturedSmoothTriangle> triangle;
-  
-public:  
-  void RunAllCalculations(const Shader &sh, const Double3 &reverse_incident_dir, const Double3 &shading_normal, int num_samples)
-  {
-    Init(sh, reverse_incident_dir, shading_normal);
-    ScatterTests::RunAllCalculations(num_samples);
-  }
-  
-private:
-  void Init(const Shader &sh, const Double3 &reverse_incident_dir, const Double3 &shading_normal)
-  {
-    this->sh = &sh;
-    this->reverse_incident_dir = reverse_incident_dir;
-    Double3 normal{0, 0, 1};
-    triangle = std::make_unique<TexturedSmoothTriangle>(
-      Double3{ -1, -1, 0}, Double3{ 1, -1, 0 }, Double3{ 0, 1, 0 },
-      shading_normal, shading_normal, shading_normal,
-      Double3{0, 0, 0}, Double3{1, 0, 0}, Double3{0.5, 1, 0});
-    context = PathContext{Color::LambdaIdxClosestToRGBPrimaries()};
-    intersection = MakeIntersection(reverse_incident_dir);
-  }
-  
-  RaySurfaceIntersection MakeIntersection(Double3 reverse_incident_dir)
-  {
-    RaySegment seg{{reverse_incident_dir, -reverse_incident_dir}, LargeNumber};
-    HitId hit;
-    bool ok = triangle->Intersect(seg.ray, seg.length, hit);
-    return RaySurfaceIntersection{hit, seg};
-  }
-  
-  double ProbabilityDensity(const Double3 &omega) const override
-  {
-    double ret = NaN;
-    sh->EvaluateBSDF(reverse_incident_dir, intersection, omega, context, &ret);
-    return ret;
-  }
-  
-  Spectral3 ScatterFunction(const Double3 &omega) const override
-  {
-    Spectral3 value = sh->EvaluateBSDF(reverse_incident_dir, intersection, omega, context, nullptr);
-    value *= std::abs(Dot(omega, intersection.shading_normal));
-    return value;
-  }
-  
-  ScatterSample MakeScatterSample() override
-  {
-    auto smpl = sh->SampleBSDF(reverse_incident_dir, intersection, sampler, context);
-    if (Dot(smpl.coordinates, intersection.normal)<0.)
-      EXPECT_TRUE(smpl.value.isZero());
-    smpl.value *= std::abs(Dot(smpl.coordinates, intersection.shading_normal));
-    return smpl;
-  }
-  
-  void CheckSymmetry() override
-  {    
-    CheckSymmetryImpl([&](const Double3 &wi, const Double3 &wo) -> std::pair<double, Spectral3>
+    ShaderScatterer sh_wrapper;
+  public:
+    ShaderTests(const Shader &_sh)
+      :  ScatterTests{sh_wrapper}, sh_wrapper{_sh}
     {
-      // Making a new intersection is needed because the shader expects the first direction to be aligned with the normals.
-      RaySurfaceIntersection intersection = MakeIntersection(wi);
-      Spectral3 ret = sh->EvaluateBSDF(wi, intersection, wo, context, nullptr);
-      // Shader pdf's are in general not symmetric. Therefore I just return 0 here.
-      return std::make_pair(0., ret);
-    });
-  }
+    }
+    
+    void RunAllCalculations(const Double3 &_reverse_incident_dir, const Double3 shading_normal, int _num_samples)
+    {
+      sh_wrapper.SetShadingNormal(shading_normal);
+      ScatterTests::RunAllCalculations(_reverse_incident_dir, _num_samples);
+    }
 };
 
 
 
-
-TEST_F(PhasefunctionTests, Uniform)
+class ScatterVisualization
 {
-  PhaseFunctions::Uniform pf;
-  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
-  this->TestCountsDeviationFromSigma(3.5);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001);
+  const Scatterer &scatterer;
+  rj::Alloc &alloc;
+  
+  CubeMap cubemap;
+  Sampler sampler;
+  static constexpr int Nbins = 64;
+  static constexpr int Nsamples = 1000;
+  
+public:  
+  ScatterVisualization(const Scatterer &_scatterer, rj::Alloc &alloc)
+    : scatterer{_scatterer}, alloc{alloc}, cubemap{Nbins}
+  {
+  } 
+  
+  rj::Value RecordSamples(const Double3 &reverse_incident_dir, int num_samples)
+  {
+    rj::Value json_samples(rj::kArrayType);
+    for (int snum = 0; snum<Nsamples; ++snum)
+    {
+      auto smpl = scatterer.MakeScatterSample(reverse_incident_dir, sampler);
+      rj::Value json_smpl = rj::ScatterSampleToJSON(smpl, alloc);
+      json_samples.PushBack(json_smpl, alloc);
+    }
+    //doc.AddMember("samples", json_samples, alloc);
+    return json_samples;
+  }
+  
+  rj::Value RecordCubemap(const Double3 &reverse_incident_dir)
+  {
+    rj::Value json_side(rj::kArrayType);
+    for (int side = 0; side < 6; ++side)
+    {
+      rj::Value json_i(rj::kArrayType);
+      for (int i = 0; i < Nbins; ++i)
+      {
+        rj::Value json_j(rj::kArrayType);
+        for (int j = 0; j < Nbins; ++j)
+        {
+          rj::Value json_bin(rj::kObjectType);
+
+          int idx = cubemap.CellToIndex(side, i, j);
+          auto bounds = cubemap.CellToUVBounds(i, j);
+          Double3 pos = cubemap.UVToOmega(side, 0.5*(std::get<0>(bounds)+std::get<1>(bounds)));
+          
+          json_bin.AddMember("pos", rj::Array3ToJSON(pos.array(), alloc), alloc);
+          
+          auto integrand = [&](const Double2 x) -> Eigen::Array<double, 5, 1>
+          {
+            Double3 omega = cubemap.UVToOmega(side, x);
+            Spectral3 val = scatterer.ScatterFunction(reverse_incident_dir, omega);
+            double pdf = scatterer.ProbabilityDensity(reverse_incident_dir, omega);
+            Eigen::Array<double, 5, 1> out; 
+            out << val[0], val[1], val[2], pdf, 1.;
+            return out*cubemap.UVtoJ(x);
+          };
+          Eigen::Array3d val_avg{NaN};
+          double pdf_avg{NaN};
+          try 
+          {
+            Eigen::Array<double, 5, 1> integral = MultivariateIntegral2D(integrand, std::get<0>(bounds), std::get<1>(bounds), 1.e-3, 1.e-2, 1000);
+            double area = integral[4];
+            val_avg = integral.head<3>() / area;
+            pdf_avg = integral[3] / area;
+          }
+          catch (std::runtime_error)
+          {
+          }
+          json_bin.AddMember("val", rj::Array3ToJSON(val_avg, alloc), alloc);
+          json_bin.AddMember("pdf", pdf_avg, alloc);
+          
+          json_j.PushBack(json_bin, alloc);
+        }
+        json_i.PushBack(json_j, alloc);
+      }
+      json_side.PushBack(json_i, alloc);
+    }
+    return json_side;
+  }
+};
+
+
+rj::Value ScatterTests::CubemapToJSON(rj::Alloc& alloc)
+{
+  rj::Value json_side;
+  json_side.SetArray();
+  for (int side = 0; side < 6; ++side)
+  {
+    rj::Value json_i(rj::kArrayType);
+    for (int i = 0; i < Nbins; ++i)
+    {
+      rj::Value json_j(rj::kArrayType);
+      for (int j = 0; j < Nbins; ++j)
+      {
+        rj::Value json_bin(rj::kObjectType);
+        int idx = cubemap.CellToIndex(side, i, j);
+        json_bin.AddMember("prob", bin_probabilities[idx], alloc);
+        json_bin.AddMember("cnt", bin_sample_count[idx], alloc);
+        json_j.PushBack(json_bin, alloc);
+      }
+      json_i.PushBack(json_j, alloc);
+    }
+    json_side.PushBack(json_i, alloc);
+  }
+  return json_side;
 }
 
 
-TEST_F(PhasefunctionTests, Rayleigh)
+void ScatterTests::DumpVisualization(const std::string filename)
 {
-  // output.open("PhasefunctionTests.Rayleight.txt");
-  PhaseFunctions::Rayleigh pf;
-  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
-  this->TestCountsDeviationFromSigma(3.5);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001);
+  rj::Document doc;
+  auto &alloc = doc.GetAllocator();
+  doc.SetObject();
+  
+  rj::Value thing;
+  thing = CubemapToJSON(alloc);
+  doc.AddMember("test_cubemap", thing, alloc);
+  ScatterVisualization vis(this->scatterer, alloc);
+  thing = vis.RecordCubemap(this->reverse_incident_dir);
+  doc.AddMember("vis_cubemap", thing, alloc);
+  thing = vis.RecordSamples(reverse_incident_dir, 5000);
+  doc.AddMember("vis_samples", thing, alloc);
+  rj::Write(doc, filename);
 }
 
 
-TEST_F(PhasefunctionTests, HenleyGreenstein)
+
+
+TEST(PhasefunctionTests, Uniform)
 {
-  //output.open("PhasefunctionTests.HenleyGreenstein.txt");
+  PhaseFunctions::Uniform pf{};
+  PhaseFunctionTests test(pf);
+  test.RunAllCalculations(Double3{0,0,1}, 5000);
+  test.TestCountsDeviationFromSigma(3);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.001);
+}
+
+
+TEST(PhasefunctionTests, Rayleigh)
+{
+  PhaseFunctions::Rayleigh pf{};
+  PhaseFunctionTests test(pf);
+  test.RunAllCalculations(Double3{0,0,1}, 5000);
+  test.TestCountsDeviationFromSigma(3);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.001);
+}
+
+
+TEST(PhasefunctionTests, HenleyGreenstein)
+{
   PhaseFunctions::HenleyGreenstein pf(0.4);
-  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
-  this->TestCountsDeviationFromSigma(4.);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001);
+  PhaseFunctionTests test(pf);
+  test.RunAllCalculations(Double3{0,0,1}, 5000);
+  test.TestCountsDeviationFromSigma(3);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.001);
 }
 
 
-TEST_F(PhasefunctionTests, Combined)
+TEST(PhasefunctionTests, Combined)
 {
   PhaseFunctions::HenleyGreenstein pf1{0.4};
   PhaseFunctions::Uniform pf2;
-  PhaseFunctions::Combined pf{{1., 1., 1.}, {.1, .2, .3}, pf1, {.3, .4, .5}, pf2};
-  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
-  this->TestCountsDeviationFromSigma(3.5);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001);
+  PhaseFunctions::Combined pf(Spectral3{1., 1., 1.}, Spectral3{.1, .2, .3}, pf1, Spectral3{.3, .4, .5}, pf2);
+  PhaseFunctionTests test(pf);
+  test.RunAllCalculations(Double3{0,0,1}, 5000);
+  test.TestCountsDeviationFromSigma(3);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.001);
 }
 
 
-TEST_F(PhasefunctionTests, SimpleCombined)
+TEST(PhasefunctionTests, SimpleCombined)
 {
   PhaseFunctions::HenleyGreenstein pf1{0.4};
   PhaseFunctions::Uniform pf2;
-  PhaseFunctions::SimpleCombined pf{{.1, .2, .3}, pf1, {.3, .4, .5}, pf2};
-  this->RunAllCalculations(pf, Double3{0,0,1}, 20000);
-  this->TestCountsDeviationFromSigma(3.5);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001);
+  PhaseFunctions::SimpleCombined pf{Spectral3{.1, .2, .3}, pf1, Spectral3{.3, .4, .5}, pf2};
+  PhaseFunctionTests test(pf);
+  test.RunAllCalculations(Double3{0,0,1}, 10000);
+  test.TestCountsDeviationFromSigma(3);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.002);
 }
+
+
 
 
 // Materials ...
 // TODO: Certainly all that repetition is not very nice ...
 
-TEST_F(ShaderTests, DiffuseShader1)
+TEST(ShaderTests, DiffuseShader1)
 {
   auto reversed_incident_dir = Normalized(Double3{0,0,1});
   auto shading_normal = Double3{0,0,1};
   DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 2000);
-  this->TestCountsDeviationFromSigma(3.);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001, Spectral3{0.5});
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 2000);
+  test.TestCountsDeviationFromSigma(3.);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.001, Spectral3{0.5});
 }
 
-TEST_F(ShaderTests, DiffuseShader2)
+TEST(ShaderTests, DiffuseShader2)
 {
   auto reversed_incident_dir = Normalized(Double3{0,1,1});
   auto shading_normal = Double3{0,0,1};
   DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 2000);
-  this->TestCountsDeviationFromSigma(3.);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001, Spectral3{0.5});
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 2000);
+  test.TestCountsDeviationFromSigma(3.);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.001, Spectral3{0.5});
 }
 
-TEST_F(ShaderTests, DiffuseShader3)
+TEST(ShaderTests, DiffuseShader3)
 {
   // NOTE: High variant because the pdf distributes samples according to geometric normal. Hence many samples needed for integral to converge!
+  // TODO: I should probably use another sampling scheme.
   auto reversed_incident_dir = Normalized(Double3{0,0,1});
   auto shading_normal = Normalized(Double3{0,10,1});
   DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 50000);
-  this->TestCountsDeviationFromSigma(3.);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001, Spectral3{0.5});
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 50000);
+  test.TestCountsDeviationFromSigma(3.);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.003, Spectral3{0.5});
 }
 
-TEST_F(ShaderTests, DiffuseShader4)
+TEST(ShaderTests, DiffuseShader4)
 {
   auto reversed_incident_dir = Normalized(Double3{0,10,1});
   auto shading_normal = Normalized(Double3{0,1,1});
   DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 50000);
-  this->TestCountsDeviationFromSigma(3.);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001, Spectral3{0.5});
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 50000);
+  test.TestCountsDeviationFromSigma(3.);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.003, Spectral3{0.5});
 }
 
 
 
 
-TEST_F(ShaderTests, SpecularReflectiveShader1)
+TEST(ShaderTests, SpecularReflectiveShader1)
 {
   auto reversed_incident_dir = Normalized(Double3{0,0,1});
   auto shading_normal = Double3{0,0,1};
   SpecularReflectiveShader sh(Color::SpectralN{0.5});
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 2000);
-  this->TestCountsDeviationFromSigma(3.);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001, Spectral3{0.5});
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 2000);
+  test.TestCountsDeviationFromSigma(3.);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.001, Spectral3{0.5});
 }
 
-TEST_F(ShaderTests, SpecularReflectiveShader2)
+TEST(ShaderTests, SpecularReflectiveShader2)
 {
   auto reversed_incident_dir = Normalized(Double3{0,1,1});
   auto shading_normal = Double3{0,0,1};
   SpecularReflectiveShader sh(Color::SpectralN{0.5});
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 2000);
-  this->TestCountsDeviationFromSigma(3.);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001, Spectral3{0.5});
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 2000);
+  test.TestCountsDeviationFromSigma(3.);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.001, Spectral3{0.5});
 }
 
-TEST_F(ShaderTests, SpecularReflectiveShader3)
+TEST(ShaderTests, SpecularReflectiveShader3)
 {
   auto reversed_incident_dir = Normalized(Double3{0,0,1});
   auto shading_normal = Normalized(Double3{0,10,1});
   SpecularReflectiveShader sh(Color::SpectralN{0.5});
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 5000);
-  this->TestCountsDeviationFromSigma(3.);
-  this->TestChiSqr(0.05);
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 5000);
+  test.TestCountsDeviationFromSigma(3.);
+  test.TestChiSqr(0.05);
   // This is a pathological case, where due to the strongly perturbed
   // shading normal, the incident direction is specularly reflected
   // below the geometric surface. I don't know what I can do but to
   // assign zero reflected radiance. Thus sane rendering algorithms
   // would not consider this path any further.
-  this->CheckIntegral(0.001, Spectral3{0.0});
+  test.CheckIntegral(0.001, Spectral3{0.0});
 }
 
-TEST_F(ShaderTests, SpecularReflectiveShader4)
+TEST(ShaderTests, SpecularReflectiveShader4)
 {
   auto reversed_incident_dir = Normalized(Double3{0,10,1});
   auto shading_normal = Normalized(Double3{0,1,1});
   SpecularReflectiveShader sh(Color::SpectralN{0.5});
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 5000);
-  this->TestCountsDeviationFromSigma(3.);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.001, Spectral3{0.5});
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 5000);
+  test.TestCountsDeviationFromSigma(3.);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.001, Spectral3{0.5});
 }
 
 
@@ -1093,96 +1334,107 @@ TEST_F(ShaderTests, SpecularReflectiveShader4)
 // high albedo of the diffuse layer. That is to uncover potential violation
 // in energy conservation. (Too high re-emission might otherwise be masked
 // by reflectivity factor.
-TEST_F(ShaderTests, SpecularDenseDielectricShader1)
+TEST(ShaderTests, SpecularDenseDielectricShader1)
 {
   auto reversed_incident_dir = Normalized(Double3{0,0,1});
   auto shading_normal = Double3{0,0,1};
   SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
-  this->TestCountsDeviationFromSigma(3.);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.005);
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
+  test.TestCountsDeviationFromSigma(3.);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.005);
 }
 
-TEST_F(ShaderTests, SpecularDenseDielectricShader2)
+TEST(ShaderTests, SpecularDenseDielectricShader2)
 {
   auto reversed_incident_dir = Normalized(Double3{0,1,1});
   auto shading_normal = Double3{0,0,1};
   SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
-  this->TestCountsDeviationFromSigma(3.);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.005);
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
+  test.TestCountsDeviationFromSigma(3.);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.005);
 }
 
-TEST_F(ShaderTests, SpecularDenseDielectricShader3)
+TEST(ShaderTests, SpecularDenseDielectricShader3)
 {
   auto reversed_incident_dir = Normalized(Double3{0,0,1});
   auto shading_normal = Normalized(Double3{0,10,1});
   SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
-  this->TestCountsDeviationFromSigma(3.5);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.005);
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
+  test.TestCountsDeviationFromSigma(3.5);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.005);
 }
 
-TEST_F(ShaderTests, SpecularDenseDielectricShader4)
+TEST(ShaderTests, SpecularDenseDielectricShader4)
 {
   auto reversed_incident_dir = Normalized(Double3{0,10,1});
   auto shading_normal = Normalized(Double3{0,1,1});
   SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
-  this->TestCountsDeviationFromSigma(3.5);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.005);
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
+  test.TestCountsDeviationFromSigma(3.5);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.005);
 }
 
 
 
-TEST_F(ShaderTests, MicrofacetShader1)
+TEST(ShaderTests, MicrofacetShader1)
 {
   auto reversed_incident_dir = Normalized(Double3{0,0,1});
   auto shading_normal = Double3{0,0,1};
   MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
-  this->TestCountsDeviationFromSigma(3.);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.005);
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
+  test.TestCountsDeviationFromSigma(3.);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.005);
+  //test.DumpVisualization("/tmp/MicrofacetShader1.json");
 }
 
-TEST_F(ShaderTests, MicrofacetShader2)
+TEST(ShaderTests, MicrofacetShader2)
 {
   auto reversed_incident_dir = Normalized(Double3{0,1,1});
   auto shading_normal = Double3{0,0,1};
   MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
-  this->TestCountsDeviationFromSigma(3.);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.005);
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 20000);
+  test.TestCountsDeviationFromSigma(3.);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.005);
+  //test.DumpVisualization("/tmp/MicrofacetShader2.json");
 }
 
-TEST_F(ShaderTests, MicrofacetShader3)
+TEST(ShaderTests, MicrofacetShader3)
 {
   auto reversed_incident_dir = Normalized(Double3{0,0,1});
   auto shading_normal = Normalized(Double3{0,10,1});
   MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
-  this->TestCountsDeviationFromSigma(3.5);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.005);
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 20000);
+  test.TestCountsDeviationFromSigma(3.5);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.005);
+  //test.DumpVisualization("/tmp/MicrofacetShader3.json");
 }
 
-TEST_F(ShaderTests, MicrofacetShader4)
+TEST(ShaderTests, MicrofacetShader4)
 {
   auto reversed_incident_dir = Normalized(Double3{0,10,1});
   auto shading_normal = Normalized(Double3{0,1,1});
   MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
-  this->RunAllCalculations(sh, reversed_incident_dir, shading_normal, 10000);
-  this->TestCountsDeviationFromSigma(3.5);
-  this->TestChiSqr(0.05);
-  this->CheckIntegral(0.005);
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
+  test.TestCountsDeviationFromSigma(3.5);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.005);
+  //test.DumpVisualization("/tmp/MicrofacetShader4.json");
 }
-
 
 
 
