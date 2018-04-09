@@ -815,7 +815,9 @@ public:
       {
         Double3 omega = cubemap.UVToOmega(side, x);
         double pdf = scatterer.ProbabilityDensity(reverse_incident_dir, omega);
-        return pdf*cubemap.UVtoJ(x);
+        double ret = pdf*cubemap.UVtoJ(x);
+        assert(std::isfinite(ret));
+        return ret;
       };
       // By design, only diffuse/glossy components will be captured by this.
       Double2 start, end;
@@ -843,7 +845,9 @@ public:
       {
         Double3 omega = cubemap.UVToOmega(side, x);
         Spectral3 val = scatterer.ReflectedRadiance(reverse_incident_dir, omega);
-        return val*cubemap.UVtoJ(x);
+        Spectral3 ret = val*cubemap.UVtoJ(x);
+        assert(ret.allFinite());
+        return ret;
       };
       Double2 start, end;
       std::tie(start, end) = cubemap.CellToUVBounds(i, j);       
@@ -1086,21 +1090,22 @@ public:
             out << val[0], val[1], val[2], pdf, 1.;
             return out*cubemap.UVtoJ(x);
           };
-          Eigen::Array3d val_avg{NaN};
-          double pdf_avg{NaN};
           try 
           {
             Eigen::Array<double, 5, 1> integral = MultivariateIntegral2D(integrand, std::get<0>(bounds), std::get<1>(bounds), 1.e-3, 1.e-2, 1000);
             double area = integral[4];
-            val_avg = integral.head<3>() / area;
-            pdf_avg = integral[3] / area;
+            Eigen::Array3d val_avg = integral.head<3>() / area;
+            double pdf_avg = integral[3] / area;
+            json_bin.AddMember("val", rj::Array3ToJSON(val_avg, alloc), alloc);
+            json_bin.AddMember("pdf", pdf_avg, alloc);
           }
           catch (std::runtime_error)
           {
+            rj::Value rjarr(rj::kArrayType);
+            rjarr.PushBack("NaN", alloc).PushBack("NaN", alloc).PushBack("NaN", alloc);
+            json_bin.AddMember("val", rjarr, alloc);
+            json_bin.AddMember("pdf", "NaN", alloc);
           }
-          json_bin.AddMember("val", rj::Array3ToJSON(val_avg, alloc), alloc);
-          json_bin.AddMember("pdf", pdf_avg, alloc);
-          
           json_j.PushBack(json_bin, alloc);
         }
         json_i.PushBack(json_j, alloc);
@@ -1409,6 +1414,21 @@ TEST(ShaderTests, MicrofacetShader2)
   test.CheckIntegral(0.005);
   //test.DumpVisualization("/tmp/MicrofacetShader2.json");
 }
+
+
+TEST(ShaderTests, MicrofacetShader2b)
+{
+  auto reversed_incident_dir = Normalized(Double3{0,10,1});
+  auto shading_normal = Double3{0,0,1};
+  MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
+  ShaderTests test(sh);
+  test.RunAllCalculations(reversed_incident_dir, shading_normal, 20000);
+  test.TestCountsDeviationFromSigma(3.);
+  test.TestChiSqr(0.05);
+  test.CheckIntegral(0.005);
+  //test.DumpVisualization("/tmp/MicrofacetShader2b.json");
+}
+
 
 TEST(ShaderTests, MicrofacetShader3)
 {
