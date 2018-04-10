@@ -168,13 +168,21 @@ MicrofacetShader::MicrofacetShader(
 Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
   double n_dot_out = Dot(surface_hit.normal, out_direction);
-  double ns_dot_out = Dot(surface_hit.shading_normal, out_direction);
-  double ns_dot_in  = Dot(surface_hit.shading_normal, reverse_incident_dir);
+  double ns_dot_out = std::abs(Dot(surface_hit.shading_normal, out_direction));
+  double ns_dot_in  = std::abs(Dot(surface_hit.shading_normal, reverse_incident_dir));
   Double3 half_angle_vector = Normalized(reverse_incident_dir + out_direction);
+#ifndef NDEBUG
+  {
+    Double3 refl = Reflected(reverse_incident_dir, half_angle_vector);
+    assert(LengthSqr(refl-out_direction) < 1.e-9);
+  }
+#endif
   double ns_dot_wh = Dot(surface_hit.shading_normal, half_angle_vector);
-  double wh_dot_out = Dot(out_direction, half_angle_vector);
-  double wh_dot_in  = Dot(reverse_incident_dir, half_angle_vector);
-
+  double wh_dot_out = std::abs(Dot(out_direction, half_angle_vector));
+  double wh_dot_in  = std::abs(Dot(reverse_incident_dir, half_angle_vector)); // Do I need this? It is the same as wh_dot_out, no?
+  //assert(wh_dot_out >= 0.);
+  //assert(wh_dot_in >= 0.);
+  
   double microfacet_distribution_val;
   { // Beckman Distrib. This formula is using the normalized distribution D(cs) 
     // such that Int_omega D(cs) cs dw = 1, using the differential solid angle dw, 
@@ -187,22 +195,30 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
   }
   
   if (pdf)
-  {
+  {    
     double half_angle_distribution_val = microfacet_distribution_val*std::abs(ns_dot_wh);
-    double out_distribution_val = half_angle_distribution_val*0.25/wh_dot_out; // From density of h_r to density of out direction.
+    double out_distribution_val = half_angle_distribution_val*0.25/(wh_dot_in+Epsilon); // From density of h_r to density of out direction.
     *pdf = out_distribution_val;
   }
-  
-  if (ns_dot_wh <= 0. || n_dot_out <= 0. || wh_dot_out <= 0. || wh_dot_in <= 0.)
+ 
+  if (n_dot_out <= 0.) // Not on same side of geometric surface?
+  {
     return Spectral3{0.};
+  }
+
+  // Half vector is on positive side of shading surface, else zero contribution.
+  // This is essential when shading normals are involved, since then, indeed the
+  // have vector can point below the surface. It can also happen by the random
+  // sampling process of the outgoing direction.
+  microfacet_distribution_val *= Heaviside(ns_dot_wh);
   
   double geometry_term;
   {
 #if 1
     // Cook & Torrance model. Seems to work good enough although Walter et al. has concerns about it's realism.
     // Ref: Cook and Torrance (1982) "A reflectance model for computer graphics"
-    double t1 = 2.*ns_dot_wh*ns_dot_out / wh_dot_out;
-    double t2 = 2.*ns_dot_wh*ns_dot_in / wh_dot_out;
+    double t1 = 2.*ns_dot_wh*ns_dot_out / (wh_dot_out + Epsilon);
+    double t2 = 2.*ns_dot_wh*ns_dot_in / (wh_dot_out + Epsilon);
     geometry_term = std::min(1., std::min(t1, t2));
 #else
     // Overkill?
@@ -236,7 +252,9 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
   
   Spectral3 kr_s_taken = Take(kr_s, context.lambda_idx);
   Spectral3 fresnel_term = SchlicksApproximation(kr_s_taken, wh_dot_in);
-  double monochromatic_terms = geometry_term*microfacet_distribution_val*0.25/ns_dot_in/ns_dot_out;
+  assert (fresnel_term.allFinite());
+  double monochromatic_terms = geometry_term*microfacet_distribution_val*0.25/(ns_dot_in*ns_dot_out+Epsilon);
+  assert(std::isfinite(monochromatic_terms));
   return monochromatic_terms*fresnel_term;
 }
 
@@ -247,10 +265,20 @@ ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, 
   double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
   Double3 h_r_local = SampleTrafo::ToBeckmanHemisphere(sampler.UniformUnitSquare(), alpha);
   Double3 h_r = m*h_r_local;
-  // The following is the inversion of the half-vector formula. It is like reflection except for the abs. But the abs is needed.
-  Double3 out_direction = 2.*std::abs(Dot(reverse_incident_dir, h_r))*h_r - reverse_incident_dir;
+  double hr_dot_in = Dot(reverse_incident_dir, h_r);
+  // See walter 2007, eq. 38. // Should I use the "reflection" formula with the abs in it instead?
+  // However, for that case I haven't found the correct pdf transform for the outgoing direction yet ...
+//   if (hr_dot_in < 0.)
+//   {
+//     hr_dot_in = -hr_dot_in;
+//     h_r = -h_r;
+//   }
+  Double3 out_direction = 2.*hr_dot_in*h_r - reverse_incident_dir;
+//   if (hr_dot_in < 0.) // Only neede dwhen using the "reflection" variant with std::abs in it.
+//     out_direction = Normalized(out_direction);
   ScatterSample smpl; 
   smpl.coordinates = out_direction;
+  ASSERT_NORMALIZED(out_direction);
   double pdf = NaN;
   smpl.value = this->EvaluateBSDF(reverse_incident_dir, surface_hit, out_direction, context, &pdf);
   smpl.pdf_or_pmf = pdf;
