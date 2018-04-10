@@ -15,6 +15,12 @@ inline T Sqr(const T &x)
   return x*x;
 }
 
+template<class T>
+inline T Heaviside(const T &x)
+{
+  return x>T{} ? T{1} : T{0};
+}
+
 
 // Note: Will happily take the signbit from zero. So the result for 0 is basically random.
 template<class T, typename std::enable_if_t<std::is_floating_point<T>{}, int> = 0>
