@@ -11,6 +11,7 @@
 
 #include <boost/math/distributions/chi_squared.hpp>
 #include <boost/math/distributions/normal.hpp>
+#include <boost/math/distributions/students_t.hpp>
 #include <boost/numeric/interval.hpp>
 
 #include "ray.hxx"
@@ -159,13 +160,19 @@ double StddevOfAverage(double sample_stddev, int num_samples)
 }
 
 
-double NormalDistributionOutlierProbability(double x, double stddev)
+double StudentsTValue(double sample_avg, double avg_stddev, double true_mean)
 {
-  boost::math::normal_distribution<double> distribution(0., stddev);
-  if (x > 0.)
-    return cdf(complement(distribution, x));
+  return (sample_avg - true_mean) / avg_stddev;
+}
+
+
+double StudentsTDistributionOutlierProbability(double t, double num_samples)
+{
+  boost::math::students_t_distribution<double> distribution(num_samples);
+  if (t > 0.)
+    return cdf(complement(distribution, t));
   else
-    return cdf(distribution, x);
+    return cdf(distribution, t);
 }
 
 
@@ -182,11 +189,11 @@ void TestSampleAverage(double sample_avg, double sample_stddev, double num_sampl
     // integration bounds. On the other hand, if the integration error is zero, I want to use the usual normal distribution as 
     // stated above. My scheme here achives both of these edge cases.
     if (sample_avg < true_mean - true_mean_error)
-      prob = NormalDistributionOutlierProbability(sample_avg - (true_mean - true_mean_error), avg_stddev);
+      prob = StudentsTDistributionOutlierProbability(StudentsTValue(sample_avg, avg_stddev, true_mean - true_mean_error), num_samples);
     else if(sample_avg > true_mean + true_mean_error)
-      prob = NormalDistributionOutlierProbability(sample_avg - (true_mean + true_mean_error), avg_stddev);
+      prob = StudentsTDistributionOutlierProbability(StudentsTValue(sample_avg, avg_stddev, true_mean + true_mean_error), num_samples);
     else
-      prob = NormalDistributionOutlierProbability(0., avg_stddev);
+      prob = StudentsTDistributionOutlierProbability(0., num_samples);
     EXPECT_GE(prob, p_value) << "Probability to find sample average " << sample_avg << " +/- " << avg_stddev << " w.r.t. true mean " << true_mean << "+/-" << true_mean_error << 
     " is " << prob << " which is lower than p-value " << p_value << std::endl;
     //std::cout << "Test Sample Avg Prob = " << prob << std::endl;
@@ -203,8 +210,8 @@ void TestProbabilityOfMeanLowerThanUpperBound(double sample_avg, double sample_s
   double avg_stddev = StddevOfAverage(sample_stddev, num_samples);
   if (avg_stddev > 0.)
   {
-    boost::math::normal_distribution<double> distribution(sample_avg, avg_stddev);
-    double prob = cdf(distribution, bound);
+    boost::math::students_t_distribution<double> distribution(num_samples);
+    double prob = cdf(complement(distribution, StudentsTValue(sample_avg, avg_stddev, bound)));
     EXPECT_GE(prob, p_value) << "Probability to find the mean smaller than " << bound << " is " << prob << " which is lower than the p-value " << p_value << ", given the average " << sample_avg << " +/- " << avg_stddev << std::endl;
     //std::cout << "Test Prob Upper Bound = " << prob << std::endl;
   }
