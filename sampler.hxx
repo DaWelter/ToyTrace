@@ -111,6 +111,72 @@ inline int TowerSampling(const T *probs, T r)
 }
 
 
+namespace OnlineVariance
+{
+
+// https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Online_algorithm
+// sqr_deviation_sum = M_2,n
+template<class T>
+void Update(T& mean, T &sqr_deviation_sum, int &num_previous_samples, const T &new_x)
+{
+  ++num_previous_samples;
+  T delta = new_x - mean;
+  mean = mean + delta / num_previous_samples;
+  T delta2 = new_x - mean;
+  sqr_deviation_sum += delta*delta2;
+}
+
+template<class T>
+T FinalizeVariance(const T &sqr_deviation_sum, int num_samples)
+{
+  if (num_samples < 2)
+    return T{NaN};
+  return sqr_deviation_sum/(num_samples-1);
+}
+
+// Convenience class, wrapping the algorithm.
+template<class T>
+class Accumulator
+{
+    T mean{0.};
+    T sqr_deviation_sum{0.};
+    int n{0};
+  public:
+    void Update(const T &new_x)
+    {
+      OnlineVariance::Update(mean, sqr_deviation_sum, n, new_x);
+    }
+    
+    void operator+=(const T &new_x)
+    {
+      Update(new_x);
+    }
+    
+    int Count() const
+    {
+      return n;
+    }
+    
+    T Mean() const 
+    {
+      return mean;
+    }
+    
+    T Var() const
+    {
+      return OnlineVariance::FinalizeVariance(sqr_deviation_sum, n);
+    }
+    
+    T Stddev() const
+    {
+      return sqrt(Var());
+    }
+};
+
+
+}
+
+
 namespace PdfConversion
 {
 

@@ -676,8 +676,8 @@ protected:
   std::vector<double> bin_probabilities_error; // Numerical integration error.
   double total_probability;
   double total_probability_error; // Numerical integration error.
-  Spectral3 integral_estimate;
-  Spectral3 integral_estimate_delta;
+  OnlineVariance::Accumulator<Spectral3> diffuse_scattered_estimate;
+  OnlineVariance::Accumulator<Spectral3> total_scattered_estimate;
   Spectral3 integral_cubature;
   Spectral3 integral_cubature_error; // Numerical integration error.
   double probability_of_delta_peaks;
@@ -728,13 +728,12 @@ public:
     {
       // As a user of the test, I probably only know the combined albedo of 
       // specular and diffuse/glossy parts. So take that for comparison.
-      Spectral3 total_reflected = integral_estimate + integral_estimate_delta;
-      EXPECT_NEAR(integral_cubature[i], integral_estimate[i], tolerance + integral_cubature_error[i]);
+      EXPECT_NEAR(integral_cubature[i], diffuse_scattered_estimate.Mean()[i], tolerance + integral_cubature_error[i]);
       if (by_value)
       {
-        EXPECT_NEAR(total_reflected[i], (*by_value)[i], tolerance);
+        EXPECT_NEAR(total_scattered_estimate.Mean()[i], (*by_value)[i], tolerance);
       }
-      EXPECT_LE(total_reflected[i], 1.+tolerance);
+      EXPECT_LE(total_scattered_estimate.Mean()[i], 1.+tolerance);
     }
     EXPECT_NEAR(total_probability, 1.-probability_of_delta_peaks, total_probability_error);
   }
@@ -742,8 +741,8 @@ public:
   void DoSampling()
   {
     this->bin_sample_count = std::vector<int>(cubemap.TotalNumBins(), 0);
-    this->integral_estimate = Spectral3{0.};  
-    this->integral_estimate_delta = Spectral3{0.};
+    this->diffuse_scattered_estimate = OnlineVariance::Accumulator<Spectral3>{};  
+    this->total_scattered_estimate = OnlineVariance::Accumulator<Spectral3>{};
     this->probability_of_delta_peaks = 0.;
     std::vector<Double3> delta_peaks;
     auto CheckDeltaPeakNewAndMemorize = [&delta_peaks](const Double3 &v) -> bool 
@@ -781,19 +780,21 @@ public:
       {
         int idx = SampleIndex(smpl);
         bin_sample_count[idx] += 1;
-        integral_estimate += smpl.value / smpl.pdf_or_pmf; 
+        diffuse_scattered_estimate += smpl.value / smpl.pdf_or_pmf; 
       }
       else
       {
-        // I can ofc integrate by MC.
-        integral_estimate_delta += smpl.value / smpl.pdf_or_pmf;
         // "pdf_or_pmf" is the probability of selecting the delta-peak.
         if (CheckDeltaPeakNewAndMemorize(smpl.coordinates))
           probability_of_delta_peaks += PmfValue(smpl);
+        // Think of Russian Roulette. When it is decided to sample the delta-peaks,
+        // the other contribution is formally zerod out. In order to make the
+        // statistics work, I must still count it as regular sample(????).
+        diffuse_scattered_estimate += Spectral3{0.};
       }
+      // I can ofc integrate delta-peak contributions by MC.
+      total_scattered_estimate += smpl.value / smpl.pdf_or_pmf; 
     }
-    integral_estimate /= num_samples;
-    integral_estimate_delta /= num_samples;
   }
  
  
@@ -1041,7 +1042,7 @@ class ScatterVisualization
   CubeMap cubemap;
   Sampler sampler;
   static constexpr int Nbins = 64;
-  static constexpr int Nsamples = 1000;
+  static constexpr int Nsamples = 10000;
   
 public:  
   ScatterVisualization(const Scatterer &_scatterer, rj::Alloc &alloc)
@@ -1049,7 +1050,7 @@ public:
   {
   } 
   
-  rj::Value RecordSamples(const Double3 &reverse_incident_dir, int num_samples)
+  rj::Value RecordSamples(const Double3 &reverse_incident_dir)
   {
     rj::Value json_samples(rj::kArrayType);
     for (int snum = 0; snum<Nsamples; ++snum)
@@ -1155,7 +1156,7 @@ void ScatterTests::DumpVisualization(const std::string filename)
   ScatterVisualization vis(this->scatterer, alloc);
   thing = vis.RecordCubemap(this->reverse_incident_dir);
   doc.AddMember("vis_cubemap", thing, alloc);
-  thing = vis.RecordSamples(reverse_incident_dir, 5000);
+  thing = vis.RecordSamples(reverse_incident_dir);
   doc.AddMember("vis_samples", thing, alloc);
   rj::Write(doc, filename);
 }
