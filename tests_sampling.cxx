@@ -10,6 +10,7 @@
 #include <rapidjson/prettywriter.h>
 
 #include <boost/math/distributions/chi_squared.hpp>
+#include <boost/math/distributions/normal.hpp>
 #include <boost/numeric/interval.hpp>
 
 #include "ray.hxx"
@@ -21,6 +22,7 @@
 #include "sampler.hxx"
 
 #include "cubature.h"
+
 
 //http://mathworld.wolfram.com/BinomialDistribution.html
 std::tuple<double, double> BinomialDistributionMeanStdev(int n, double p)
@@ -68,59 +70,149 @@ void CheckNumberOfSamplesInBin(const char *name, int num_smpl_in_bin, int total_
 }
 
 
-// On low_expected_num_samples_cutoff: Chi-Sqr test only works if there is good statistics available, i.e. each bin
-// should have at least 5 or so samples in it. With the cutoff I can simply ignore bins where the expected number of
-// samples is too low.
+namespace ChiSqrInternal
+{
+
+struct Bin {
+  double count;
+  double expected;
+};
+
+
+// TODO: I wish I had a super lightweight range checked (in debug mode only ofc.) array view.
+
+void MergeBinsToGetAboveMinNumSamplesCutoff(Bin *bins, int &num_bins, double low_expected_num_samples_cutoff)
+{
+  //http://en.cppreference.com/w/cpp/algorithm/make_heap
+  // ... and so on.
+  auto cmp = [](const Bin &a, const Bin &b) -> bool { return a.count > b.count; }; // Using > instead of < makes it a min-heap.
+  std::make_heap(bins, bins+num_bins, cmp);
+  while (num_bins > 1)
+  {
+    // Get smallest element to the end.
+    std::pop_heap(bins, bins+num_bins, cmp);
+    if (bins[num_bins-1].expected > low_expected_num_samples_cutoff)
+      break;
+    // Get the second smallest element to the second last position.
+    std::pop_heap(bins, bins+num_bins-1, cmp);
+    // Merge them.
+    Bin &merged = bins[num_bins-2];
+    Bin &removed = bins[num_bins-1];
+    merged.count += removed.count;
+    merged.expected += removed.expected;
+    removed.count = 0;
+    removed.expected = 0;
+    --num_bins; 
+    // Modifications done. Get last element back into heap.
+    std::push_heap(bins, bins+num_bins, cmp);
+  }
+  assert(num_bins >= 1);
+  assert((num_bins == 1) || (bins[num_bins-1].expected > low_expected_num_samples_cutoff));
+}
+
+}
+
+
 double ChiSquaredProbability(const int *counts, const double *weights, int num_bins, double low_expected_num_samples_cutoff = 5)
 {
-  int num_nonzero_bins = 0;
+  using namespace ChiSqrInternal;
   
-  int num_samples = std::accumulate(counts, counts+num_bins, 0);
+  int num_samples = std::accumulate(counts, counts+num_bins, 0); // It's the sum.
   double probability_normalization = std::accumulate(weights, weights+num_bins, 0.);
-  auto IsAdmissibleBin = [=](int i) -> bool
-  {
-    return weights[i]*num_samples > low_expected_num_samples_cutoff*probability_normalization;
-  };
-  // Note: num_samples and probability_normalization is captured in IsAdmissibleBin. I can change those vars
-  // now but it won't change the output of IsAdmissibleBin! Which is what I need.
 
-  for (int i=0; i<num_bins; ++i)
-  {
-    if (IsAdmissibleBin(i))
-    {
-      num_samples += counts[i];
-      probability_normalization += weights[i];
-      ++num_nonzero_bins;
-    }
-  }
   probability_normalization = probability_normalization>0. ? 1./probability_normalization : 0.;
+  
+  std::unique_ptr<Bin[]> bins{new Bin[num_bins]};
+  for (int i=0; i<num_bins; ++i)
+    bins[i] = Bin{(double)counts[i], weights[i]*num_samples*probability_normalization};
+
+  int original_num_bins = num_bins;
+  MergeBinsToGetAboveMinNumSamplesCutoff(bins.get(), num_bins, low_expected_num_samples_cutoff);
+  
   double chi_sqr = 0.;
   for (int i=0; i<num_bins; ++i)
   {
-    if (IsAdmissibleBin(i))
-    {
-      double expected = weights[i]*probability_normalization*num_samples;
-      chi_sqr += Sqr(counts[i]-expected)/expected;
-    }
+    chi_sqr += Sqr(bins[i].count - bins[i].expected)/bins[i].expected;
   }
 
-  if (num_nonzero_bins <= num_bins * 0.4)
+  if (original_num_bins > num_bins*3)
   {
-    std::cout << "Warning: Chi-Sqr Test where only " << num_nonzero_bins << " of " << num_bins << " bins are used. Other bins have expected number of samples lower than " << low_expected_num_samples_cutoff << "." << std::endl;
+    std::cout << "Chi-Sqr Test merged " << (original_num_bins-num_bins) << " bins because their sample count was below " << low_expected_num_samples_cutoff << std::endl;
   }
   
-  if (num_nonzero_bins <= 0)
-    return 1.;
-
   // https://www.boost.org/doc/libs/1_66_0/libs/math/doc/html/math_toolkit/dist_ref/dists/chi_squared_dist.html
   // https://www.boost.org/doc/libs/1_66_0/libs/math/doc/html/math_toolkit/dist_ref/nmp.html#math_toolkit.dist_ref.nmp.cdf
-  boost::math::chi_squared_distribution<double> distribution(num_nonzero_bins-1);
+  boost::math::chi_squared_distribution<double> distribution(num_bins-1);
   double prob_observe_ge_chi_sqr = cdf(complement(distribution, chi_sqr));
   
+  //std::cout << "chi-sqr prob = " << prob_observe_ge_chi_sqr << std::endl;
   //EXPECT_GE(prob_observe_ge_chi_sqr, p_threshold);
   return prob_observe_ge_chi_sqr;  
 }
 
+
+// By https://en.wikipedia.org/wiki/Central_limit_theorem
+// for large number of samples.
+double StddevOfAverage(double sample_stddev, int num_samples)
+{
+  return sample_stddev / std::sqrt(num_samples);
+}
+
+
+double NormalDistributionOutlierProbability(double x, double stddev)
+{
+  boost::math::normal_distribution<double> distribution(0., stddev);
+  if (x > 0.)
+    return cdf(complement(distribution, x));
+  else
+    return cdf(distribution, x);
+}
+
+
+void TestSampleAverage(double sample_avg, double sample_stddev, double num_samples, double true_mean, double true_mean_error, double p_value)
+{
+  double avg_stddev = StddevOfAverage(sample_stddev, num_samples);
+  if (avg_stddev > 0.)
+  {
+    double prob;
+    // Normally I would use the probability of the distance greater than |(sample_avg - true_mean)| w.r.t. to a normal distribution.
+    // I use normal distribution rather than t-test stuff because I have a lot of samples.
+    // However, since I also have integration errors, I "split" the normal distribution in half and move both sides to the edges of
+    // the integration error bounds. Clearly, I the MC estimate is very good, I want to check if sample_avg is precisely within the 
+    // integration bounds. On the other hand, if the integration error is zero, I want to use the usual normal distribution as 
+    // stated above. My scheme here achives both of these edge cases.
+    if (sample_avg < true_mean - true_mean_error)
+      prob = NormalDistributionOutlierProbability(sample_avg - (true_mean - true_mean_error), avg_stddev);
+    else if(sample_avg > true_mean + true_mean_error)
+      prob = NormalDistributionOutlierProbability(sample_avg - (true_mean + true_mean_error), avg_stddev);
+    else
+      prob = NormalDistributionOutlierProbability(0., avg_stddev);
+    EXPECT_GE(prob, p_value) << "Probability to find sample average " << sample_avg << " +/- " << avg_stddev << " w.r.t. true mean " << true_mean << "+/-" << true_mean_error << 
+    " is " << prob << " which is lower than p-value " << p_value << std::endl;
+    //std::cout << "Test Sample Avg Prob = " << prob << std::endl;
+  }
+  else
+  {
+    EXPECT_NEAR(sample_avg, true_mean, true_mean_error);
+  }
+}
+
+
+void TestProbabilityOfMeanLowerThanUpperBound(double sample_avg, double sample_stddev, double num_samples, double bound, double p_value)
+{
+  double avg_stddev = StddevOfAverage(sample_stddev, num_samples);
+  if (avg_stddev > 0.)
+  {
+    boost::math::normal_distribution<double> distribution(sample_avg, avg_stddev);
+    double prob = cdf(distribution, bound);
+    EXPECT_GE(prob, p_value) << "Probability to find the mean smaller than " << bound << " is " << prob << " which is lower than the p-value " << p_value << ", given the average " << sample_avg << " +/- " << avg_stddev << std::endl;
+    //std::cout << "Test Prob Upper Bound = " << prob << std::endl;
+  }
+  else
+  {
+    EXPECT_LE(sample_avg, bound);
+  }
+}
 
 
 namespace rj
@@ -716,27 +808,31 @@ public:
   }
   
 
-  void TestChiSqr(double p_threshold)
+  void TestChiSqr(double p_threshold = 0.05)
   {
     double chi_sqr_probability = ChiSquaredProbability(&bin_sample_count[0], &bin_probabilities[0], cubemap.TotalNumBins());
     EXPECT_GE(chi_sqr_probability, p_threshold);
   }
   
-  void CheckIntegral(double tolerance, boost::optional<Spectral3> by_value = boost::none)
+  
+  void CheckIntegral(boost::optional<Spectral3> by_value = boost::none, double p_value = 0.05)
   {
+    static constexpr double TEST_EPS = 1.e-8; // Extra wiggle room for roundoff errors.
     for (int i=0; i<integral_cubature.size(); ++i)
     {
       // As a user of the test, I probably only know the combined albedo of 
       // specular and diffuse/glossy parts. So take that for comparison.
-      EXPECT_NEAR(integral_cubature[i], diffuse_scattered_estimate.Mean()[i], tolerance + integral_cubature_error[i]);
+      
+      TestSampleAverage(diffuse_scattered_estimate.Mean()[i], diffuse_scattered_estimate.Stddev()[i], num_samples, integral_cubature[i], integral_cubature_error[i]+TEST_EPS, p_value);
       if (by_value)
       {
-        EXPECT_NEAR(total_scattered_estimate.Mean()[i], (*by_value)[i], tolerance);
+        TestSampleAverage(total_scattered_estimate.Mean()[i], total_scattered_estimate.Stddev()[i], num_samples, (*by_value)[i], TEST_EPS, p_value);
       }
-      EXPECT_LE(total_scattered_estimate.Mean()[i], 1.+tolerance);
+      TestProbabilityOfMeanLowerThanUpperBound(total_scattered_estimate.Mean()[i], total_scattered_estimate.Stddev()[i], num_samples, 1.+TEST_EPS, p_value);
     }
     EXPECT_NEAR(total_probability, 1.-probability_of_delta_peaks, total_probability_error);
   }
+ 
  
   void DoSampling()
   {
@@ -858,6 +954,7 @@ public:
       this->integral_cubature_error += err;
     }
   }
+  
   
   void CheckSymmetry()
   {
@@ -1170,8 +1267,8 @@ TEST(PhasefunctionTests, Uniform)
   PhaseFunctionTests test(pf);
   test.RunAllCalculations(Double3{0,0,1}, 5000);
   test.TestCountsDeviationFromSigma(3);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.001);
+  test.TestChiSqr();
+  test.CheckIntegral();
 }
 
 
@@ -1181,8 +1278,8 @@ TEST(PhasefunctionTests, Rayleigh)
   PhaseFunctionTests test(pf);
   test.RunAllCalculations(Double3{0,0,1}, 5000);
   test.TestCountsDeviationFromSigma(3);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.001);
+  test.TestChiSqr();
+  test.CheckIntegral();
 }
 
 
@@ -1192,8 +1289,8 @@ TEST(PhasefunctionTests, HenleyGreenstein)
   PhaseFunctionTests test(pf);
   test.RunAllCalculations(Double3{0,0,1}, 5000);
   test.TestCountsDeviationFromSigma(3);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.001);
+  test.TestChiSqr();
+  test.CheckIntegral();
 }
 
 
@@ -1205,8 +1302,8 @@ TEST(PhasefunctionTests, Combined)
   PhaseFunctionTests test(pf);
   test.RunAllCalculations(Double3{0,0,1}, 5000);
   test.TestCountsDeviationFromSigma(3);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.001);
+  test.TestChiSqr();
+  test.CheckIntegral();
 }
 
 
@@ -1218,10 +1315,9 @@ TEST(PhasefunctionTests, SimpleCombined)
   PhaseFunctionTests test(pf);
   test.RunAllCalculations(Double3{0,0,1}, 10000);
   test.TestCountsDeviationFromSigma(3);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.002);
+  test.TestChiSqr();
+  test.CheckIntegral();
 }
-
 
 
 
@@ -1232,12 +1328,12 @@ TEST(ShaderTests, DiffuseShader1)
 {
   auto reversed_incident_dir = Normalized(Double3{0,0,1});
   auto shading_normal = Double3{0,0,1};
-  DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
+  DiffuseShader sh(Color::SpectralN{1.0}, nullptr);
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 2000);
   test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.001, Spectral3{0.5});
+  test.TestChiSqr();
+  test.CheckIntegral(Spectral3{1.});
 }
 
 TEST(ShaderTests, DiffuseShader2)
@@ -1248,8 +1344,8 @@ TEST(ShaderTests, DiffuseShader2)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 2000);
   test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.001, Spectral3{0.5});
+  test.TestChiSqr();
+  test.CheckIntegral(Spectral3{0.5});
 }
 
 TEST(ShaderTests, DiffuseShader3)
@@ -1262,8 +1358,8 @@ TEST(ShaderTests, DiffuseShader3)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 50000);
   test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.003, Spectral3{0.5});
+  test.TestChiSqr();
+  test.CheckIntegral(Spectral3{0.5});
 }
 
 TEST(ShaderTests, DiffuseShader4)
@@ -1274,8 +1370,8 @@ TEST(ShaderTests, DiffuseShader4)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 50000);
   test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.003, Spectral3{0.5});
+  test.TestChiSqr();
+  test.CheckIntegral(Spectral3{0.5});
 }
 
 
@@ -1289,8 +1385,7 @@ TEST(ShaderTests, SpecularReflectiveShader1)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 2000);
   test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.001, Spectral3{0.5});
+  test.CheckIntegral(Spectral3{0.5});
 }
 
 TEST(ShaderTests, SpecularReflectiveShader2)
@@ -1301,8 +1396,7 @@ TEST(ShaderTests, SpecularReflectiveShader2)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 2000);
   test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.001, Spectral3{0.5});
+  test.CheckIntegral(Spectral3{0.5});
 }
 
 TEST(ShaderTests, SpecularReflectiveShader3)
@@ -1313,13 +1407,12 @@ TEST(ShaderTests, SpecularReflectiveShader3)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 5000);
   test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr(0.05);
   // This is a pathological case, where due to the strongly perturbed
   // shading normal, the incident direction is specularly reflected
   // below the geometric surface. I don't know what I can do but to
   // assign zero reflected radiance. Thus sane rendering algorithms
   // would not consider this path any further.
-  test.CheckIntegral(0.001, Spectral3{0.0});
+  test.CheckIntegral(Spectral3{0.0});
 }
 
 TEST(ShaderTests, SpecularReflectiveShader4)
@@ -1330,8 +1423,7 @@ TEST(ShaderTests, SpecularReflectiveShader4)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 5000);
   test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.001, Spectral3{0.5});
+  test.CheckIntegral(Spectral3{0.5});
 }
 
 
@@ -1348,8 +1440,8 @@ TEST(ShaderTests, SpecularDenseDielectricShader1)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
   test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.005);
+  test.TestChiSqr();
+  test.CheckIntegral();
 }
 
 TEST(ShaderTests, SpecularDenseDielectricShader2)
@@ -1360,8 +1452,8 @@ TEST(ShaderTests, SpecularDenseDielectricShader2)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
   test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.005);
+  test.TestChiSqr();
+  test.CheckIntegral();
 }
 
 TEST(ShaderTests, SpecularDenseDielectricShader3)
@@ -1372,8 +1464,8 @@ TEST(ShaderTests, SpecularDenseDielectricShader3)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
   test.TestCountsDeviationFromSigma(3.5);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.005);
+  test.TestChiSqr();
+  test.CheckIntegral();
 }
 
 TEST(ShaderTests, SpecularDenseDielectricShader4)
@@ -1384,8 +1476,8 @@ TEST(ShaderTests, SpecularDenseDielectricShader4)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
   test.TestCountsDeviationFromSigma(3.5);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.005);
+  test.TestChiSqr();
+  test.CheckIntegral();
 }
 
 
@@ -1398,8 +1490,8 @@ TEST(ShaderTests, MicrofacetShader1)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
   test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.005);
+  test.TestChiSqr();
+  test.CheckIntegral();
   //test.DumpVisualization("/tmp/MicrofacetShader1.json");
 }
 
@@ -1411,8 +1503,8 @@ TEST(ShaderTests, MicrofacetShader2)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 20000);
   test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.005);
+  test.TestChiSqr();
+  test.CheckIntegral();
   //test.DumpVisualization("/tmp/MicrofacetShader2.json");
 }
 
@@ -1425,8 +1517,8 @@ TEST(ShaderTests, MicrofacetShader2b)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 20000);
   test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.005);
+  test.TestChiSqr();
+  test.CheckIntegral();
   //test.DumpVisualization("/tmp/MicrofacetShader2b.json");
 }
 
@@ -1439,8 +1531,8 @@ TEST(ShaderTests, MicrofacetShader3)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 20000);
   test.TestCountsDeviationFromSigma(3.5);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.005);
+  test.TestChiSqr();
+  test.CheckIntegral();
   //test.DumpVisualization("/tmp/MicrofacetShader3.json");
 }
 
@@ -1452,8 +1544,8 @@ TEST(ShaderTests, MicrofacetShader4)
   ShaderTests test(sh);
   test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
   test.TestCountsDeviationFromSigma(3.5);
-  test.TestChiSqr(0.05);
-  test.CheckIntegral(0.005);
+  test.TestChiSqr();
+  test.CheckIntegral();
   //test.DumpVisualization("/tmp/MicrofacetShader4.json");
 }
 
