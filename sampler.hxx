@@ -26,6 +26,8 @@ class Sampler
   std::uniform_real_distribution<double> uniform;
 public: 
   Sampler();
+  void Seed(std::uint64_t seed);
+  
   void Uniform01(double *dest, int count);
   int UniformInt(int a, int b_inclusive);
   

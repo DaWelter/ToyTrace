@@ -109,6 +109,12 @@ Sampler::Sampler()
 }
 
 
+void Sampler::Seed(std::uint64_t seed)
+{
+  random_engine.seed(seed);
+}
+
+
 void Sampler::Uniform01(double* dest, int count)
 {
   for (int i=0; i<count; ++i)

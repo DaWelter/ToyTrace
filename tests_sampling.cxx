@@ -764,7 +764,6 @@ class ScatterTests
     * returned by the Evaluate function. I further want to validate the normalization constraint. */
 protected:
   CubeMap cubemap;
-  Sampler sampler;
   static constexpr int Nbins = 4;
   Double3 reverse_incident_dir {NaN};
   const Scatterer &scatterer;
@@ -781,6 +780,9 @@ protected:
   Spectral3 integral_cubature_error; // Numerical integration error.
   double probability_of_delta_peaks;
   int num_samples {0};  
+
+public:
+    Sampler sampler;
   
 public:
   ScatterTests(const Scatterer &_scatterer)
@@ -1320,6 +1322,7 @@ TEST(PhasefunctionTests, SimpleCombined)
   PhaseFunctions::Uniform pf2;
   PhaseFunctions::SimpleCombined pf{Spectral3{.1, .2, .3}, pf1, Spectral3{.3, .4, .5}, pf2};
   PhaseFunctionTests test(pf);
+  test.sampler.Seed(12356);
   test.RunAllCalculations(Double3{0,0,1}, 10000);
   test.TestCountsDeviationFromSigma(3);
   test.TestChiSqr();
