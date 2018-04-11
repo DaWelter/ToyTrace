@@ -24,6 +24,8 @@
 
 #include "cubature.h"
 
+// A review of statistical testing applied to computer graphics!
+// http://www0.cs.ucl.ac.uk/staff/K.Subr/Files/Papers/PG2007.pdf
 
 //http://mathworld.wolfram.com/BinomialDistribution.html
 std::tuple<double, double> BinomialDistributionMeanStdev(int n, double p)
