@@ -86,6 +86,11 @@ public:
     responses.clear();
   }
   
+  void NotifyPassesFinished(int num_passes)
+  {
+    algo->NotifyPassesFinished(num_passes);
+  }
+  
 private:
   void SetState(State _state)
   {
@@ -361,12 +366,16 @@ int main(int argc, char *argv[])
         IssueRequest(workers, Worker::REQUEST_GO);        
         display->Show(bm);
       }
-
+     
       IssueRequest(workers, Worker::REQUEST_HALT);
       WaitForWorkers(workers);
-
+      
       for (auto &worker : workers)
         worker->FillInSplats();
+      
+      for (auto &worker : workers)
+        worker->NotifyPassesFinished(samples_per_pixel_per_iteration);
+      
       UpdateImageToCurrentLine();
       display->Show(bm);
       bm.write(output_file.string());
