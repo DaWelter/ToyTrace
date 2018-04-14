@@ -315,13 +315,16 @@ private:
     double nominator = eye_densities[connection.eye_index+1]*
                        light_densities[connection.light_index+1];
     nominator = Sqr(nominator);
+    assert (std::isfinite(nominator));
     double denom = 0.;
     for (int s = 0; s <= total_node_count; ++s)
     {
       bool flag = !(specular_flags[s] || specular_flags[s+1]);
       double summand = flag ? (eye_densities[s]*light_densities[total_node_count-s]) : 0.;
       denom += Sqr(summand);
+      assert (std::isfinite(denom));
     }
+    assert(denom > 0.);
     return nominator/denom;
   }
   
@@ -564,6 +567,7 @@ public:
   
   void AddPathContribution(int s, int t, double mis_weight, const Spectral3 &path_weight)
   {
+    assert(path_weight.allFinite() && std::isfinite(mis_weight));
     int path_length = s+t+2; // +2 Because s and t are 0-based indices.
     assert(path_length >= 2);
     if (s == 0) // Initial eye vertex.
@@ -611,19 +615,25 @@ public:
 
       Pdf reverse_pdf = ReverseScatterPdf(current_node, step.scatter_pdf, step.segment.ray.dir, context);
       
+      // Determine survival of russian roulette early because it modifies beta_factor!
+      bool survive = SurvivalAtNthScatterNode(step.beta_factor, path_node_count+1); 
+      
       path.AddSegment(step.node, step.beta_factor, step.scatter_pdf, reverse_pdf, volume_pdf_coeff, step.segment);
       
       step_callback(path_node_count);
-      
-      ++path_node_count;
-      
-      bool survive = SurvivalAtNthScatterNode(step.beta_factor, path_node_count); 
+            
+      // The new node is used definitely. However now the walk can terminate.
+      // It would make more sense maybe to do RR right after evaluating the 
+      // scatter function. On the other hand, it should not matter how and where 
+      // I compute the termination (or survival) probability.
       if (!survive)
         break;
       
       if (step.node.node_type != RW::NodeType::SCATTER)
         break;
-    }    
+      
+      ++path_node_count;
+    }
   }
   
   
