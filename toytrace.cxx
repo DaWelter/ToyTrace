@@ -568,7 +568,7 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
       else
       {
         output_file = input_file.parent_path() / input_file.stem();
-        output_file += ".jpg";
+        output_file += ".png";
       }
     }
     
