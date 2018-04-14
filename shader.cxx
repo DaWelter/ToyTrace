@@ -54,6 +54,21 @@ inline T AverageOfProjectedSchlicksApproximationOverHemisphere(const T &kspecula
 }
 
 
+double Shader::Pdf(const Double3& incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext& context) const
+{
+  RaySurfaceIntersection intersect{surface_hit};
+  // Puke ... TODO: Abolish requirement of normal alignment with incident dir.
+  if (Dot(incident_dir, intersect.normal) < 0.)
+  {
+    intersect.normal = -intersect.normal;
+    intersect.shading_normal = -intersect.shading_normal;
+  }
+  // TODO: This should be implemented in each shader so that only the pdf is computed (?)!
+  double pdf;
+  this->EvaluateBSDF(incident_dir, intersect, out_direction, context, &pdf);
+  return pdf;
+}
+
 
 DiffuseShader::DiffuseShader(const SpectralN &_reflectance, std::unique_ptr<Texture> _diffuse_texture)
   : Shader(IS_REFLECTIVE),
@@ -171,12 +186,8 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
   double ns_dot_out = std::abs(Dot(surface_hit.shading_normal, out_direction));
   double ns_dot_in  = std::abs(Dot(surface_hit.shading_normal, reverse_incident_dir));
   Double3 half_angle_vector = Normalized(reverse_incident_dir + out_direction);
-#ifndef NDEBUG
-  {
-    Double3 refl = Reflected(reverse_incident_dir, half_angle_vector);
-    assert(LengthSqr(refl-out_direction) < 1.e-9);
-  }
-#endif
+  // Note: half_angle_vector is NaN whenever I evalute straight through transmission.
+
   double ns_dot_wh = Dot(surface_hit.shading_normal, half_angle_vector);
   double wh_dot_out = std::abs(Dot(out_direction, half_angle_vector));
   double wh_dot_in  = std::abs(Dot(reverse_incident_dir, half_angle_vector)); // Do I need this? It is the same as wh_dot_out, no?

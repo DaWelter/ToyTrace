@@ -33,6 +33,7 @@ public:
   virtual ~Shader() {}
   virtual ScatterSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const = 0;
   virtual Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
+  virtual double Pdf(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, const PathContext &context) const;
   bool IsReflectionSpecular() const { return flags & REFLECTION_IS_SPECULAR; }
   bool IsPassthrough() const { return flags & IS_PASSTHROUGH; }
 };

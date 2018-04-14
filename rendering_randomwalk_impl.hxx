@@ -412,7 +412,7 @@ public:
   {
     RW::PathNode node;
     RaySegment segment; // Leading to the node
-    Pdf scatter_pdf; // Of existant coordinate. For envlight it is w.r.t. area. Else w.r.t solid angle.
+    Pdf scatter_pdf; // Of existant coordinate. For envlight it is w.r.t. area. Else w.r.t solid angle. TODO: Maybe put elsewhere.
     Spectral3 beta_factor {0.};
   };
   
@@ -457,7 +457,7 @@ public:
       assert(node_sample.node.node_type == RW::NodeType::ZERO_CONTRIBUTION_ABORT_WALK); // TODO Write test to check that the node is default constructed as required here.
       return node_sample;
     }
-    
+       
     MaybeHandlePassageThroughSurface(source_node, ray.dir, medium_tracker);
     
     auto collision = CollisionData{ray};
