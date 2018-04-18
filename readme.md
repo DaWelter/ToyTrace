@@ -38,6 +38,7 @@ Features
 * Camera:
     * Pinhole
     * Fisheye
+* Statistical test for BSDF & Phasefunction sampling routines.
 * Naive Kd-tree
 * Binned spectral representation
 * Multithreading
@@ -48,7 +49,6 @@ Eventually, maybe ...
 
 * Advanced techniques. Beam radiance estimators or MLT.
 * Refractive interfaces
-* Correctly accouting for dissymmetry of bsdf's when normal interpolation or refractive materials are involved.
 * SAH based Kd-tree or BVH construction
 * Designed for data locality and cache performance
 * Ray packet traversal and coherence improving ray-reordering
