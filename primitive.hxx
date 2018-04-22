@@ -21,9 +21,9 @@ public:
   {}
   virtual ~Primitive() {}
   
-  Shader *shader;
-  Medium *medium;
-  RadianceOrImportance::AreaEmitter *emitter;
+  const Shader *shader;
+  const Medium *medium;
+  const RadianceOrImportance::AreaEmitter *emitter;
   
   virtual bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const = 0;
   

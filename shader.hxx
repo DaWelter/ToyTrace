@@ -15,16 +15,6 @@ using ScatterSample = Sample<Double3, Spectral3, TagScatterSample>;
 #include"phasefunctions.hxx"
 
 
-enum ShaderFlags : int
-{
-  REFLECTION_IS_SPECULAR = 1,
-  TRANSMISSION_IS_SPECULAR = 2,
-  IS_PASSTHROUGH = 4,
-  IS_TRANSMISSIVE = 8,
-  IS_REFLECTIVE = 16,
-};
-
-
 class Shader
 {
   int flags;
@@ -34,8 +24,6 @@ public:
   virtual ScatterSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const = 0;
   virtual Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
   virtual double Pdf(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, const PathContext &context) const;
-  bool IsReflectionSpecular() const { return flags & REFLECTION_IS_SPECULAR; }
-  bool IsPassthrough() const { return flags & IS_PASSTHROUGH; }
 };
 
 
@@ -95,7 +83,7 @@ public:
 class InvisibleShader : public Shader
 {
 public:
-  InvisibleShader() : Shader(IS_PASSTHROUGH|REFLECTION_IS_SPECULAR|TRANSMISSION_IS_SPECULAR) {}
+  InvisibleShader() {}
   ScatterSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
   Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };

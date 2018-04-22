@@ -1021,7 +1021,7 @@ public:
       const auto &hit = collision.hit = intersector.First(segment.ray, segment.length);
       const auto &medium_smpl = collision.smpl = medium.SampleInteractionPoint(segment, sampler, context);
       total_weight *= medium_smpl.weight;
-      bool cont = medium_smpl.t >= segment.length && hit && hit.primitive->shader->IsPassthrough();
+      bool cont = medium_smpl.t >= segment.length && hit && hit.primitive->shader == &scene.GetInvisibleShader();
       
       if (volume_pdf_coeff)
       {

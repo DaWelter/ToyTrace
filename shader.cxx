@@ -71,7 +71,7 @@ double Shader::Pdf(const Double3& incident_dir, const RaySurfaceIntersection& su
 
 
 DiffuseShader::DiffuseShader(const SpectralN &_reflectance, std::unique_ptr<Texture> _diffuse_texture)
-  : Shader(IS_REFLECTIVE),
+  : Shader(),
     kr_d(_reflectance),
     diffuse_texture(std::move(_diffuse_texture))
 {
@@ -116,7 +116,7 @@ ScatterSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySu
 
 
 SpecularReflectiveShader::SpecularReflectiveShader(const SpectralN& reflectance)
-  : Shader(REFLECTION_IS_SPECULAR|IS_REFLECTIVE),
+  : Shader(),
     kr_s(reflectance)
 {
 }

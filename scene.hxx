@@ -47,13 +47,15 @@ class Scene
   std::vector<std::unique_ptr<EnvironmentalRadianceField>> envlights;
   std::unique_ptr<Camera> camera;
   std::unique_ptr<Medium> empty_space_medium;
+  std::unique_ptr<Shader> invisible_shader;
   
   Box boundingBox;
   
 public:
   Scene()
     : camera(nullptr),
-      empty_space_medium{new VacuumMedium()}
+      empty_space_medium{new VacuumMedium()},
+      invisible_shader{new InvisibleShader{}}
   {
   }
 
@@ -122,7 +124,12 @@ public:
   {
     return *empty_space_medium;
   }
-    
+  
+  const Shader& GetInvisibleShader() const
+  {
+    return *invisible_shader;
+  }
+  
   template<class PrimitiveType, class... Args>
   Primitive& AddPrimitive(Args&&... args)
   {

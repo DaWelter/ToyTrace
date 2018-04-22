@@ -82,14 +82,14 @@ public:
 
 struct Scope
 {
-  SymbolTable<Shader> shaders;
-  SymbolTable<Medium> mediums;
+  SymbolTable<const Shader> shaders;
+  SymbolTable<const Medium> mediums;
   SymbolTable<AreaEmitter> areaemitters;
   Eigen::Transform<double,3,Eigen::Affine> currentTransform;
 
-  Scope() :
-    shaders("Shader", "invisible", new InvisibleShader()),
-    mediums("Medium", "default", new VacuumMedium()),
+  Scope(const Scene &scene) :
+    shaders("Shader", "invisible", &scene.GetInvisibleShader()),
+    mediums("Medium", "default", &scene.GetEmptySpaceMedium()),
     areaemitters("AreaEmitter", "none", nullptr),
     currentTransform(decltype(currentTransform)::Identity())
   {
@@ -1060,7 +1060,7 @@ void Scene::ParseNFF(const fs::path &filename, RenderingParameters *render_param
   {
     throw std::runtime_error(strconcat("Could not open input file", filename));
   }
-  Scope scope;
+  Scope scope{*this};
   NFFParser(this, render_params, is, filename).Parse(scope);
 }
 
@@ -1074,6 +1074,6 @@ void Scene::ParseNFFString(const std::string &scenestr, RenderingParameters *ren
 
 void Scene::ParseNFF(std::istream &is, RenderingParameters *render_params)
 {
-  Scope scope;
+  Scope scope{*this};
   NFFParser(this, render_params, is, std::string()).Parse(scope);
 }
