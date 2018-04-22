@@ -42,6 +42,7 @@ Features
 * Naive Kd-tree
 * Binned spectral representation
 * Multithreading
+* Automated rendering of test scenes.
 
 Not Implemented
 ---------------
