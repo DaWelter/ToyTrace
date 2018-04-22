@@ -272,23 +272,6 @@ TEST(TestMath, Reflected)
 }
 
 
-// Adapted from pbrt. eta is the ratio of refractive indices eta_i / eta_t
-inline boost::optional<Double3> Refracted(const Double3 &wi, const Double3 &n, double eta_i_over_t) 
-{
-    const double eta = eta_i_over_t;
-    double cosThetaI = Dot(n, wi);
-    double sin2ThetaI = std::max(double(0), double(1 - cosThetaI * cosThetaI));
-    double sin2ThetaT = eta * eta * sin2ThetaI;
-
-    // Handle total internal reflection for transmission
-    if (sin2ThetaT >= 1) return boost::none;
-    double cosThetaT = std::sqrt(1 - sin2ThetaT);
-    double n_prefactor = (eta * std::abs(cosThetaI) - cosThetaT);
-           n_prefactor = cosThetaI>=0. ? n_prefactor : -n_prefactor; // Invariance to normal flip.
-    return Double3{-eta * wi + n_prefactor * n};
-}
-
-
 TEST(TestMath, Refracted)
 {
   Double3 n{0., 1., 0.};
