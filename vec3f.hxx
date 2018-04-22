@@ -5,8 +5,8 @@
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Geometry>
 #include <eigen3/Eigen/LU>
-//#include <boost/format.hpp>
-//#include <boost/functional/hash.hpp>
+
+#include <boost/optional/optional.hpp>
 
 template<class T, int d>
 class Vec : public Eigen::Matrix<T, d, 1>
@@ -169,6 +169,7 @@ auto Reflected(const Eigen::MatrixBase<Derived>& reverse_incident_dir, const Eig
 {
   return (2.*reverse_incident_dir.dot(normal)*normal - reverse_incident_dir);
 }
+
 
 #ifndef NDEBUG
 #define ASSERT_NORMALIZED(v) assert(std::abs(LengthSqr(v) - 1.) < 1.e-6)

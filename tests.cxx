@@ -262,13 +262,52 @@ inline RaySegment MakeSegmentAt(const RaySurfaceIntersection &intersection, cons
 }
 
 
-TEST(TestMath, Reflect)
+TEST(TestMath, Reflected)
 {
   Double3 n{0., 1., 0.};
   auto in = Normalized(Double3{0., 1., 2.});
   Double3 out = Reflected(in, n);
   auto out_expected = Normalized(Double3{0., 1., -2.});
   ASSERT_GE(Dot(out, out_expected), 0.99);
+}
+
+
+// Adapted from pbrt. eta is the ratio of refractive indices eta_i / eta_t
+inline boost::optional<Double3> Refracted(const Double3 &wi, const Double3 &n, double eta_i_over_t) 
+{
+    const double eta = eta_i_over_t;
+    double cosThetaI = Dot(n, wi);
+    double sin2ThetaI = std::max(double(0), double(1 - cosThetaI * cosThetaI));
+    double sin2ThetaT = eta * eta * sin2ThetaI;
+
+    // Handle total internal reflection for transmission
+    if (sin2ThetaT >= 1) return boost::none;
+    double cosThetaT = std::sqrt(1 - sin2ThetaT);
+    double n_prefactor = (eta * std::abs(cosThetaI) - cosThetaT);
+           n_prefactor = cosThetaI>=0. ? n_prefactor : -n_prefactor; // Invariance to normal flip.
+    return Double3{-eta * wi + n_prefactor * n};
+}
+
+
+TEST(TestMath, Refracted)
+{
+  Double3 n{0., 1., 0.};
+  auto w1 = Normalized(Double3{0., 1., 2.});
+  double eta1 = 1.;
+  double eta2 = 1.1;
+  auto w2 = Refracted(w1, n, eta1/eta2);
+  ASSERT_TRUE((bool)w2);
+  auto w3 = Refracted(*w2, n, eta2/eta1);
+  ASSERT_TRUE((bool)w3);
+  EXPECT_NEAR((*w3)[0], w1[0], 1.e-3);
+  EXPECT_NEAR((*w3)[1], w1[1], 1.e-3);
+  EXPECT_NEAR((*w3)[2], w1[2], 1.e-3);
+  // Test total reflection.
+  w1 = Normalized(Double3{0., 1., 100.});
+  eta1 = 1.2;
+  eta2 = 1.;
+  w2 = Refracted(w1, n, eta1/eta2);
+  ASSERT_FALSE((bool)w2);
 }
 
 
