@@ -492,6 +492,20 @@ void NFFParser::Parse(Scope &scope)
       continue;
     }
     
+    if (!strcmp(token, "speculartransmissivedielectric"))
+    {
+      double ior_ratio = 1.;
+      char name[LINESIZE];
+      int num = std::sscanf(line.c_str(), "speculartransmissivedielectric %s %lg\n", name, &ior_ratio);
+      if (num == 2)
+      {
+        scope.shaders.set_and_activate(name,
+          new SpecularTransmissiveDielectricShader(ior_ratio));
+      }
+      else throw MakeException("Error");
+      continue;
+    }
+    
     if (!strcmp(token, "speculardensedielectric"))
     {
       RGB diffuse_coeff;

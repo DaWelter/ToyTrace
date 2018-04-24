@@ -778,14 +778,15 @@ public:
 
 
   /* Straight forwardly following Cpt 5.3 Veach's thesis.
-   * Except that maybe my conventions are somewhat different. (Are they?) Here, in/out directions refer to the random walk.
-   * The correction factor is formed with the incident direction of light as per Eq. 5.17.
-   */
+   * Basically when multiplied, it turns fs(wi -> wo, Nshd) into the corrected BSDF fs(wi->wo, Nsh)*Dot(Nshd,wi)/Dot(N,wi),
+   * where wi refers to the incident direction of light as per Eq. 5.17.
+   * 
+   * Except that my conventions are different. In/out directions refer to the random walk. */
   static double BsdfCorrectionFactor(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &intersection, const Double3 &exitant_dir, TransportType transport)
   {
-    const Double3 &dir = transport==RADIANCE ? exitant_dir : reverse_incident_dir;
-    double correction = std::abs(Dot(intersection.shading_normal, dir))/
-                        (std::abs(Dot(intersection.normal, dir))+Epsilon);
+    const Double3 &light_incident = transport==RADIANCE ? exitant_dir : reverse_incident_dir;
+    double correction = std::abs(Dot(intersection.shading_normal, light_incident))/
+                        (std::abs(Dot(intersection.normal, light_incident))+Epsilon);
     return correction;
   }
    

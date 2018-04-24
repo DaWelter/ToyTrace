@@ -65,6 +65,16 @@ public:
 };
 
 
+class SpecularTransmissiveDielectricShader : public Shader
+{
+  double ior_ratio; // Inside ior / Outside ior
+public:
+  SpecularTransmissiveDielectricShader(double _ior_ratio);
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+};
+
+
 class SpecularDenseDielectricShader : public Shader
 {
   // Certainly, the compiler is going to de-virtualize calls to these members?!

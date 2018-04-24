@@ -150,6 +150,112 @@ ScatterSample SpecularReflectiveShader::SampleBSDF(const Double3& incident_dir, 
 }
 
 
+inline bool OnSameSide(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &other_dir)
+{
+  assert(Dot(reverse_incident_dir, surface_hit.normal) >= 0.);
+  return Dot(other_dir, surface_hit.normal) >= 0.;
+}
+
+
+inline double FresnelReflectivity(
+  double cs_i,  // cos theta of incident direction
+  double cs_t,  // cos theta of refracted(!) direction. Must be >0.
+  double eta_i_over_t
+)
+{
+  // https://en.wikipedia.org/wiki/Fresnel_equations
+  // I divide both nominator and denominator by eta_2
+  assert (cs_i >= 0.); 
+  assert (cs_t >= 0.); // Take std::abs(Dot(n,r), or flip normal.
+  assert (eta_i_over_t > 0.);
+  double rs_nom = eta_i_over_t * cs_i - cs_t;
+  double rs_den = eta_i_over_t * cs_i + cs_t;
+  double rp_nom = eta_i_over_t * cs_t - cs_i;
+  double rp_den = eta_i_over_t * cs_t + cs_i;
+  return 0.5*(Sqr(rs_nom/rs_den) + Sqr(rp_nom/rp_den));
+}
+
+
+SpecularTransmissiveDielectricShader::SpecularTransmissiveDielectricShader(double _ior_ratio) 
+  : Shader{}, ior_ratio{_ior_ratio}
+{
+  
+}
+
+
+ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
+{
+  double shn_dot_i = Dot(surface_hit.shading_normal, reverse_incident_dir);
+  bool entering = Dot(surface_hit.geometry_normal, reverse_incident_dir) > 0.;
+  double eta_i_over_t = entering ? 1./ior_ratio  : ior_ratio; // eta_i refers to ior on the side of the incomming random walk! 
+  
+  /* Citing Veach (pg. 147): "Specular BSDF’s contain Dirac distribu-
+  tions, which means that the only allowable operation is sampling: there must be an explicit
+  procedure that generates a sample direction and a weight. When the specular BSDF is not
+  symmetric, the direction and/or weight computation for the adjoint is different, and thus
+  there must be two different sampling procedures, or an explicit flag that specifies whether
+  the direct or adjoint BSDF is being sampled."! */
+  
+  auto OneOverCosThetaLight = [&](double cos_theta_i, double cos_theta_o)
+  {
+    // Want to divide out the cos theta term with the incident direction of light!
+    return 1./(context.transport==RADIANCE ? cos_theta_o : cos_theta_i);
+  };
+  
+  double radiance_weight = (context.transport==RADIANCE) ? Sqr(eta_i_over_t) : 1.;
+  
+  double fresnel_reflectivity = 1.;
+  boost::optional<Double3> wt = Refracted(reverse_incident_dir, surface_hit.shading_normal, eta_i_over_t);
+  if (wt)
+  {
+    double abs_shn_dot_r = std::abs(Dot(*wt, surface_hit.shading_normal));
+    fresnel_reflectivity = FresnelReflectivity(shn_dot_i,abs_shn_dot_r, eta_i_over_t);
+  }
+  assert (fresnel_reflectivity >= -0.00001 && fresnel_reflectivity <= 1.000001);
+  
+  const double pr_sample_reflect = fresnel_reflectivity;
+  bool do_sample_reflection = sampler.Uniform01() < pr_sample_reflect;
+  assert (do_sample_reflection || (bool)(wt));
+  
+  ScatterSample smpl;
+  if (do_sample_reflection)
+  {
+    Double3 wr = Reflected(reverse_incident_dir, surface_hit.shading_normal);
+    smpl.coordinates = wr;
+    smpl.pdf_or_pmf = Pdf::MakeFromDelta(pr_sample_reflect);
+    if (OnSameSide(reverse_incident_dir, surface_hit, wr))
+    {
+      double tmp = OneOverCosThetaLight(shn_dot_i, Dot(wr, surface_hit.shading_normal));
+      smpl.value = Spectral3{fresnel_reflectivity*tmp};
+    }
+    else
+      smpl.value = Spectral3{0.};
+  }
+  else // Transmission
+  {
+    smpl.coordinates = *wt;
+    smpl.pdf_or_pmf = Pdf::MakeFromDelta(1.-pr_sample_reflect);
+    if (OnSameSide(reverse_incident_dir, surface_hit, *wt))
+      smpl.value = Spectral3{0.}; // Should be on other side of geometric surface, but we are not!
+    else
+    {
+      double tmp = OneOverCosThetaLight(shn_dot_i, -Dot(*wt, surface_hit.shading_normal));
+      smpl.value = Spectral3{(1.-fresnel_reflectivity)*tmp*radiance_weight};
+    }
+  }
+  return smpl;
+}
+
+
+Spectral3 SpecularTransmissiveDielectricShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
+{
+  if (pdf)
+    *pdf = 0.;
+  return Spectral3{0.};
+}
+
+
+
 
 namespace MicrofacetDetail
 {
@@ -237,29 +343,7 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
                     MicrofacetDetail::G1(wh_dot_out, ns_dot_out, alpha);
 #endif
   }
-  
-  {
-#if 0
-    Way too little reflection as these formulae are for dielectrics which reflect mostly at glancing angles.
-    Without a diffuse background this is not good. Anyway, I want to simulate metals with this shader.
-    double eta_i = 1.0;
-    double eta_t = 0.9;
-    double eta = eta_t/eta_i;
-    double c = wh_dot_in;
-    double t5 = eta*eta - 1. + c*c;
-    if (t5 >= 0.)
-    {
-      double g = std::sqrt(t5);
-      double t1 = (g-c)*(g-c)/((g+c)*g+c);
-      double t2 = c*(g+c)-1.;
-      double t3 = c*(g-c)+1.;
-      double t4 = (t2/t3)*(t2/t3);
-      fresnel_term = 0.5*t1*(1. + t4);
-    }
-    else
-      fresnel_term = 1.;
-#endif
-  }
+ 
   
   Spectral3 kr_s_taken = Take(kr_s, context.lambda_idx);
   Spectral3 fresnel_term = SchlicksApproximation(kr_s_taken, wh_dot_in);
