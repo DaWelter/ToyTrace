@@ -1,5 +1,6 @@
 ToyTrace
 ========
+Born out of an ancient computer graphics exercise, this is my hobby renderer.
 
 [Picz](https://www.dropbox.com/sh/vevib9qe5r87a24/AACuqKUPGzxHyl6E2E7iepSha?dl=0)
 
@@ -49,7 +50,6 @@ Not Implemented
 Eventually, maybe ...
 
 * Advanced techniques. Beam radiance estimators or MLT.
-* Refractive interfaces
 * SAH based Kd-tree or BVH construction
 * Designed for data locality and cache performance
 * Ray packet traversal and coherence improving ray-reordering
