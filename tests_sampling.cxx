@@ -765,6 +765,13 @@ class ScatterTests
   /* I want to check if the sampling frequency of some solid angle areas match the probabilities
     * returned by the Evaluate function. I further want to validate the normalization constraint. */
 protected:
+  struct DeltaPeak
+  {
+    double pr; // Probability
+    int sample_count; // Fallen into this bin.
+    Double3 direction; // Where the peak is.
+  };
+  
   CubeMap cubemap;
   static constexpr int Nbins = 4;
   Double3 reverse_incident_dir {NaN};
@@ -774,13 +781,14 @@ protected:
   std::vector<int> bin_sample_count;
   std::vector<double> bin_probabilities;
   std::vector<double> bin_probabilities_error; // Numerical integration error.
+  std::vector<DeltaPeak> delta_peaks;
   double total_probability;
   double total_probability_error; // Numerical integration error.
+  double probability_of_delta_peaks;
   OnlineVariance::Accumulator<Spectral3> diffuse_scattered_estimate;
   OnlineVariance::Accumulator<Spectral3> total_scattered_estimate;
   Spectral3 integral_cubature;
   Spectral3 integral_cubature_error; // Numerical integration error.
-  double probability_of_delta_peaks;
   int num_samples {0};  
 
 public:
@@ -816,14 +824,30 @@ public:
         number_of_sigmas_threshold,
         bin_probabilities_error[idx]);
     }
+    for (auto &p : delta_peaks)
+    {
+      CheckNumberOfSamplesInBin(
+        strconcat("peak ", p.direction).c_str(),
+        p.sample_count,
+        num_samples,
+        p.pr,
+        number_of_sigmas_threshold,
+        0.);
+    }
   }
   
 
   void TestChiSqr(double p_threshold = 0.05)
   {
-    double chi_sqr_probability = ChiSquaredProbability(&bin_sample_count[0], &bin_probabilities[0], cubemap.TotalNumBins());
+    std::vector<int> sample_count = bin_sample_count;
+    std::vector<double> probabilities = bin_probabilities;
+    for (const auto &p : delta_peaks)
+    {
+      sample_count.push_back(p.sample_count);
+      probabilities.push_back(p.pr);
+    }
+    double chi_sqr_probability = ChiSquaredProbability(&bin_sample_count[0], &bin_probabilities[0], bin_probabilities.size());
     EXPECT_GE(chi_sqr_probability, p_threshold);
-    // TODO: add extra bins for delta peaks!
   }
   
   
@@ -834,7 +858,6 @@ public:
     {
       // As a user of the test, I probably only know the combined albedo of 
       // specular and diffuse/glossy parts. So take that for comparison.
-      
       TestSampleAverage(diffuse_scattered_estimate.Mean()[i], diffuse_scattered_estimate.Stddev()[i], num_samples, integral_cubature[i], integral_cubature_error[i]+TEST_EPS, p_value);
       if (by_value)
       {
@@ -842,23 +865,30 @@ public:
       }
       TestProbabilityOfMeanLowerThanUpperBound(total_scattered_estimate.Mean()[i], total_scattered_estimate.Stddev()[i], num_samples, 1.+TEST_EPS, p_value);
     }
-    EXPECT_NEAR(total_probability, 1.-probability_of_delta_peaks, total_probability_error);
+    EXPECT_NEAR(total_probability+probability_of_delta_peaks, 1., total_probability_error+TEST_EPS);
   }
  
  
   void DoSampling()
   {
     this->bin_sample_count = std::vector<int>(cubemap.TotalNumBins(), 0);
+    this->delta_peaks = decltype(delta_peaks){};
     this->diffuse_scattered_estimate = OnlineVariance::Accumulator<Spectral3>{};  
     this->total_scattered_estimate = OnlineVariance::Accumulator<Spectral3>{};
     this->probability_of_delta_peaks = 0.;
-    std::vector<Double3> delta_peaks;
-    auto CheckDeltaPeakNewAndMemorize = [&delta_peaks](const Double3 &v) -> bool 
+    auto RegisterDeltaSample = [this](const Double3 &v, double pr)
     {
-      auto it = std::find_if(delta_peaks.begin(), delta_peaks.end(), [&](const Double3 &w) { return v.cwiseEqual(w).all(); });
-      bool is_new = it == delta_peaks.end();
-      if (is_new) delta_peaks.push_back(v);
-      return is_new;
+      auto it = std::find_if(delta_peaks.begin(), delta_peaks.end(), [&](const DeltaPeak &pk) { return v.cwiseEqual(pk.direction).all(); });
+      if (it == delta_peaks.end())
+      {
+        delta_peaks.push_back(DeltaPeak{pr, 1, v});
+        probability_of_delta_peaks += pr;
+      }
+      else
+      {
+        EXPECT_EQ(pr, it->pr);
+        ++it->sample_count;
+      }
     };
     auto SampleIndex = [this](const ScatterSample &smpl) ->  int
     {
@@ -892,12 +922,10 @@ public:
       }
       else
       {
-        // "pdf_or_pmf" is the probability of selecting the delta-peak.
-        if (CheckDeltaPeakNewAndMemorize(smpl.coordinates))
-          probability_of_delta_peaks += PmfValue(smpl);
+        RegisterDeltaSample(smpl.coordinates, (double)smpl.pdf_or_pmf);
         // Think of Russian Roulette. When it is decided to sample the delta-peaks,
         // the other contribution is formally zerod out. In order to make the
-        // statistics work, I must still count it as regular sample(????).
+        // statistics work, I must still count it as regular sample.
         diffuse_scattered_estimate += Spectral3{0.};
       }
       // I can ofc integrate delta-peak contributions by MC.
@@ -1570,7 +1598,7 @@ TEST(ShaderTests, SpecularTransmissiveDielectricShader1)
 { 
   SpecularTransmissiveDielectricShader sh(DEFAULT_IOR);
   ShaderTests test(sh, DEFAULT_IOR);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 1000);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 100);
   test.CheckIntegral(Spectral3{1.});
 }
 
@@ -1578,7 +1606,7 @@ TEST(ShaderTests, SpecularTransmissiveDielectricShader2)
 {
   SpecularTransmissiveDielectricShader sh(DEFAULT_IOR);
   ShaderTests test(sh, DEFAULT_IOR);
-  test.RunAllCalculations(Normalized(Double3{0,1,101}), NORMAL_VERTICAL, 1000);
+  test.RunAllCalculations(Normalized(Double3{0,1,101}), NORMAL_VERTICAL, 100);
   test.CheckIntegral(Spectral3{1.});
 }
 
@@ -1586,7 +1614,7 @@ TEST(ShaderTests, SpecularTransmissiveDielectricShader3)
 {
   SpecularTransmissiveDielectricShader sh(DEFAULT_IOR);
   ShaderTests test(sh, DEFAULT_IOR);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 1000);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 100);
   // Not checking the total scattered radiance here???
   // If reflected, the exit direction is below the goemetrical surface, in case of which the contribution is canceled.
   // However if transmitted, the exit direction is correctly below the geom. surface. So this makes a contribution to
@@ -1598,7 +1626,7 @@ TEST(ShaderTests, SpecularTransmissiveDielectricShader4)
 {
   SpecularTransmissiveDielectricShader sh(DEFAULT_IOR);
   ShaderTests test(sh, DEFAULT_IOR);
-  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_VERTICAL, 1000);
+  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_VERTICAL, 100);
   test.CheckIntegral(Spectral3{1.});
 }
 
@@ -1606,7 +1634,7 @@ TEST(ShaderTests, SpecularTransmissiveDielectricShader5)
 { 
   SpecularTransmissiveDielectricShader sh(1./DEFAULT_IOR);
   ShaderTests test(sh, 1./DEFAULT_IOR);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 1000);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 100);
   test.CheckIntegral(Spectral3{1.});
 }
 
@@ -1614,7 +1642,7 @@ TEST(ShaderTests, SpecularTransmissiveDielectricShader6)
 {
   SpecularTransmissiveDielectricShader sh(1./DEFAULT_IOR);
   ShaderTests test(sh, 1./DEFAULT_IOR);
-  test.RunAllCalculations(INCIDENT_45DEG, NORMAL_VERTICAL, 1000);
+  test.RunAllCalculations(INCIDENT_45DEG, NORMAL_VERTICAL, 100);
   test.CheckIntegral(Spectral3{1.});
 }
 
@@ -1622,7 +1650,7 @@ TEST(ShaderTests, SpecularTransmissiveDielectricShader7)
 {
   SpecularTransmissiveDielectricShader sh(1./DEFAULT_IOR);
   ShaderTests test(sh, 1./DEFAULT_IOR);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 1000);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 100);
   test.CheckIntegral(Spectral3{0.}); // Scattered below geometric surface, Best I can do is zero out the contribution.
 }
 
@@ -1630,7 +1658,7 @@ TEST(ShaderTests, SpecularTransmissiveDielectricShader8)
 {
   SpecularTransmissiveDielectricShader sh(1./DEFAULT_IOR);
   ShaderTests test(sh, 1./DEFAULT_IOR);
-  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_VERTICAL, 1000); // Total reflection!
+  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_VERTICAL, 100); // Total reflection!
   test.CheckIntegral(Spectral3{1.});
 }
 
