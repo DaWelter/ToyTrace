@@ -802,7 +802,7 @@ public:
   }
   
   
-  void TestCountsDeviationFromSigma(double number_of_sigmas_threshold)
+  void TestCountsDeviationFromSigma(double number_of_sigmas_threshold = 3.)
   {
     for (int idx=0; idx<cubemap.TotalNumBins(); ++idx)
     {
@@ -823,6 +823,7 @@ public:
   {
     double chi_sqr_probability = ChiSquaredProbability(&bin_sample_count[0], &bin_probabilities[0], cubemap.TotalNumBins());
     EXPECT_GE(chi_sqr_probability, p_threshold);
+    // TODO: add extra bins for delta peaks!
   }
   
   
@@ -854,7 +855,7 @@ public:
     std::vector<Double3> delta_peaks;
     auto CheckDeltaPeakNewAndMemorize = [&delta_peaks](const Double3 &v) -> bool 
     {
-      auto it = std::find_if(delta_peaks.begin(), delta_peaks.end(), [&](const Double3 &v) { return v.cwiseEqual(v).all(); });
+      auto it = std::find_if(delta_peaks.begin(), delta_peaks.end(), [&](const Double3 &w) { return v.cwiseEqual(w).all(); });
       bool is_new = it == delta_peaks.end();
       if (is_new) delta_peaks.push_back(v);
       return is_new;
@@ -1051,6 +1052,7 @@ class ShaderScatterer : public Scatterer
   
   mutable RaySurfaceIntersection last_intersection;
   mutable Double3 last_incident_dir;
+  double ior_below_over_above; // Ratio
   
   RaySurfaceIntersection& MakeIntersection(const Double3 &reverse_incident_dir) const
   {
@@ -1065,19 +1067,39 @@ class ShaderScatterer : public Scatterer
     return last_intersection;
   }
   
-public:
-  ShaderScatterer(const Shader &_sh, const Double3 &shading_normal = Double3{0., 0., 1.})
-    : sh{_sh},
-      last_incident_dir{NaN}
+  Spectral3 UndoneIorScaling(Spectral3 value, const Double3 &wi, const RaySurfaceIntersection &intersection, const Double3 &wo) const
   {
-    SetShadingNormal(shading_normal);
+    // TODO: Consider also the adjoint!
+    if (Dot(wo, intersection.normal) < 0.) // We have transmission
+    {
+      // According to Veach's Thesis (Eq. 5.12), transmitted radiance is scaled by (eta_t/eta_i)^2.
+      // Here I undo the scaling factor, so that when summing, the total scattered radiance equals
+      // the incident radiance. And that conservation is much simpler to check for.
+      if (Dot(wi, intersection.geometry_normal) >= 0.) // Light goes from below surface to above. Because wi, wo denote direction of randomwalk.
+        value *= Sqr(ior_below_over_above);
+      else
+        value *= Sqr(1./ior_below_over_above);
+    }
+    return value;
+  }
+  
+public:
+  ShaderScatterer(const Shader &_sh)
+    : sh{_sh},
+      last_incident_dir{NaN},
+      ior_below_over_above{1.}
+  {
+    SetShadingNormal(Double3{0,0,1});
     context = PathContext{Color::LambdaIdxClosestToRGBPrimaries()};
   }
   
-  
+  void SetIorRatio(double _ior_below_over_above)
+  {
+    this->ior_below_over_above = _ior_below_over_above;
+  }
+    
   void SetShadingNormal(const Double3 &shading_normal)
   {
-    Double3 normal{0, 0, 1};
     triangle = std::make_unique<TexturedSmoothTriangle>(
       Double3{ -1, -1, 0}, Double3{ 1, -1, 0 }, Double3{ 0, 1, 0 },
       shading_normal, shading_normal, shading_normal,
@@ -1097,8 +1119,9 @@ public:
   Spectral3 ScatterFunction(const Double3 &wi, const Double3 &wo) const override
   {
     auto &intersection = MakeIntersection(wi);
-    return sh.EvaluateBSDF(wi, intersection, wo, context, nullptr);
-
+    return UndoneIorScaling(
+      sh.EvaluateBSDF(wi, intersection, wo, context, nullptr), 
+      wi, intersection, wo);
   }
   
   Spectral3 ReflectedRadiance(const Double3 &wi, const Double3 &wo) const override
@@ -1106,6 +1129,7 @@ public:
     auto &intersection = MakeIntersection(wi);
     auto value = sh.EvaluateBSDF(wi, intersection, wo, context, nullptr);
     value *= std::abs(Dot(wo, intersection.shading_normal));
+    value = UndoneIorScaling(value, wi, intersection, wo);
     return value;
   }
   
@@ -1114,6 +1138,7 @@ public:
     auto &intersection = MakeIntersection(wi);
     auto smpl = sh.SampleBSDF(wi, intersection, sampler, context);
     smpl.value *= std::abs(Dot(smpl.coordinates, intersection.shading_normal));
+    smpl.value = UndoneIorScaling(smpl.value, wi, intersection, smpl.coordinates);
     return smpl;
   }
   
@@ -1128,9 +1153,10 @@ class ShaderTests : public ScatterTests
 {
     ShaderScatterer sh_wrapper;
   public:
-    ShaderTests(const Shader &_sh)
+    ShaderTests(const Shader &_sh, double ior_below_over_above = 1.)
       :  ScatterTests{sh_wrapper}, sh_wrapper{_sh}
     {
+      sh_wrapper.SetIorRatio(ior_below_over_above);
     }
     
     void RunAllCalculations(const Double3 &_reverse_incident_dir, const Double3 shading_normal, int _num_samples)
@@ -1336,13 +1362,21 @@ TEST(PhasefunctionTests, SimpleCombined)
 // Materials ...
 // TODO: Certainly all that repetition is not very nice ...
 
+///////////////////////////////////////
+static const double DEFAULT_IOR = 1.3;
+static const Double3 NORMAL_VERTICAL = Double3{0,0,1};
+static const Double3 NORMAL_45DEG    = Normalized(Double3{0,1,1});
+static const Double3 NORMAL_MUCH_DEFLECTED = Normalized(Double3{0,10,1});
+static const Double3 INCIDENT_VERTICAL = NORMAL_VERTICAL;
+static const Double3 INCIDENT_45DEG = NORMAL_45DEG;
+static const Double3 INCIDENT_MUCH_DEFLECTED = NORMAL_MUCH_DEFLECTED;
+
+
 TEST(ShaderTests, DiffuseShader1)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,0,1});
-  auto shading_normal = Double3{0,0,1};
   DiffuseShader sh(Color::SpectralN{1.0}, nullptr);
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 2000);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 2000);
   test.TestCountsDeviationFromSigma(3.);
   test.TestChiSqr();
   test.CheckIntegral(Spectral3{1.});
@@ -1350,11 +1384,9 @@ TEST(ShaderTests, DiffuseShader1)
 
 TEST(ShaderTests, DiffuseShader2)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,1,1});
-  auto shading_normal = Double3{0,0,1};
   DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 2000);
+  test.RunAllCalculations(INCIDENT_45DEG, NORMAL_VERTICAL, 2000);
   test.TestCountsDeviationFromSigma(3.);
   test.TestChiSqr();
   test.CheckIntegral(Spectral3{0.5});
@@ -1364,11 +1396,9 @@ TEST(ShaderTests, DiffuseShader3)
 {
   // NOTE: High variant because the pdf distributes samples according to geometric normal. Hence many samples needed for integral to converge!
   // TODO: I should probably use another sampling scheme.
-  auto reversed_incident_dir = Normalized(Double3{0,0,1});
-  auto shading_normal = Normalized(Double3{0,10,1});
   DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 50000);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 50000);
   test.TestCountsDeviationFromSigma(3.);
   test.TestChiSqr();
   test.CheckIntegral(Spectral3{0.5});
@@ -1376,11 +1406,9 @@ TEST(ShaderTests, DiffuseShader3)
 
 TEST(ShaderTests, DiffuseShader4)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,10,1});
-  auto shading_normal = Normalized(Double3{0,1,1});
   DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 50000);
+  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_45DEG, 50000);
   test.TestCountsDeviationFromSigma(3.);
   test.TestChiSqr();
   test.CheckIntegral(Spectral3{0.5});
@@ -1391,33 +1419,27 @@ TEST(ShaderTests, DiffuseShader4)
 
 TEST(ShaderTests, SpecularReflectiveShader1)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,0,1});
-  auto shading_normal = Double3{0,0,1};
   SpecularReflectiveShader sh(Color::SpectralN{0.5});
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 2000);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 100);
   test.TestCountsDeviationFromSigma(3.);
   test.CheckIntegral(Spectral3{0.5});
 }
 
 TEST(ShaderTests, SpecularReflectiveShader2)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,1,1});
-  auto shading_normal = Double3{0,0,1};
   SpecularReflectiveShader sh(Color::SpectralN{0.5});
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 2000);
+  test.RunAllCalculations(INCIDENT_45DEG, NORMAL_VERTICAL, 100);
   test.TestCountsDeviationFromSigma(3.);
   test.CheckIntegral(Spectral3{0.5});
 }
 
 TEST(ShaderTests, SpecularReflectiveShader3)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,0,1});
-  auto shading_normal = Normalized(Double3{0,10,1});
   SpecularReflectiveShader sh(Color::SpectralN{0.5});
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 5000);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 100);
   test.TestCountsDeviationFromSigma(3.);
   // This is a pathological case, where due to the strongly perturbed
   // shading normal, the incident direction is specularly reflected
@@ -1429,11 +1451,9 @@ TEST(ShaderTests, SpecularReflectiveShader3)
 
 TEST(ShaderTests, SpecularReflectiveShader4)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,10,1});
-  auto shading_normal = Normalized(Double3{0,1,1});
   SpecularReflectiveShader sh(Color::SpectralN{0.5});
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 5000);
+  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_45DEG, 100);
   test.TestCountsDeviationFromSigma(3.);
   test.CheckIntegral(Spectral3{0.5});
 }
@@ -1446,11 +1466,9 @@ TEST(ShaderTests, SpecularReflectiveShader4)
 // by reflectivity factor.
 TEST(ShaderTests, SpecularDenseDielectricShader1)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,0,1});
-  auto shading_normal = Double3{0,0,1};
   SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 10000);
   test.TestCountsDeviationFromSigma(3.);
   test.TestChiSqr();
   test.CheckIntegral();
@@ -1458,11 +1476,9 @@ TEST(ShaderTests, SpecularDenseDielectricShader1)
 
 TEST(ShaderTests, SpecularDenseDielectricShader2)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,1,1});
-  auto shading_normal = Double3{0,0,1};
   SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
+  test.RunAllCalculations(INCIDENT_45DEG, NORMAL_VERTICAL, 10000);
   test.TestCountsDeviationFromSigma(3.);
   test.TestChiSqr();
   test.CheckIntegral();
@@ -1470,11 +1486,9 @@ TEST(ShaderTests, SpecularDenseDielectricShader2)
 
 TEST(ShaderTests, SpecularDenseDielectricShader3)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,0,1});
-  auto shading_normal = Normalized(Double3{0,10,1});
   SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 10000);
   test.TestCountsDeviationFromSigma(3.5);
   test.TestChiSqr();
   test.CheckIntegral();
@@ -1482,11 +1496,9 @@ TEST(ShaderTests, SpecularDenseDielectricShader3)
 
 TEST(ShaderTests, SpecularDenseDielectricShader4)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,10,1});
-  auto shading_normal = Normalized(Double3{0,1,1});
   SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
+  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_45DEG, 10000);
   test.TestCountsDeviationFromSigma(3.5);
   test.TestChiSqr();
   test.CheckIntegral();
@@ -1496,11 +1508,9 @@ TEST(ShaderTests, SpecularDenseDielectricShader4)
 
 TEST(ShaderTests, MicrofacetShader1)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,0,1});
-  auto shading_normal = Double3{0,0,1};
   MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 10000);
   test.TestCountsDeviationFromSigma(3.);
   test.TestChiSqr();
   test.CheckIntegral();
@@ -1509,11 +1519,10 @@ TEST(ShaderTests, MicrofacetShader1)
 
 TEST(ShaderTests, MicrofacetShader2)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,1,1});
-  auto shading_normal = Double3{0,0,1};
   MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 20000);
+  // Don't have the point where the PDF diverges coincide with the boundaries of some bins.
+  test.RunAllCalculations(Normalized(Double3{0,1,11}), NORMAL_VERTICAL, 20000);
   test.TestCountsDeviationFromSigma(3.);
   test.TestChiSqr();
   test.CheckIntegral();
@@ -1523,11 +1532,9 @@ TEST(ShaderTests, MicrofacetShader2)
 
 TEST(ShaderTests, MicrofacetShader2b)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,10,1});
-  auto shading_normal = Double3{0,0,1};
   MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 20000);
+  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_VERTICAL, 20000);
   test.TestCountsDeviationFromSigma(3.);
   test.TestChiSqr();
   test.CheckIntegral();
@@ -1537,11 +1544,9 @@ TEST(ShaderTests, MicrofacetShader2b)
 
 TEST(ShaderTests, MicrofacetShader3)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,0,1});
-  auto shading_normal = Normalized(Double3{0,10,1});
   MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 20000);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 20000);
   test.TestCountsDeviationFromSigma(3.5);
   test.TestChiSqr();
   test.CheckIntegral();
@@ -1550,15 +1555,83 @@ TEST(ShaderTests, MicrofacetShader3)
 
 TEST(ShaderTests, MicrofacetShader4)
 {
-  auto reversed_incident_dir = Normalized(Double3{0,10,1});
-  auto shading_normal = Normalized(Double3{0,1,1});
   MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
   ShaderTests test(sh);
-  test.RunAllCalculations(reversed_incident_dir, shading_normal, 10000);
+  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_45DEG, 10000);
   test.TestCountsDeviationFromSigma(3.5);
   test.TestChiSqr();
   test.CheckIntegral();
   //test.DumpVisualization("/tmp/MicrofacetShader4.json");
+}
+
+
+
+TEST(ShaderTests, SpecularTransmissiveDielectricShader1)
+{ 
+  SpecularTransmissiveDielectricShader sh(DEFAULT_IOR);
+  ShaderTests test(sh, DEFAULT_IOR);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 1000);
+  test.CheckIntegral(Spectral3{1.});
+}
+
+TEST(ShaderTests, SpecularTransmissiveDielectricShader2)
+{
+  SpecularTransmissiveDielectricShader sh(DEFAULT_IOR);
+  ShaderTests test(sh, DEFAULT_IOR);
+  test.RunAllCalculations(Normalized(Double3{0,1,101}), NORMAL_VERTICAL, 1000);
+  test.CheckIntegral(Spectral3{1.});
+}
+
+TEST(ShaderTests, SpecularTransmissiveDielectricShader3)
+{
+  SpecularTransmissiveDielectricShader sh(DEFAULT_IOR);
+  ShaderTests test(sh, DEFAULT_IOR);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 1000);
+  // Not checking the total scattered radiance here???
+  // If reflected, the exit direction is below the goemetrical surface, in case of which the contribution is canceled.
+  // However if transmitted, the exit direction is correctly below the geom. surface. So this makes a contribution to
+  // the integral check. But since the energy from reflection is missing, the total scattered radiance is hard to predict.
+  test.CheckIntegral();
+}
+
+TEST(ShaderTests, SpecularTransmissiveDielectricShader4)
+{
+  SpecularTransmissiveDielectricShader sh(DEFAULT_IOR);
+  ShaderTests test(sh, DEFAULT_IOR);
+  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_VERTICAL, 1000);
+  test.CheckIntegral(Spectral3{1.});
+}
+
+TEST(ShaderTests, SpecularTransmissiveDielectricShader5)
+{ 
+  SpecularTransmissiveDielectricShader sh(1./DEFAULT_IOR);
+  ShaderTests test(sh, 1./DEFAULT_IOR);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 1000);
+  test.CheckIntegral(Spectral3{1.});
+}
+
+TEST(ShaderTests, SpecularTransmissiveDielectricShader6)
+{
+  SpecularTransmissiveDielectricShader sh(1./DEFAULT_IOR);
+  ShaderTests test(sh, 1./DEFAULT_IOR);
+  test.RunAllCalculations(INCIDENT_45DEG, NORMAL_VERTICAL, 1000);
+  test.CheckIntegral(Spectral3{1.});
+}
+
+TEST(ShaderTests, SpecularTransmissiveDielectricShader7)
+{
+  SpecularTransmissiveDielectricShader sh(1./DEFAULT_IOR);
+  ShaderTests test(sh, 1./DEFAULT_IOR);
+  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 1000);
+  test.CheckIntegral(Spectral3{0.}); // Scattered below geometric surface, Best I can do is zero out the contribution.
+}
+
+TEST(ShaderTests, SpecularTransmissiveDielectricShader8)
+{
+  SpecularTransmissiveDielectricShader sh(1./DEFAULT_IOR);
+  ShaderTests test(sh, 1./DEFAULT_IOR);
+  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_VERTICAL, 1000); // Total reflection!
+  test.CheckIntegral(Spectral3{1.});
 }
 
 
