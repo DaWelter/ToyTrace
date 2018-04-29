@@ -24,7 +24,7 @@ class Sampler
 {
   std::mt19937 random_engine;
   std::uniform_real_distribution<double> uniform;
-public: 
+public:
   Sampler();
   void Seed(std::uint64_t seed);
   
@@ -44,6 +44,8 @@ public:
     Uniform01(r.data(), 2);
     return r;
   }
+  
+  static constexpr std::uint64_t default_seed = std::mt19937::default_seed;
 };
 
 

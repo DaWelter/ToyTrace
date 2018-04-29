@@ -127,6 +127,7 @@ int Sampler::UniformInt(int a, int b_inclusive)
   return std::uniform_int_distribution<int>(a, b_inclusive)(random_engine);
 }
 
+constexpr std::uint64_t Sampler::default_seed;
 
 
 // Double3 Sampler::UniformSphere()

@@ -5,6 +5,7 @@
 #include <iostream>
 #include <fstream>
 
+
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/prettywriter.h>
@@ -13,6 +14,7 @@
 #include <boost/math/distributions/normal.hpp>
 #include <boost/math/distributions/students_t.hpp>
 #include <boost/numeric/interval.hpp>
+
 
 #include "ray.hxx"
 #include "sampler.hxx"
@@ -23,6 +25,14 @@
 #include "sampler.hxx"
 
 #include "cubature.h"
+
+
+inline void ExpectNear(const Spectral3 &a, const Spectral3 &b, double tol)
+{
+  EXPECT_NEAR(a[0], b[0], 1.e-6);
+  EXPECT_NEAR(a[1], b[1], 1.e-6);
+  EXPECT_NEAR(a[2], b[2], 1.e-6);
+}
 
 // A review of statistical testing applied to computer graphics!
 // http://www0.cs.ucl.ac.uk/staff/K.Subr/Files/Papers/PG2007.pdf
@@ -754,13 +764,13 @@ public:
   virtual ~Scatterer() {};
   virtual double ProbabilityDensity(const Double3 &wi, const Double3 &wo) const = 0;
   virtual Spectral3 ScatterFunction(const Double3 &wi, const Double3 &wo) const = 0;
-  virtual Spectral3 ReflectedRadiance(const Double3 &wi, const Double3 &wo) const = 0;
   virtual ScatterSample MakeScatterSample(const Double3 &wi, Sampler &sampler) const = 0;
-  virtual bool IsSymmetric() const = 0;
+  virtual void SetAdjoint(bool use_adjoint) = 0;
+  virtual double SurfaceNormalCosineOrOne(const Double3 &w, bool use_shading_normal) const = 0;
 };
 
 
-class ScatterTests
+class SamplingConsistencyTest
 {
   /* I want to check if the sampling frequency of some solid angle areas match the probabilities
     * returned by the Evaluate function. I further want to validate the normalization constraint. */
@@ -795,9 +805,10 @@ public:
     Sampler sampler;
   
 public:
-  ScatterTests(const Scatterer &_scatterer)
+  SamplingConsistencyTest(const Scatterer &_scatterer)
     : cubemap{Nbins}, scatterer{_scatterer}
-  {}
+  {
+  }
   
   void RunAllCalculations(const Double3 &_reverse_incident_dir, int _num_samples)
   {
@@ -806,7 +817,6 @@ public:
     DoSampling();
     ComputeBinProbabilities();
     ComputeCubatureIntegral();
-    CheckSymmetry();
   }
   
   
@@ -865,9 +875,14 @@ public:
       }
       TestProbabilityOfMeanLowerThanUpperBound(total_scattered_estimate.Mean()[i], total_scattered_estimate.Stddev()[i], num_samples, 1.+TEST_EPS, p_value);
     }
-    EXPECT_NEAR(total_probability+probability_of_delta_peaks, 1., total_probability_error+TEST_EPS);
+    CheckTotalProbability();
   }
  
+  void CheckTotalProbability()
+  {
+    static constexpr double TEST_EPS = 1.e-8; // Extra wiggle room for roundoff errors.
+    EXPECT_NEAR(total_probability+probability_of_delta_peaks, 1., total_probability_error+TEST_EPS);
+  }
  
   void DoSampling()
   {
@@ -895,41 +910,30 @@ public:
       int side, i, j;
       std::tie(side, i, j) = cubemap.OmegaToCell(smpl.coordinates);
       return cubemap.CellToIndex(side, i, j);
-    };
-    auto CrossValidate = [this](const ScatterSample &smpl) -> void
-    {
-      // Do pdf and scatter function values in the smpl struct match what comes out of member functions?
-      double pdf_crossvalidate = scatterer.ProbabilityDensity(reverse_incident_dir, smpl.coordinates);
-      ASSERT_NEAR(PdfValue(smpl), pdf_crossvalidate, 1.e-6);
-      Spectral3 val_crossvalidate = scatterer.ReflectedRadiance(reverse_incident_dir, smpl.coordinates);
-      ASSERT_NEAR(smpl.value[0], val_crossvalidate[0], 1.e-6);
-      ASSERT_NEAR(smpl.value[1], val_crossvalidate[1], 1.e-6);
-      ASSERT_NEAR(smpl.value[2], val_crossvalidate[2], 1.e-6);
-    };
-    
+    };    
     for (int snum = 0; snum<num_samples; ++snum)
     {
       auto smpl = scatterer.MakeScatterSample(reverse_incident_dir, sampler);
-      if (IsFromPdf(smpl) && snum<100)
-        CrossValidate(smpl);
+      Spectral3 contribution = scatterer.SurfaceNormalCosineOrOne(smpl.coordinates, false) 
+                               / smpl.pdf_or_pmf * smpl.value;
       // Can only integrate the non-delta density. 
       // Keep track of delta-peaks separately.
       if (IsFromPdf(smpl))
       {
         int idx = SampleIndex(smpl);
         bin_sample_count[idx] += 1;
-        diffuse_scattered_estimate += smpl.value / smpl.pdf_or_pmf; 
+        diffuse_scattered_estimate += contribution;
       }
       else
       {
-        RegisterDeltaSample(smpl.coordinates, (double)smpl.pdf_or_pmf);
+        RegisterDeltaSample(smpl.coordinates, smpl.pdf_or_pmf);
         // Think of Russian Roulette. When it is decided to sample the delta-peaks,
         // the other contribution is formally zerod out. In order to make the
         // statistics work, I must still count it as regular sample.
         diffuse_scattered_estimate += Spectral3{0.};
       }
       // I can ofc integrate delta-peak contributions by MC.
-      total_scattered_estimate += smpl.value / smpl.pdf_or_pmf; 
+      total_scattered_estimate += contribution; 
     }
   }
  
@@ -981,7 +985,8 @@ public:
       auto functionValueTimesJ = [&](const Double2 x) -> Eigen::Array3d
       {
         Double3 omega = cubemap.UVToOmega(side, x);
-        Spectral3 val = scatterer.ReflectedRadiance(reverse_incident_dir, omega);
+        Spectral3 val = scatterer.ScatterFunction(reverse_incident_dir, omega);
+                  val *= scatterer.SurfaceNormalCosineOrOne(omega, false);
         Spectral3 ret = val*cubemap.UVtoJ(x);
         assert(ret.allFinite());
         return ret;
@@ -995,32 +1000,119 @@ public:
     }
   }
   
-  
-  void CheckSymmetry()
-  {
-    const int NUM_SAMPLES = 100;
-    for (int snum = 0; snum<NUM_SAMPLES; ++snum)
-    {
-      Double3 wi = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
-      Double3 wo = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
-      if (scatterer.IsSymmetric())
-      {
-        double pdf_val = scatterer.ProbabilityDensity(wi, wo); 
-        double pdf_rev = scatterer.ProbabilityDensity(wo, wi);
-        EXPECT_NEAR(pdf_val, pdf_rev, 1.e-6);
-      }
-      Spectral3 f_val = scatterer.ScatterFunction(wi, wo);
-      Spectral3 f_rev = scatterer.ScatterFunction(wo, wi);
-      EXPECT_NEAR(f_val[0], f_rev[0], 1.e-6);
-      EXPECT_NEAR(f_val[1], f_rev[1], 1.e-6);
-      EXPECT_NEAR(f_val[2], f_rev[2], 1.e-6);
-    }
-  }
-
-  
   rj::Value CubemapToJSON(rj::Alloc &alloc);
   void DumpVisualization(const std::string filename);
 };
+
+
+// This test basically amounts to evaluating the scatter function with
+// swapped argument and looking if the result equals the evaluation of
+// the adjoint.
+class PointwiseSymmetryTest
+{
+    ScatterSample CheckedSample(const Double3 &wi, bool sample_adjoint)
+    {
+      scatterer->SetAdjoint(sample_adjoint);
+      ScatterSample smpl = scatterer->MakeScatterSample(wi, sampler);
+      if (!smpl.pdf_or_pmf.IsFromDelta())
+      {
+        // Check reversed arguments
+        scatterer->SetAdjoint(!sample_adjoint);
+        Spectral3 f = scatterer->ScatterFunction(smpl.coordinates, wi);
+        constexpr double TOL = 1.e-6;
+        ExpectNear(smpl.value, f, TOL);
+      }
+      return smpl;
+    }
+  
+  protected:
+    Scatterer *scatterer {nullptr};
+    int num_samples;
+    Sampler sampler;
+    
+  public:
+    PointwiseSymmetryTest(Scatterer &_scatterer, int _num_samples, std::uint64_t seed) :
+      scatterer{&_scatterer}, num_samples{_num_samples}
+    {
+      sampler.Seed(seed);
+    }
+    
+    void Run()
+    {
+      for (int snum = 0; snum<num_samples; ++snum)
+      {
+        Double3 wi = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
+        Double3 wo = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
+        scatterer->SetAdjoint(false);
+        Spectral3 f_val = scatterer->ScatterFunction(wi, wo);
+        scatterer->SetAdjoint(true);
+        Spectral3 f_rev = scatterer->ScatterFunction(wo, wi);
+        ExpectNear(f_val, f_rev, 1.e-6);
+      }
+      
+      for (int snum = 0; snum<num_samples; ++snum)
+      {
+        Double3 wi = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
+        CheckedSample(wi, true);
+        CheckedSample(wi, false);
+      }
+    }
+};
+
+
+// This test computes the double integral 
+// int_wi int_wo g(wi, wo)*|wi.n|*|wo.n| dwi dwo,
+// two times. First using normal scatter function (g = f),
+// and secondly using the adjoint (g = f*). Math sais
+// that the results should be equal! (Because, we can
+// swap the order of integration and rename the integration
+// variables).
+// This test is useful for scatter functions with Dirac-deltas
+// because for the delta peaks, the only operation we can do
+// to get some values is sampling.
+class IntegralSymmetryTest
+{
+  protected:
+    // parameters
+    Scatterer *scatterer {nullptr};
+    int num_samples;
+    Sampler sampler;    
+  public:
+    IntegralSymmetryTest(Scatterer &_scatterer, int _num_samples, std::uint64_t seed) :
+      scatterer{&_scatterer}, num_samples{_num_samples}
+    {
+      sampler.Seed(seed);
+    }
+    
+    void Run()
+    {
+      OnlineVariance::Accumulator<Spectral3> total_albedo_adjoint;
+      OnlineVariance::Accumulator<Spectral3> total_albedo;
+      
+      for (int snum = 0; snum<num_samples; ++snum)
+      {
+        Double3 wi = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
+        scatterer->SetAdjoint(true);
+        ScatterSample smpl_adj = scatterer->MakeScatterSample(wi, sampler);
+        scatterer->SetAdjoint(false);
+        ScatterSample smpl_non = scatterer->MakeScatterSample(wi, sampler);
+        double cos_wi = scatterer->SurfaceNormalCosineOrOne(wi, false);
+        double cos_wo_adj = scatterer->SurfaceNormalCosineOrOne(smpl_adj.coordinates, false);
+        double cos_wo_non = scatterer->SurfaceNormalCosineOrOne(smpl_non.coordinates, false);
+        total_albedo_adjoint += cos_wo_adj*cos_wi/PmfOrPdfValue(smpl_adj) * smpl_adj.value;
+        total_albedo += cos_wo_non*cos_wi/PmfOrPdfValue(smpl_non) * smpl_non.value;
+      }
+      
+      Spectral3 error = (total_albedo.Mean() - total_albedo_adjoint.Mean()).abs();
+      Spectral3 stddev = (total_albedo.Stddev() + total_albedo_adjoint.Stddev());
+      static constexpr double TEST_EPS = 1.e-6;
+      for (int i=0; i<error.size(); ++i)
+        TestSampleAverage(error[i], stddev[i], num_samples, 0., TEST_EPS, 0.05);
+    }
+};
+
+
+
 
 
 class PhasefunctionScatterer : public Scatterer
@@ -1038,15 +1130,10 @@ public:
     pf.Evaluate(wi, wo, &ret);
     return ret;
   }
-  
+
   Spectral3 ScatterFunction(const Double3 &wi, const Double3 &wo) const override
   {
     return pf.Evaluate(wi, wo, nullptr);
-  }
-  
-  Spectral3 ReflectedRadiance(const Double3 &wi, const Double3 &wo) const override
-  {
-    return ScatterFunction(wi, wo);
   }
   
   ScatterSample MakeScatterSample(const Double3 &wi, Sampler &sampler) const override
@@ -1054,27 +1141,21 @@ public:
     return pf.SampleDirection(wi, sampler);
   }
   
-  bool IsSymmetric() const override
+  void SetAdjoint(bool ) override 
   {
-    return true;
+    // Is self adjoint.
   }
-};
-
-
-class PhaseFunctionTests : public ScatterTests
-{
-    PhasefunctionScatterer pf_wrapper;
-  public:
-    PhaseFunctionTests(const PhaseFunctions::PhaseFunction &_pf)
-      :  ScatterTests{pf_wrapper}, pf_wrapper{_pf}
-    {
-    }
+  
+  double SurfaceNormalCosineOrOne(const Double3 &w, bool use_shading_normal) const override
+  {
+    return 1;
+  }
 };
 
 
 class ShaderScatterer : public Scatterer
 {
-  const Shader &sh;
+  std::unique_ptr<Shader> shader;
   PathContext context;
   std::unique_ptr<TexturedSmoothTriangle> triangle;
   
@@ -1097,8 +1178,7 @@ class ShaderScatterer : public Scatterer
   
   Spectral3 UndoneIorScaling(Spectral3 value, const Double3 &wi, const RaySurfaceIntersection &intersection, const Double3 &wo) const
   {
-    // TODO: Consider also the adjoint!
-    if (Dot(wo, intersection.normal) < 0.) // We have transmission
+    if (Dot(wo, intersection.normal) < 0. && context.transport == TransportType::RADIANCE) // We have transmission
     {
       // According to Veach's Thesis (Eq. 5.12), transmitted radiance is scaled by (eta_t/eta_i)^2.
       // Here I undo the scaling factor, so that when summing, the total scattered radiance equals
@@ -1111,9 +1191,23 @@ class ShaderScatterer : public Scatterer
     return value;
   }
   
+  Spectral3 CosThetaTerm(Spectral3 value, const Double3 &wi, const RaySurfaceIntersection &intersection, const Double3 &wo) const
+  {
+    // Here, the normal correction is applied. See Veach, p.g. 153.
+    if (context.transport==RADIANCE) // light comes from wo
+    {
+      value *= std::abs(Dot(wo, intersection.shading_normal))/(std::abs(Dot(wo, intersection.normal))+Epsilon);
+    }
+    else // Light goes from wi to wo.
+    {
+      value *= std::abs(Dot(wi, intersection.shading_normal))/(std::abs(Dot(wi, intersection.normal))+Epsilon);
+    }
+    return value;
+  }
+  
 public:
-  ShaderScatterer(const Shader &_sh)
-    : sh{_sh},
+  ShaderScatterer(std::unique_ptr<Shader> _shader)
+    : shader{std::move(_shader)},
       last_incident_dir{NaN},
       ior_below_over_above{1.}
   {
@@ -1135,28 +1229,19 @@ public:
     last_incident_dir = Double3{NaN}; // Force regeneration of intersection!
   }
   
-  
   double ProbabilityDensity(const Double3 &wi, const Double3 &wo) const override
   {
     double ret = NaN;
     auto &intersection = MakeIntersection(wi);
-    sh.EvaluateBSDF(wi, intersection, wo, context, &ret);
+    shader->EvaluateBSDF(wi, intersection, wo, context, &ret);
     return ret;
   }
   
   Spectral3 ScatterFunction(const Double3 &wi, const Double3 &wo) const override
   {
     auto &intersection = MakeIntersection(wi);
-    return UndoneIorScaling(
-      sh.EvaluateBSDF(wi, intersection, wo, context, nullptr), 
-      wi, intersection, wo);
-  }
-  
-  Spectral3 ReflectedRadiance(const Double3 &wi, const Double3 &wo) const override
-  {
-    auto &intersection = MakeIntersection(wi);
-    auto value = sh.EvaluateBSDF(wi, intersection, wo, context, nullptr);
-    value *= std::abs(Dot(wo, intersection.shading_normal));
+    auto value = shader->EvaluateBSDF(wi, intersection, wo, context, nullptr);
+    value = CosThetaTerm(value, wi, intersection, wo);
     value = UndoneIorScaling(value, wi, intersection, wo);
     return value;
   }
@@ -1164,35 +1249,35 @@ public:
   ScatterSample MakeScatterSample(const Double3 &wi, Sampler &sampler) const override
   {
     auto &intersection = MakeIntersection(wi);
-    auto smpl = sh.SampleBSDF(wi, intersection, sampler, context);
-    smpl.value *= std::abs(Dot(smpl.coordinates, intersection.shading_normal));
+    auto smpl = shader->SampleBSDF(wi, intersection, sampler, context);
+    smpl.value= CosThetaTerm(smpl.value,wi, intersection, smpl.coordinates);
     smpl.value = UndoneIorScaling(smpl.value, wi, intersection, smpl.coordinates);
     return smpl;
   }
   
-  bool IsSymmetric() const override
+  void SetAdjoint(bool to_adjoint) override
   {
-    return false;
+    context.transport = to_adjoint ? TransportType::IMPORTANCE : TransportType::RADIANCE;
+  }
+  
+  double SurfaceNormalCosineOrOne(const Double3 &w, bool use_shading_normal) const override
+  {
+    return std::abs(Dot(w, use_shading_normal ? last_intersection.smooth_normal : last_intersection.geometry_normal));
   }
 };
 
 
-class ShaderTests : public ScatterTests
+
+class PhaseFunctionTests : public SamplingConsistencyTest
 {
-    ShaderScatterer sh_wrapper;
+    PhasefunctionScatterer pf_wrapper;
   public:
-    ShaderTests(const Shader &_sh, double ior_below_over_above = 1.)
-      :  ScatterTests{sh_wrapper}, sh_wrapper{_sh}
+    PhaseFunctionTests(const PhaseFunctions::PhaseFunction &_pf)
+      :  SamplingConsistencyTest{pf_wrapper}, pf_wrapper{_pf}
     {
-      sh_wrapper.SetIorRatio(ior_below_over_above);
-    }
-    
-    void RunAllCalculations(const Double3 &_reverse_incident_dir, const Double3 shading_normal, int _num_samples)
-    {
-      sh_wrapper.SetShadingNormal(shading_normal);
-      ScatterTests::RunAllCalculations(_reverse_incident_dir, _num_samples);
     }
 };
+
 
 
 
@@ -1280,7 +1365,7 @@ public:
 };
 
 
-rj::Value ScatterTests::CubemapToJSON(rj::Alloc& alloc)
+rj::Value SamplingConsistencyTest::CubemapToJSON(rj::Alloc& alloc)
 {
   rj::Value json_side;
   json_side.SetArray();
@@ -1306,7 +1391,7 @@ rj::Value ScatterTests::CubemapToJSON(rj::Alloc& alloc)
 }
 
 
-void ScatterTests::DumpVisualization(const std::string filename)
+void SamplingConsistencyTest::DumpVisualization(const std::string filename)
 {
   rj::Document doc;
   auto &alloc = doc.GetAllocator();
@@ -1322,6 +1407,9 @@ void ScatterTests::DumpVisualization(const std::string filename)
   doc.AddMember("vis_samples", thing, alloc);
   rj::Write(doc, filename);
 }
+
+
+
 
 
 
@@ -1386,282 +1474,307 @@ TEST(PhasefunctionTests, SimpleCombined)
 }
 
 
-
-// Materials ...
-// TODO: Certainly all that repetition is not very nice ...
+namespace ParameterizedShaderTests
+{
+///////////////////////////////////////
+static const Double3 VERTICAL = Double3{0,0,1};
+static const Double3 EXACT_45DEG    = Normalized(Double3{0,1,1});
+static const Double3 ALMOST_45DEG    = Normalized(Double3{0,1,1.1});
+static const Double3 MUCH_DEFLECTED = Normalized(Double3{0,10,1});
+static const Double3 UNUSED_VECTOR  = Double3{NaN};
 
 ///////////////////////////////////////
-static const double DEFAULT_IOR = 1.3;
-static const Double3 NORMAL_VERTICAL = Double3{0,0,1};
-static const Double3 NORMAL_45DEG    = Normalized(Double3{0,1,1});
-static const Double3 NORMAL_MUCH_DEFLECTED = Normalized(Double3{0,10,1});
-static const Double3 INCIDENT_VERTICAL = NORMAL_VERTICAL;
-static const Double3 INCIDENT_45DEG = NORMAL_45DEG;
-static const Double3 INCIDENT_MUCH_DEFLECTED = NORMAL_MUCH_DEFLECTED;
+struct Params;
 
+using Factory = std::function<Shader*()>; // The code does not work with a naked function pointer. Why? Idk!
 
-TEST(ShaderTests, DiffuseShader1)
+struct Params
 {
-  DiffuseShader sh(Color::SpectralN{1.0}, nullptr);
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 2000);
-  test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr();
-  test.CheckIntegral(Spectral3{1.});
-}
+  Factory factory;
+  Double3 reverse_incident_dir{NaN};
+  Double3 normal{NaN};
+  double ior{1.};
+  int num_samples{10000};
+  boost::optional<Spectral3> albedo{boost::none};
+  bool test_sample_distribution{true};
+  boost::optional<std::uint64_t> seed;
 
-TEST(ShaderTests, DiffuseShader2)
+  Params(Factory f, const Double3 &wi, const Double3 &n, double ior = 1.) : 
+    factory{f}, reverse_incident_dir{wi}, normal{n}, ior{ior}
+    {}
+  Params& NumSamples(int n) {
+    num_samples = n;
+    return *this;
+  }
+  Params& TestSampleDistribution(bool do_it) {
+    test_sample_distribution = do_it;
+    return *this;
+  }
+  Params& Albedo(boost::optional<Spectral3> albedo) {
+    this->albedo = albedo;
+    return *this;
+  }
+  Params& Seed(boost::optional<std::uint64_t> seed) {
+    this->seed = seed;
+    return *this;
+  }
+};
+
+
+std::ostream& operator<<(std::ostream &os, const Params &p)
 {
-  DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_45DEG, NORMAL_VERTICAL, 2000);
-  test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr();
-  test.CheckIntegral(Spectral3{0.5});
-}
-
-TEST(ShaderTests, DiffuseShader3)
-{
-  // NOTE: High variant because the pdf distributes samples according to geometric normal. Hence many samples needed for integral to converge!
-  // TODO: I should probably use another sampling scheme.
-  DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 50000);
-  test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr();
-  test.CheckIntegral(Spectral3{0.5});
-}
-
-TEST(ShaderTests, DiffuseShader4)
-{
-  DiffuseShader sh(Color::SpectralN{0.5}, nullptr);
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_45DEG, 50000);
-  test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr();
-  test.CheckIntegral(Spectral3{0.5});
-}
-
-
-
-
-TEST(ShaderTests, SpecularReflectiveShader1)
-{
-  SpecularReflectiveShader sh(Color::SpectralN{0.5});
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 100);
-  test.TestCountsDeviationFromSigma(3.);
-  test.CheckIntegral(Spectral3{0.5});
-}
-
-TEST(ShaderTests, SpecularReflectiveShader2)
-{
-  SpecularReflectiveShader sh(Color::SpectralN{0.5});
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_45DEG, NORMAL_VERTICAL, 100);
-  test.TestCountsDeviationFromSigma(3.);
-  test.CheckIntegral(Spectral3{0.5});
-}
-
-TEST(ShaderTests, SpecularReflectiveShader3)
-{
-  SpecularReflectiveShader sh(Color::SpectralN{0.5});
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 100);
-  test.TestCountsDeviationFromSigma(3.);
-  // This is a pathological case, where due to the strongly perturbed
-  // shading normal, the incident direction is specularly reflected
-  // below the geometric surface. I don't know what I can do but to
-  // assign zero reflected radiance. Thus sane rendering algorithms
-  // would not consider this path any further.
-  test.CheckIntegral(Spectral3{0.0});
-}
-
-TEST(ShaderTests, SpecularReflectiveShader4)
-{
-  SpecularReflectiveShader sh(Color::SpectralN{0.5});
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_45DEG, 100);
-  test.TestCountsDeviationFromSigma(3.);
-  test.CheckIntegral(Spectral3{0.5});
+  os << p.reverse_incident_dir << ", " << p.normal
+    << ", " << p.ior
+    << ", " << p.num_samples;
+  if (p.albedo)
+  {
+    auto tmp = *p.albedo;
+    os << ", <" << tmp[0] << "," << tmp[1] << "," << tmp[2] << ">";
+  }
+  return os;
 }
 
 
+class ShaderSamplingConsistency : public testing::TestWithParam<Params>
+{
+    std::unique_ptr<ShaderScatterer> scatter;
+    std::unique_ptr<SamplingConsistencyTest> test;
+  protected:
+    void SetUp() override
+    {
+      const Params& p = this->GetParam();
+      {
+        std::unique_ptr<Shader> sh(const_cast<Params&>(p).factory());
+        this->scatter = std::make_unique<ShaderScatterer>(std::move(sh));
+      }
+      scatter->SetIorRatio(p.ior);
+      scatter->SetShadingNormal(p.normal);
+      test = std::make_unique<SamplingConsistencyTest>(*scatter);
+      if (p.seed)
+        test->sampler.Seed(*p.seed);
+    }
+    
+    void Run(bool adjoint)
+    {
+      const Params& p = this->GetParam();
+      scatter->SetAdjoint(adjoint);
+      test->RunAllCalculations(p.reverse_incident_dir, p.num_samples);
+      if (p.test_sample_distribution)
+      {
+        test->TestCountsDeviationFromSigma(3.5);
+        test->TestChiSqr();
+      }
+      if (adjoint)
+        test->CheckTotalProbability();
+      else
+        test->CheckIntegral(p.albedo);
+    }
+};
 
-// Test case for SpecularDenseDielectric selected with almost unnaturally
+
+TEST_P(ShaderSamplingConsistency, NotAdjoint)
+{
+  this->Run(false);
+}
+
+
+TEST_P(ShaderSamplingConsistency, Adjoint)
+{
+  this->Run(true);
+}
+
+
+class ShaderSymmetry : public testing::TestWithParam<Params>
+{
+protected:
+  std::unique_ptr<ShaderScatterer> scatter;
+  
+  void SetUp() override
+  {
+    const Params& p = this->GetParam();
+    {
+      std::unique_ptr<Shader> sh(const_cast<Params&>(p).factory());
+      this->scatter = std::make_unique<ShaderScatterer>(std::move(sh));
+    }
+    scatter->SetIorRatio(p.ior);
+    scatter->SetShadingNormal(p.normal);
+  }
+};
+
+
+TEST_P(ShaderSymmetry, Pointwise)
+{
+  const Params& p = this->GetParam();
+  PointwiseSymmetryTest test(*scatter, 100, p.seed.value_or(Sampler::default_seed));
+  test.Run();
+}
+
+TEST_P(ShaderSymmetry, Integral)
+{
+  const Params& p = this->GetParam();
+  IntegralSymmetryTest test(*scatter, p.num_samples, p.seed.value_or(Sampler::default_seed));
+  test.Run();
+}
+
+
+
+///////////////////////////////////////
+namespace Diffuse
+{
+
+Params P(const Double3 &wi, const Double3 &n)
+{
+  auto f = []() { return new DiffuseShader(Color::SpectralN{0.5}, nullptr); };
+  return Params{f, wi, n}.NumSamples(2000).Albedo(Spectral3{0.5});
+}
+
+INSTANTIATE_TEST_CASE_P(Diffuse,
+                        ShaderSamplingConsistency,
+                        ::testing::Values(
+                          P(VERTICAL,       VERTICAL),
+                          P(EXACT_45DEG,          VERTICAL),
+                          P(VERTICAL,       MUCH_DEFLECTED),
+                          P(MUCH_DEFLECTED, EXACT_45DEG)
+                        ));
+
+INSTANTIATE_TEST_CASE_P(Diffuse,
+                        ShaderSymmetry,
+                        ::testing::Values(
+                          P(UNUSED_VECTOR, VERTICAL)
+                          //P(UNUSED_VECTOR, EXACT_45DEG)
+                        ));
+
+} // namespace
+
+
+
+namespace SpecularReflective
+{
+
+Params P(const Double3 &wi, const Double3 &n)
+{
+  auto f = []() { return new SpecularReflectiveShader(Color::SpectralN{0.5}); };
+  return Params{f, wi, n}.NumSamples(100).Albedo(Spectral3{0.5}).TestSampleDistribution(false);
+}
+  
+INSTANTIATE_TEST_CASE_P(SpecularReflective,
+                        ShaderSamplingConsistency,
+                        ::testing::Values(
+                          P(VERTICAL,       VERTICAL),
+                          P(EXACT_45DEG,          VERTICAL),
+                          // This is a pathological case, where due to the strongly perturbed
+                          // shading normal, the incident direction is specularly reflected
+                          // below the geometric surface. I don't know what I can do but to
+                          // assign zero reflected radiance. Thus sane rendering algorithms
+                          // would not consider this path any further.
+                          P(VERTICAL,       MUCH_DEFLECTED).Albedo(Spectral3{0.}),
+                          P(MUCH_DEFLECTED, EXACT_45DEG)
+                        ));
+
+INSTANTIATE_TEST_CASE_P(SpecularReflective,
+                        ShaderSymmetry,
+                        ::testing::Values(
+                          P(UNUSED_VECTOR, VERTICAL)
+                        ));
+
+}
+
+
+
+namespace SpecularDenseDielectric
+{
+
+// Test case for SpecularDenseDielectric selected with unnaturally
 // high albedo of the diffuse layer. That is to uncover potential violation
 // in energy conservation. (Too high re-emission might otherwise be masked
 // by reflectivity factor.
-TEST(ShaderTests, SpecularDenseDielectricShader1)
+Params P(const Double3 &wi, const Double3 &n)
 {
-  SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 10000);
-  test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr();
-  test.CheckIntegral();
+  auto f = []() { return new SpecularDenseDielectricShader(0.2, Color::SpectralN{0.99}, nullptr); };
+  return Params{f, wi, n};
+}
+  
+INSTANTIATE_TEST_CASE_P(SpecularDenseDielectric,
+                        ShaderSamplingConsistency,
+                        ::testing::Values(
+                          P(VERTICAL,       VERTICAL),
+                          P(EXACT_45DEG,          VERTICAL),
+                          P(VERTICAL,       MUCH_DEFLECTED),
+                          P(MUCH_DEFLECTED, EXACT_45DEG)
+                        ));
+
+INSTANTIATE_TEST_CASE_P(SpecularDenseDielectric,
+                        ShaderSymmetry,
+                        ::testing::Values(
+                          P(UNUSED_VECTOR, VERTICAL)
+                        ));
+
 }
 
-TEST(ShaderTests, SpecularDenseDielectricShader2)
+
+namespace Microfacet
 {
-  SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_45DEG, NORMAL_VERTICAL, 10000);
-  test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr();
-  test.CheckIntegral();
-}
 
-TEST(ShaderTests, SpecularDenseDielectricShader3)
+Params P(const Double3 &wi, const Double3 &n)
 {
-  SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 10000);
-  test.TestCountsDeviationFromSigma(3.5);
-  test.TestChiSqr();
-  test.CheckIntegral();
+  auto f = []() { return new MicrofacetShader(Color::SpectralN{0.3}, 0.4, nullptr); };
+  return Params{f, wi, n}.NumSamples(10000);
+}
+  
+INSTANTIATE_TEST_CASE_P(Microfacet,
+                        ShaderSamplingConsistency,
+                        ::testing::Values(
+                          P(VERTICAL,       VERTICAL),
+                          P(ALMOST_45DEG,            VERTICAL),
+                          P(VERTICAL,       MUCH_DEFLECTED),
+                          P(MUCH_DEFLECTED, EXACT_45DEG),
+                          P(MUCH_DEFLECTED, VERTICAL)
+                        ));
+
+INSTANTIATE_TEST_CASE_P(Microfacet,
+                        ShaderSymmetry,
+                        ::testing::Values(
+                          P(UNUSED_VECTOR, VERTICAL)
+                        ));
+
 }
 
-TEST(ShaderTests, SpecularDenseDielectricShader4)
+
+namespace SpecularTransmissiveDielectric
 {
-  SpecularDenseDielectricShader sh(0.2, Color::SpectralN{0.99}, nullptr);
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_45DEG, 10000);
-  test.TestCountsDeviationFromSigma(3.5);
-  test.TestChiSqr();
-  test.CheckIntegral();
-}
 
-
-
-TEST(ShaderTests, MicrofacetShader1)
+Params P(const Double3 &wi, const Double3 &n)
 {
-  MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 10000);
-  test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr();
-  test.CheckIntegral();
-  //test.DumpVisualization("/tmp/MicrofacetShader1.json");
-}
-
-TEST(ShaderTests, MicrofacetShader2)
-{
-  MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
-  ShaderTests test(sh);
-  // Don't have the point where the PDF diverges coincide with the boundaries of some bins.
-  test.RunAllCalculations(Normalized(Double3{0,1,11}), NORMAL_VERTICAL, 20000);
-  test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr();
-  test.CheckIntegral();
-  //test.DumpVisualization("/tmp/MicrofacetShader2.json");
+  auto f = []() { return new SpecularTransmissiveDielectricShader(1.3); };
+  return Params{f, wi, n, 1.3}.NumSamples(100).Albedo(Spectral3{1.}).TestSampleDistribution(false);
 }
 
 
-TEST(ShaderTests, MicrofacetShader2b)
-{
-  MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_VERTICAL, 20000);
-  test.TestCountsDeviationFromSigma(3.);
-  test.TestChiSqr();
-  test.CheckIntegral();
-  //test.DumpVisualization("/tmp/MicrofacetShader2b.json");
-}
+INSTANTIATE_TEST_CASE_P(SpecularTransmissiveDielectric,
+                        ShaderSamplingConsistency,
+                        ::testing::Values(
+                          P(VERTICAL,       VERTICAL),
+                          P(EXACT_45DEG,          VERTICAL),
+                          P(MUCH_DEFLECTED, VERTICAL),
+                          // Not checking the total scattered radiance here???
+                          // If reflected, the exit direction is below the goemetrical surface, in case of which the contribution is canceled.
+                          // However if transmitted, the exit direction is correctly below the geom. surface. So this makes a contribution to
+                          // the integral check. But since the energy from reflection is missing, the total scattered radiance is hard to predict.
+                          P(VERTICAL,       MUCH_DEFLECTED).Albedo(boost::none),
+                          P(-VERTICAL,       VERTICAL),
+                          P(-EXACT_45DEG,          VERTICAL),
+                          P(-MUCH_DEFLECTED, VERTICAL),
+                          P(-VERTICAL,       MUCH_DEFLECTED).Albedo(Spectral3{0.})
+                        ));
 
+INSTANTIATE_TEST_CASE_P(SpecularTransmissiveDielectric,
+                        ShaderSymmetry,
+                        ::testing::Values(
+                          P(UNUSED_VECTOR, VERTICAL)
+                        ));
 
-TEST(ShaderTests, MicrofacetShader3)
-{
-  MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 20000);
-  test.TestCountsDeviationFromSigma(3.5);
-  test.TestChiSqr();
-  test.CheckIntegral();
-  //test.DumpVisualization("/tmp/MicrofacetShader3.json");
-}
-
-TEST(ShaderTests, MicrofacetShader4)
-{
-  MicrofacetShader sh(Color::SpectralN{0.3}, 0.4, nullptr);
-  ShaderTests test(sh);
-  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_45DEG, 10000);
-  test.TestCountsDeviationFromSigma(3.5);
-  test.TestChiSqr();
-  test.CheckIntegral();
-  //test.DumpVisualization("/tmp/MicrofacetShader4.json");
-}
-
-
-
-TEST(ShaderTests, SpecularTransmissiveDielectricShader1)
-{ 
-  SpecularTransmissiveDielectricShader sh(DEFAULT_IOR);
-  ShaderTests test(sh, DEFAULT_IOR);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 100);
-  test.CheckIntegral(Spectral3{1.});
-}
-
-TEST(ShaderTests, SpecularTransmissiveDielectricShader2)
-{
-  SpecularTransmissiveDielectricShader sh(DEFAULT_IOR);
-  ShaderTests test(sh, DEFAULT_IOR);
-  test.RunAllCalculations(Normalized(Double3{0,1,101}), NORMAL_VERTICAL, 100);
-  test.CheckIntegral(Spectral3{1.});
-}
-
-TEST(ShaderTests, SpecularTransmissiveDielectricShader3)
-{
-  SpecularTransmissiveDielectricShader sh(DEFAULT_IOR);
-  ShaderTests test(sh, DEFAULT_IOR);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 100);
-  // Not checking the total scattered radiance here???
-  // If reflected, the exit direction is below the goemetrical surface, in case of which the contribution is canceled.
-  // However if transmitted, the exit direction is correctly below the geom. surface. So this makes a contribution to
-  // the integral check. But since the energy from reflection is missing, the total scattered radiance is hard to predict.
-  test.CheckIntegral();
-}
-
-TEST(ShaderTests, SpecularTransmissiveDielectricShader4)
-{
-  SpecularTransmissiveDielectricShader sh(DEFAULT_IOR);
-  ShaderTests test(sh, DEFAULT_IOR);
-  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_VERTICAL, 100);
-  test.CheckIntegral(Spectral3{1.});
-}
-
-TEST(ShaderTests, SpecularTransmissiveDielectricShader5)
-{ 
-  SpecularTransmissiveDielectricShader sh(1./DEFAULT_IOR);
-  ShaderTests test(sh, 1./DEFAULT_IOR);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_VERTICAL, 100);
-  test.CheckIntegral(Spectral3{1.});
-}
-
-TEST(ShaderTests, SpecularTransmissiveDielectricShader6)
-{
-  SpecularTransmissiveDielectricShader sh(1./DEFAULT_IOR);
-  ShaderTests test(sh, 1./DEFAULT_IOR);
-  test.RunAllCalculations(INCIDENT_45DEG, NORMAL_VERTICAL, 100);
-  test.CheckIntegral(Spectral3{1.});
-}
-
-TEST(ShaderTests, SpecularTransmissiveDielectricShader7)
-{
-  SpecularTransmissiveDielectricShader sh(1./DEFAULT_IOR);
-  ShaderTests test(sh, 1./DEFAULT_IOR);
-  test.RunAllCalculations(INCIDENT_VERTICAL, NORMAL_MUCH_DEFLECTED, 100);
-  test.CheckIntegral(Spectral3{0.}); // Scattered below geometric surface, Best I can do is zero out the contribution.
-}
-
-TEST(ShaderTests, SpecularTransmissiveDielectricShader8)
-{
-  SpecularTransmissiveDielectricShader sh(1./DEFAULT_IOR);
-  ShaderTests test(sh, 1./DEFAULT_IOR);
-  test.RunAllCalculations(INCIDENT_MUCH_DEFLECTED, NORMAL_VERTICAL, 100); // Total reflection!
-  test.CheckIntegral(Spectral3{1.});
-}
-
+} // namespace
+} // namespace parameterized shader tests
 
 
 

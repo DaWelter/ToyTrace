@@ -2,12 +2,15 @@
 #include <typeinfo>
 #include <bitset>
 #include <type_traits>
+#include <unordered_map>
 
 #include <boost/serialization/strong_typedef.hpp>
 #include <boost/pool/simple_segregated_storage.hpp>
 #include <boost/variant.hpp>
 #include <boost/variant/polymorphic_get.hpp>
 #include <boost/align/aligned_allocator.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/any.hpp>
 
 #include "gtest/gtest.h"
 #include "spectral.hxx"
@@ -722,6 +725,84 @@ TEST(StrFormat, Test)
   EXPECT_EQ(strformat("%%%", 1), "%1");
   EXPECT_EQ(strformat("nothing"), "nothing");
   EXPECT_EQ(strformat("%bar%", "foo", "baz"), "foobarbaz");
+}
+
+//////////////////////////////////////////////
+//// Ptree building in style
+//////////////////////////////////////////////
+namespace make_pt_detail
+{
+namespace pt = boost::property_tree;
+  
+inline void put_pt(pt::ptree &dst)
+{
+}
+
+template<class T, class ... Args>
+inline void put_pt(pt::ptree &dst, const char* name, const T &x, Args&& ... args)
+{
+  dst.put(name, x);
+  put_pt(dst, args...);
+}
+
+}
+
+template<class ... Args>
+boost::property_tree::ptree make_pt(Args&& ...args)
+{
+  namespace pt = boost::property_tree;
+  pt::ptree dst;
+  make_pt_detail::put_pt(dst, args...);
+  return dst;
+}
+
+
+TEST(PTree, MakeInStyle)
+{
+  namespace pt = boost::property_tree;
+  pt::ptree tree = make_pt("foo", Spectral3{1.}, "bar", 1., "baz", 42);
+  // EXPECT_EQ(tree.get<Spectral3>("foo")[0], 1.);  // Bah! Compile error. Needs operator>> :-(
+  EXPECT_EQ(tree.get<double>("bar"), 1.);
+  EXPECT_EQ(tree.get<int>("baz"), 42);
+}
+
+
+//////////////////////////////////////////////
+////// Demoing Parameterized Tests
+//////////////////////////////////////////////
+namespace ParameterizedTestDemoDetail
+{
+using Options = std::unordered_map<const char*, boost::any>;
+using Factory = std::function<int*()>;
+
+using Params = std::tuple<double, Factory, Options>;
+
+Params MakeParams(double x, Factory f, std::initializer_list<Options::value_type> opts)
+{
+  return Params{x, f, Options{std::move(opts)}};
+}
+
+
+class ParameterizedTestDemo : public testing::TestWithParam<ParameterizedTestDemoDetail::Params>
+{
+};
+
+TEST_P(ParameterizedTestDemo, Foo) 
+{
+  auto param = GetParam();
+  double x;
+  ParameterizedTestDemoDetail::Factory f;
+  Options opt;
+  std::tie(x, f, opt) = param;
+  int *i = f();
+}
+
+INSTANTIATE_TEST_CASE_P(TheInstiationName,
+                        ParameterizedTestDemo,
+                        ::testing::Values(
+                          MakeParams(1., []{ return new int(42); }, {{"foo", 666}, {"bar", Spectral3{7.}}}), 
+                          MakeParams(2., []{ return new int(7); }, {{"foo", 42},{"bar", Spectral3{23.}}})
+                        ));
 }
 
 
