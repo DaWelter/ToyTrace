@@ -1640,8 +1640,9 @@ INSTANTIATE_TEST_CASE_P(Diffuse,
 INSTANTIATE_TEST_CASE_P(Diffuse,
                         ShaderSymmetry,
                         ::testing::Values(
-                          P(UNUSED_VECTOR, VERTICAL)
-                          //P(UNUSED_VECTOR, EXACT_45DEG)
+                          P(UNUSED_VECTOR, VERTICAL),
+                          P(UNUSED_VECTOR, EXACT_45DEG),
+                          P(UNUSED_VECTOR, MUCH_DEFLECTED)
                         ));
 
 } // namespace
@@ -1674,7 +1675,9 @@ INSTANTIATE_TEST_CASE_P(SpecularReflective,
 INSTANTIATE_TEST_CASE_P(SpecularReflective,
                         ShaderSymmetry,
                         ::testing::Values(
-                          P(UNUSED_VECTOR, VERTICAL)
+                          P(UNUSED_VECTOR, VERTICAL),
+                          P(UNUSED_VECTOR, EXACT_45DEG),
+                          P(UNUSED_VECTOR, MUCH_DEFLECTED)
                         ));
 
 }
@@ -1706,7 +1709,9 @@ INSTANTIATE_TEST_CASE_P(SpecularDenseDielectric,
 INSTANTIATE_TEST_CASE_P(SpecularDenseDielectric,
                         ShaderSymmetry,
                         ::testing::Values(
-                          P(UNUSED_VECTOR, VERTICAL)
+                          P(UNUSED_VECTOR, VERTICAL),
+                          P(UNUSED_VECTOR, EXACT_45DEG),
+                          P(UNUSED_VECTOR, MUCH_DEFLECTED)
                         ));
 
 }
@@ -1734,7 +1739,9 @@ INSTANTIATE_TEST_CASE_P(Microfacet,
 INSTANTIATE_TEST_CASE_P(Microfacet,
                         ShaderSymmetry,
                         ::testing::Values(
-                          P(UNUSED_VECTOR, VERTICAL)
+                          P(UNUSED_VECTOR, VERTICAL),
+                          P(UNUSED_VECTOR, EXACT_45DEG),
+                          P(UNUSED_VECTOR, MUCH_DEFLECTED)
                         ));
 
 }
@@ -1770,7 +1777,9 @@ INSTANTIATE_TEST_CASE_P(SpecularTransmissiveDielectric,
 INSTANTIATE_TEST_CASE_P(SpecularTransmissiveDielectric,
                         ShaderSymmetry,
                         ::testing::Values(
-                          P(UNUSED_VECTOR, VERTICAL)
+                          P(UNUSED_VECTOR, VERTICAL),
+                          P(UNUSED_VECTOR, EXACT_45DEG),
+                          P(UNUSED_VECTOR, MUCH_DEFLECTED)
                         ));
 
 } // namespace
