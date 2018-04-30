@@ -799,26 +799,16 @@ protected:
   OnlineVariance::Accumulator<Spectral3> total_scattered_estimate;
   Spectral3 integral_cubature;
   Spectral3 integral_cubature_error; // Numerical integration error.
-  int num_samples {0};  
-
+  int num_samples{0};
+  
 public:
     Sampler sampler;
   
 public:
-  SamplingConsistencyTest(const Scatterer &_scatterer)
-    : cubemap{Nbins}, scatterer{_scatterer}
+  SamplingConsistencyTest(const Scatterer &_scatterer, const Double3 &_reverse_incident_dir)
+    : cubemap{Nbins}, reverse_incident_dir{_reverse_incident_dir}, scatterer{_scatterer}
   {
   }
-  
-  void RunAllCalculations(const Double3 &_reverse_incident_dir, int _num_samples)
-  {
-    this->reverse_incident_dir = _reverse_incident_dir;
-    this->num_samples = _num_samples;
-    DoSampling();
-    ComputeBinProbabilities();
-    ComputeCubatureIntegral();
-  }
-  
   
   void TestCountsDeviationFromSigma(double number_of_sigmas_threshold = 3.)
   {
@@ -884,8 +874,9 @@ public:
     EXPECT_NEAR(total_probability+probability_of_delta_peaks, 1., total_probability_error+TEST_EPS);
   }
  
-  void DoSampling()
+  void DoSampling(int num_samples)
   {
+    this->num_samples = num_samples;
     this->bin_sample_count = std::vector<int>(cubemap.TotalNumBins(), 0);
     this->delta_peaks = decltype(delta_peaks){};
     this->diffuse_scattered_estimate = OnlineVariance::Accumulator<Spectral3>{};  
@@ -1272,9 +1263,16 @@ class PhaseFunctionTests : public SamplingConsistencyTest
 {
     PhasefunctionScatterer pf_wrapper;
   public:
-    PhaseFunctionTests(const PhaseFunctions::PhaseFunction &_pf)
-      :  SamplingConsistencyTest{pf_wrapper}, pf_wrapper{_pf}
+    PhaseFunctionTests(const PhaseFunctions::PhaseFunction &_pf, const Double3 &reverse_incident_dir)
+      :  SamplingConsistencyTest{pf_wrapper, reverse_incident_dir}, pf_wrapper{_pf}
     {
+    }
+    
+    void RunAllCalculations(int num_samples)
+    {
+      DoSampling(num_samples);
+      ComputeBinProbabilities();
+      ComputeCubatureIntegral();
     }
 };
 
@@ -1417,8 +1415,8 @@ void SamplingConsistencyTest::DumpVisualization(const std::string filename)
 TEST(PhasefunctionTests, Uniform)
 {
   PhaseFunctions::Uniform pf{};
-  PhaseFunctionTests test(pf);
-  test.RunAllCalculations(Double3{0,0,1}, 5000);
+  PhaseFunctionTests test(pf, Double3{0,0,1});
+  test.RunAllCalculations(5000);
   test.TestCountsDeviationFromSigma(3);
   test.TestChiSqr();
   test.CheckIntegral();
@@ -1428,8 +1426,8 @@ TEST(PhasefunctionTests, Uniform)
 TEST(PhasefunctionTests, Rayleigh)
 {
   PhaseFunctions::Rayleigh pf{};
-  PhaseFunctionTests test(pf);
-  test.RunAllCalculations(Double3{0,0,1}, 5000);
+  PhaseFunctionTests test(pf,Double3{0,0,1});
+  test.RunAllCalculations(5000);
   test.TestCountsDeviationFromSigma(3);
   test.TestChiSqr();
   test.CheckIntegral();
@@ -1439,8 +1437,8 @@ TEST(PhasefunctionTests, Rayleigh)
 TEST(PhasefunctionTests, HenleyGreenstein)
 {
   PhaseFunctions::HenleyGreenstein pf(0.4);
-  PhaseFunctionTests test(pf);
-  test.RunAllCalculations(Double3{0,0,1}, 5000);
+  PhaseFunctionTests test(pf, Double3{0,0,1});
+  test.RunAllCalculations(5000);
   test.TestCountsDeviationFromSigma(3);
   test.TestChiSqr();
   test.CheckIntegral();
@@ -1452,8 +1450,8 @@ TEST(PhasefunctionTests, Combined)
   PhaseFunctions::HenleyGreenstein pf1{0.4};
   PhaseFunctions::Uniform pf2;
   PhaseFunctions::Combined pf(Spectral3{1., 1., 1.}, Spectral3{.1, .2, .3}, pf1, Spectral3{.3, .4, .5}, pf2);
-  PhaseFunctionTests test(pf);
-  test.RunAllCalculations(Double3{0,0,1}, 5000);
+  PhaseFunctionTests test(pf, Double3{0,0,1});
+  test.RunAllCalculations(5000);
   test.TestCountsDeviationFromSigma(3);
   test.TestChiSqr();
   test.CheckIntegral();
@@ -1465,9 +1463,9 @@ TEST(PhasefunctionTests, SimpleCombined)
   PhaseFunctions::HenleyGreenstein pf1{0.4};
   PhaseFunctions::Uniform pf2;
   PhaseFunctions::SimpleCombined pf{Spectral3{.1, .2, .3}, pf1, Spectral3{.3, .4, .5}, pf2};
-  PhaseFunctionTests test(pf);
+  PhaseFunctionTests test(pf, Double3{0,0,1});
   test.sampler.Seed(12356);
-  test.RunAllCalculations(Double3{0,0,1}, 10000);
+  test.RunAllCalculations(10000);
   test.TestCountsDeviationFromSigma(3);
   test.TestChiSqr();
   test.CheckIntegral();
@@ -1549,7 +1547,7 @@ class ShaderSamplingConsistency : public testing::TestWithParam<Params>
       }
       scatter->SetIorRatio(p.ior);
       scatter->SetShadingNormal(p.normal);
-      test = std::make_unique<SamplingConsistencyTest>(*scatter);
+      test = std::make_unique<SamplingConsistencyTest>(*scatter, p.reverse_incident_dir);
       if (p.seed)
         test->sampler.Seed(*p.seed);
     }
@@ -1558,7 +1556,8 @@ class ShaderSamplingConsistency : public testing::TestWithParam<Params>
     {
       const Params& p = this->GetParam();
       scatter->SetAdjoint(adjoint);
-      test->RunAllCalculations(p.reverse_incident_dir, p.num_samples);
+      test->DoSampling(p.num_samples);
+      test->ComputeBinProbabilities();
       if (p.test_sample_distribution)
       {
         test->TestCountsDeviationFromSigma(3.5);
@@ -1567,7 +1566,10 @@ class ShaderSamplingConsistency : public testing::TestWithParam<Params>
       if (adjoint)
         test->CheckTotalProbability();
       else
+      {
+        test->ComputeCubatureIntegral();
         test->CheckIntegral(p.albedo);
+      }
     }
 };
 
