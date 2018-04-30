@@ -185,7 +185,7 @@ SpecularTransmissiveDielectricShader::SpecularTransmissiveDielectricShader(doubl
 
 ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
 {
-  double shn_dot_i = Dot(surface_hit.shading_normal, reverse_incident_dir);
+  double shn_dot_i = std::abs(Dot(surface_hit.shading_normal, reverse_incident_dir));
   bool entering = Dot(surface_hit.geometry_normal, reverse_incident_dir) > 0.;
   double eta_i_over_t = entering ? 1./ior_ratio  : ior_ratio; // eta_i refers to ior on the side of the incomming random walk! 
   
@@ -200,6 +200,7 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
   {
     // Want to divide out the cos theta term with the incident direction of light!
     return 1./(context.transport==RADIANCE ? cos_theta_o : cos_theta_i);
+    // return 1./cos_theta_o; // Not sure if this is correct ... It makes the test work, but who knows if the test is correct ...
   };
   
   double radiance_weight = (context.transport==RADIANCE) ? Sqr(eta_i_over_t) : 1.;
