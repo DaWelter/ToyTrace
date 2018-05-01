@@ -199,8 +199,12 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
   auto OneOverCosThetaLight = [&](double cos_theta_i, double cos_theta_o)
   {
     // Want to divide out the cos theta term with the incident direction of light!
-    return 1./(context.transport==RADIANCE ? cos_theta_o : cos_theta_i);
-    // return 1./cos_theta_o; // Not sure if this is correct ... It makes the test work, but who knows if the test is correct ...
+    // return 1./(context.transport==RADIANCE ? cos_theta_o : cos_theta_i);
+    
+    // Probably the following is correct. It is what PBRT does. Also if I follow Veach with
+    // his derivation on p.g. 171, but with dsigma instead of dsigma_perpendicular, I get this.
+    // It also makes my tests not fail!
+    return 1./cos_theta_o; 
   };
   
   double radiance_weight = (context.transport==RADIANCE) ? Sqr(eta_i_over_t) : 1.;
