@@ -1,0 +1,19 @@
+# Constant normal for an mesh that has an obvious kink.
+# Light path contributions need to be computed with the
+# modified BSDF with the correct order of arguments (Eq. 5.17).
+# Else there will be a visible discontinuity.
+# Insprired by Veach's thought-experiment in Cpt.5, Fig 5.10.
+
+v
+from 2 0.2 0
+at 0 0 0
+up 0 1 0
+resolution 320 320
+angle 60
+
+
+lddirection 0 -1 0 1 1 1
+
+diffuse test 1. 1. 1. 0.5
+
+m veach_shading_normals.obj

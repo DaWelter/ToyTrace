@@ -1,0 +1,17 @@
+# viewpoint
+v
+from 0 5 5
+at 0 1. 0
+up 0 1 0
+resolution 320 320
+angle 60
+
+
+lddirection -0.587 -0.752 -0.299 3 3 3
+diffuse test2 1. 1. 1. 0.5
+
+transform 0 1 0
+m unit_sphere_lowpoly.obj
+
+transform 0 0 0 0 0 0 4 4 4
+m unitrectangle.obj

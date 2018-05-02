@@ -361,6 +361,11 @@ class Various(object):
         self.scenes['various_cubelight'] = 'cubelight.nff'
         self.scenes['various_texture_test'] = 'texture_test.nff'
         self.scenes['various_off_center_rgb_cmy'] = 'off_center_rgb_cmy.nff'
+        self.scenes['various_veach_shading_normals'] = 'veach_shading_normals.nff'
+        self.scenes['various_test_lowpoly_sphere'] = 'test_lowpoly_sphere.nff'
+        self.scenes['various_refractive_sphere_caustics'] = 'refractive_sphere_caustics.nff'
+        self.scenes['various_refract_beam_at_cube'] = 'refract_beam_at_cube.nff'
+        self.scenes['various_refractive_sphere_caustics_wo_medium'] = 'refractive_sphere_caustics_wo_medium.nff'
         # self.common_opt = defaultdict(lambda : {'-w': 480, '-h': 320})
         # self.common_opt['various_cornel_parallel_arealight'] = {'-w': 320, '-h': 320}
         # self.common_opt['various_cornelbox_parabolic_reflector'] = {'-w': 320, '-h': 320}

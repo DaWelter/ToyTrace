@@ -1,0 +1,24 @@
+v
+from -3 0 0
+at 0 0 0
+up 0 0 1
+resolution 800 600
+angle 60
+
+{
+larea arealight1 parallel 1. 1. 1. 70
+diffuse black  1 1 1 1.
+transform 0 5 0 0 0 3.14 1 1 5
+m unitrectangle.obj
+}
+
+#l -10 2 2 1 1 1 700
+lddome -1 0 0  0.4 0.4 0.4
+
+speculartransmissivedielectric mat1 1.3
+s 0 0.2 0 0.5
+
+diffuse mat2 1 1 1 0.3
+diffusetexture checkerboard_bright_256.png
+transform 1.1 0 0 0 0.3 1.57 7 1 7
+m unitrectangle.obj
