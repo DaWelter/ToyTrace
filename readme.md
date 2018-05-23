@@ -28,7 +28,8 @@ Features
     * Glossy microfacet metallic BRDF
     * Dense dielectric with specular interface
     * Specular mirror
-    * Pure diffuse
+    * Specular transmissive dielectric, aka. glass.
+    * Lambertian diffuse
 * Textures & UV mapping
 * Lights:
     * Isotropic homogeneous area
