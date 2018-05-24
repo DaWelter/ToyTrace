@@ -1,15 +1,14 @@
-#ifndef RAY_HXX
-#define RAY_HXX
+#pragma once
 
 #include <limits>
 #include <vector>
+
+#include "types.hxx"
 #include "vec3f.hxx"
+#include "scene.hxx"
 
-class Primitive;
-class Shader;
-class Medium;
 
-static constexpr double RAY_EPSILON = 1.e-6; //1.e-10;
+static constexpr double RAY_EPSILON = 1.e-6;
 
 
 struct Ray
@@ -58,17 +57,6 @@ inline std::ostream &operator<<(std::ostream &o,const Ray &ray)
 { o << "Ray[" << ray.org << "+t*" << ray.dir << "]"; return o; }
 
 
-struct HitId
-{
-  const Primitive *primitive = { nullptr }; // primitive that was hit
-  Double3 barry;
-  
-  operator bool() const
-  {
-    return primitive != nullptr;
-  }
-};
-
 
 struct InteractionPoint
 {
@@ -81,22 +69,20 @@ struct SurfaceInteraction : public InteractionPoint
   HitId hitid;
   Double3 geometry_normal;
   Double3 smooth_normal;
-  
-  const Primitive& primitive() const;
-  const Shader& shader() const;
+  Float2 GetTexCoords() const;
   
   SurfaceInteraction(const HitId &hitid);
   SurfaceInteraction() = default;
 };
 
-
 struct RaySurfaceIntersection : public SurfaceInteraction
 {
-  Double3 normal;        // Used for shading and tracing. Oriented toward the incomming ray.
-  Double3 shading_normal;
+  Double3 normal;    // Geometry normal, oriented toward the incomming ray, if result of ray-surface intersection.
+  Double3 shading_normal; // Same for smooth normal.
   
   RaySurfaceIntersection(const HitId &hitid, const RaySegment &_incident_segment);
   RaySurfaceIntersection() = default;
+  void SetOrientedNormals(const Double3 &incident);
 };
 
 
@@ -112,27 +98,15 @@ struct VolumeInteraction : public InteractionPoint
 };
 
 
-
-inline Double3 AntiSelfIntersectionOffset(const Double3 &normal, double eps, const Double3 &exitant_dir)
+inline Double3 AntiSelfIntersectionOffset(const SurfaceInteraction &interaction, const Double3 &exitant_dir)
 {
+  static constexpr float EXPERIMENTALLY_DETERMINED_MAGIC_NUMBER = 512.f;
+  const auto pos = interaction.pos.cast<float>();
+  const auto normal = interaction.geometry_normal;
+  float val = pos.cwiseAbs().maxCoeff();
+  float eps = EXPERIMENTALLY_DETERMINED_MAGIC_NUMBER*
+              val*std::numeric_limits<float>::epsilon();
+  assert(eps > 0.f);
   return eps * (Dot(exitant_dir, normal) > 0. ? 1. : -1.) * normal;
 }
 
-
-inline Double3 AntiSelfIntersectionOffset(const RaySurfaceIntersection &intersection, double eps, const Double3 &exitant_dir)
-{
-  return AntiSelfIntersectionOffset(intersection.normal, eps, exitant_dir);
-}
-
-
-struct HitRecord : public HitId
-{
-  HitRecord(const HitId &hit, double _t) :
-    HitId(hit), t(_t) {}
-  HitRecord() : t(LargeNumber) {}
-  double t;
-};
-using HitVector = std::vector<HitRecord>;
-
-
-#endif

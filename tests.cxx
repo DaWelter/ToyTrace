@@ -10,13 +10,11 @@
 
 #include "ray.hxx"
 #include "image.hxx"
-#include "perspectivecamera.hxx"
+#include "camera.hxx"
 #include "infiniteplane.hxx"
 #include "sampler.hxx"
 #include "scene.hxx"
 #include "renderingalgorithms.hxx"
-#include "sphere.hxx"
-#include "triangle.hxx"
 #include "atmosphere.hxx"
 #include "util.hxx"
 
@@ -160,23 +158,25 @@ TEST(Spectral, RGBConversionSelection)
 
 
 
-class TestIntersection : public testing::Test
+class EmbreePrimitives : public testing::Test
 {
+  Scene scene;
 protected:
   RaySurfaceIntersection intersection;
   double distance;
   
-  void Intersect(const Primitive &prim, const Ray &ray, bool expect_hit = true)
+  void Initialize(std::function<void(Scene &)> scene_filler)
+  {
+    scene_filler(scene);
+    scene.BuildAccelStructure();
+  }
+  
+  void Intersect(const Ray &ray, bool expect_hit = true)
   {
     RaySegment rs{ray, LargeNumber};
-    HitId hit;
-    bool bhit = prim.Intersect(rs.ray, 0., rs.length, hit);
+    bool bhit = scene.FirstIntersectionEmbree(rs.ray, 0., rs.length, intersection);
     ASSERT_TRUE(bhit == expect_hit);
-    if (bhit)
-    {
-      distance = rs.length;
-      intersection = RaySurfaceIntersection{hit, rs};
-    }
+    distance = rs.length;
   }
   
   void CheckPosition(const Double3 &p) const
@@ -193,73 +193,216 @@ protected:
 };
 
 
-TEST_F(TestIntersection, Sphere)
+inline RaySegment MakeSegmentAt(const RaySurfaceIntersection &intersection, const Double3 &ray_dir)
 {
-  Sphere s{{0., 0., 2.}, 2.};
-  Intersect(s, {{0., 0., -1.},{0., 0., 1.}});
+  return RaySegment{
+    {intersection.pos + AntiSelfIntersectionOffset(intersection, ray_dir), ray_dir},
+    LargeNumber
+  };
+}
+
+
+TEST_F(EmbreePrimitives, Sphere)
+{
+  this->Initialize([](Scene &scene) {
+    Spheres s; s.Append({0., 0., 2.}, 2., MaterialIndex{-1});  
+    scene.Append(s);
+  });
+  Intersect({{0., 0., -1.},{0., 0., 1.}});
   EXPECT_NEAR(distance, 1., 1.e-6);
   CheckPosition({0., 0., 0.});
   CheckNormal({0.,0.,-1.});
 }
 
 
-//TEST_F(TestIntersection, SphereRepeatedIntersection)
-//{
-//  Sphere s{{0., 0., 0.}, 6300.};
-//  Ray r{{-10000., 0., 0.}, {1., 0., 0.}};
-//  std::cout << std::setprecision(std::numeric_limits<double>::digits10) << "one ulp at r=6300 is" << boost::math::float_advance<double>(6300.,1) - 6300. << std::endl;
-//  for (int iter=0; iter<100; ++iter)
-//  {
-//    Intersect(s, r);
-//    EXPECT_LE(intersection.pos[0], 0.);
-//    EXPECT_NEAR(intersection.pos[1], 0., 1.e-6);
-//    EXPECT_NEAR(intersection.pos[2], 0., 1.e-6);
-//    r.org[0] = (r.org[0]+6300.)*0.5 - 6300.;
-//    std::cout << std::setprecision(std::numeric_limits<double>::digits10) << "start=" << r.org[0] << " xpos=" << intersection.pos[0] << std::endl;
-//  }
-//}
-
-
-TEST_F(TestIntersection, Triangle)
+TEST_F(EmbreePrimitives, Triangle)
 {
   /*     x
    *   / |
    *  /  |
    * x---x
    * Depiction of the triangle */
-  double q = 0.5;
-  Triangle prim{{-q, -q, 0}, {q, -q, 0}, {q, q, 0}};
-  Intersect(prim, Ray{{0.1, 0., -1.},{0., 0., 1.}});
+  this->Initialize([](Scene &scene) {
+    float q = 0.5;
+    Mesh m{0,0}; AppendSingleTriangle(m, {-q, -q, 0}, {q, -q, 0}, {q, q, 0}, {0,0,0});
+    m.MakeFlatNormals();
+    scene.Append(m);
+  });
+  Intersect(Ray{{0.1, 0., -1.},{0., 0., 1.}});
   EXPECT_NEAR(distance, 1., 1.e-6);
   CheckPosition({0.1, 0., 0.});
   CheckNormal({0., 0., -1.});
 }
 
 
-TEST_F(TestIntersection, TriangleEdgeCase)
+TEST_F(EmbreePrimitives, TriangleEdgeCase)
 {
-  double q = 0.5;
-  Triangle prim{{-q, -q, 0}, {q, -q, 0}, {q, q, 0}};
-  Intersect(prim, Ray{{0., 0., -1.},{0., 0., 1.}});
+  this->Initialize([](Scene &scene) {
+    float q = 0.5;
+    Mesh m{0,0}; 
+    AppendSingleTriangle(m, {-q, -q, 0}, {q, -q, 0}, {q, q, 0}, {0,0,0});
+    AppendSingleTriangle(m, {-q, -q, 0}, {-q, q, 0}, {q, q, 0}, {0,0,0});
+    m.MakeFlatNormals();
+    scene.Append(m);
+  });
+  Intersect(Ray{{0., 0., -1.},{0., 0., 1.}});
   EXPECT_NEAR(distance, 1., 1.e-6);
   CheckPosition({0., 0., 0.});
   CheckNormal({0., 0., -1.});
-  // Slightly offset the ray, there should be no intersection.
-  Intersect(prim, Ray{{-Epsilon, 0., -1.},{0., 0., 1.}}, false);
-  // An adjacent triangle should catch the ray, however.
-  // This one covers the top left corner.
-  Triangle prim_top_left{{-q, -q, 0}, {-q, q, 0}, {q, q, 0}};
-  Intersect(prim_top_left, Ray{{-Epsilon, 0., -1.},{0., 0., 1.}}, true);
+  Intersect(Ray{{1.e-7, 0., -1.},{0., 0., 1.}}); // 10^{-7} still works. It happens that log2(10^7) ~= 23, the number of significant bits in IEEE float.
+  EXPECT_EQ(intersection.hitid.index, int{0});
+  Intersect(Ray{{-1.e-7, 0., -1.},{0., 0., 1.}});
+  EXPECT_EQ(intersection.hitid.index, int{1});
 }
 
 
-inline RaySegment MakeSegmentAt(const RaySurfaceIntersection &intersection, const Double3 &ray_dir)
+
+
+TEST(Embree, SelfIntersection)
 {
- return RaySegment{
-   {intersection.pos + AntiSelfIntersectionOffset(intersection, RAY_EPSILON, ray_dir), ray_dir},
-   LargeNumber
- };
+  // Intersect with primitive far off the origin.
+  // Go to intersection point and shoot another ray.
+  // Is there self intersection?
+  const char* scenestr = R"""(
+transform 0 0 1.e5
+p 4
+0.5 0.5 -10
+-0.5 0.5 10
+-0.5 -0.5 10
+0.5 -0.5 -10
+)""";
+  Scene scene;
+  scene.ParseNFFString(scenestr);
+  scene.BuildAccelStructure();
+  Ray r{{0, 0, 1.e5 + 1.}, {0, 0, -1}};
+  double tfar = Infinity;
+  RaySurfaceIntersection intersection;
+  bool is_hit = scene.FirstIntersectionEmbree(r, 0, tfar, intersection);
+  EXPECT_TRUE(is_hit);
+  r.org = intersection.pos;
+  tfar = Infinity;
+  is_hit = scene.FirstIntersectionEmbree(r, 0, tfar, intersection);
+  EXPECT_FALSE(is_hit);
 }
+
+
+TEST(Embree, SphereIntersectionMadness)
+{
+  // Intersect sphere with ray. Start new ray from intersection point.
+  // Is there self-intersection?
+  Sampler sampler;
+  Double3 sphere_org{0., 0., 2};
+  double sphere_rad = 6300;
+  Spheres geom;
+  geom.Append(sphere_org.cast<float>(), (float)sphere_rad, MaterialIndex{-1});
+  EmbreeAccelerator world;
+  world.Add(geom);
+  world.Build();
+  
+  const int N = 100;
+  for (int num = 0; num < N; ++num)
+  {
+    // Sample random position outside the sphere as start point.
+    // And position inside the sphere as end point.
+    // Intersection is thus guaranteed.
+    Double3 org = 
+      SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare())
+      * sphere_rad * 10. + sphere_org;
+    Double3 target = 
+      SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare())
+      * sphere_rad * 0.99 + sphere_org;
+    Double3 dir = target - org; 
+    Normalize(dir);
+    
+    // Shoot ray to the inside. Expect intersection at the
+    // front side of the sphere.
+    RaySegment rs{{org, dir}, LargeNumber};
+    RaySurfaceIntersection intersect1;
+    bool bhit = world.FirstIntersection(rs.ray, 0, rs.length, intersect1);
+    ASSERT_TRUE(bhit);
+    ASSERT_LE(Length(org - intersect1.pos), Length(org - sphere_org));
+    
+    // Put the origin at the intersection and shoot a ray to the outside
+    // in a random direction. Expect no further hit.
+    auto m  = OrthogonalSystemZAligned(intersect1.geometry_normal);
+    auto new_dir = m * SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare());
+    rs = MakeSegmentAt(intersect1, new_dir);
+    bhit = world.FirstIntersection(rs.ray, 0, rs.length, intersect1);
+    ASSERT_FALSE(bhit);
+    ASSERT_EQ(rs.length, LargeNumber);
+  }
+}
+
+
+TEST(Embree, SphereIntersectionMadness2)
+{
+  // Bounce a particle around in the inside of the sphere.
+  // It must not escape.
+  Sampler sampler;
+  Double3 sphere_org{0., 0., 2};
+  double sphere_rad = 6300;
+  Spheres geom;
+  geom.Append(sphere_org.cast<float>(), (float)sphere_rad, MaterialIndex{-1});
+  EmbreeAccelerator world;
+  world.Add(geom);
+  world.Build();
+  
+  RaySegment rs{{sphere_org, {1., 0., 0.}}, LargeNumber};
+  HitId hit, last_hit;
+  const int N = 100;
+  for (int num = 0; num < N; ++num)
+  {
+    RaySurfaceIntersection intersect;
+    bool bhit = world.FirstIntersection(rs.ray, 0, rs.length, intersect);
+    ASSERT_TRUE(bhit);
+    double rho = Length(intersect.pos-sphere_org);
+    auto m  = OrthogonalSystemZAligned(intersect.normal);
+    auto new_dir = m * SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare());
+    rs = MakeSegmentAt(intersect, new_dir);
+    rho = Length(rs.ray.org-sphere_org);
+    EXPECT_LE(rho, sphere_rad);
+    last_hit = hit;
+  }
+}
+
+
+TEST(Embree, SphereIntersectionMadness3)
+{
+  // Bounce a particle around within a shell between two spheres.
+  // It must not escape.
+  Sampler sampler;
+  Spheres geom;
+  double rad1 = 6300.;
+  double rad2 = 6350.;
+  geom.Append({0.f, 0.f, 0.f}, (float)rad1, MaterialIndex{-1});
+  geom.Append({0.f, 0.f, 0.f}, (float)rad2, MaterialIndex{-1});
+  EmbreeAccelerator world;
+  world.Add(geom);
+  world.Build();
+  
+  Double3 start_point = {0.5*(rad1+rad2), 0., 0.};
+  double max_dist_from_start = 0.;
+  RaySegment rs{{start_point, {1., 0., 0.}}, LargeNumber};
+  const int N = 100;
+  for (int num = 0; num < N; ++num)
+  {
+    RaySurfaceIntersection intersect;
+    bool bhit = world.FirstIntersection(rs.ray, 0., rs.length, intersect);
+    ASSERT_TRUE(bhit);
+    double rho = Length(intersect.pos);
+    max_dist_from_start = std::max(max_dist_from_start, Length(intersect.pos-start_point));
+    auto eps = rad2*std::numeric_limits<float>::epsilon();
+    EXPECT_LE(rho-eps, rad2);
+    EXPECT_GE(rho+eps, rad1);
+    auto m  = OrthogonalSystemZAligned(intersect.normal);
+    auto new_dir = m * SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare());
+    rs = MakeSegmentAt(intersect, new_dir);
+  }
+  EXPECT_GE(max_dist_from_start, rad1*1.e-3);
+}
+
+
+
 
 
 TEST(TestMath, Reflected)
@@ -292,106 +435,6 @@ TEST(TestMath, Refracted)
   w2 = Refracted(w1, n, eta1/eta2);
   ASSERT_FALSE((bool)w2);
 }
-
-
-TEST(TestMath, SphereIntersectionMadness)
-{
-  Sampler sampler;
-  Double3 sphere_org{0., 0., 2.};
-  double sphere_rad = 6300;
-  Sphere s{sphere_org, sphere_rad};
-  const int N = 100;
-  for (int num = 0; num < N; ++num)
-  {
-    // Sample random position outside the sphere as start point.
-    // And position inside the sphere as end point.
-    // Intersection is thus guaranteed.
-    Double3 org = 
-      SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare())
-      * sphere_rad * 10. + sphere_org;
-    Double3 target = 
-      SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare())
-      * sphere_rad * 0.99 + sphere_org;
-    Double3 dir = target - org; 
-    Normalize(dir);
-    
-    // Shoot ray to the inside. Expect intersection at the
-    // front side of the sphere.
-    RaySegment rs{{org, dir}, LargeNumber};
-    HitId hit1;
-    bool bhit = s.Intersect(rs.ray, 0., rs.length, hit1);
-    ASSERT_TRUE(bhit);
-    RaySurfaceIntersection intersect1{hit1, rs};
-    ASSERT_LE(Length(org - intersect1.pos), Length(org - sphere_org));
-    
-    // Put the origina at at the intersection and shoot a ray to the outside
-    // in a random direction. Expect no further hit.
-    auto m  = OrthogonalSystemZAligned(intersect1.geometry_normal);
-    auto new_dir = m * SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare());
-    rs = MakeSegmentAt(intersect1, new_dir);
-    bhit = s.Intersect(rs.ray, 0., rs.length, hit1);
-    ASSERT_FALSE(bhit);
-    ASSERT_EQ(rs.length, LargeNumber);
-  }
-}
-
-
-TEST(TestMath, SphereIntersectionMadness2)
-{
-  Sampler sampler;
-  Double3 sphere_org{0., 0., 2.};
-  double sphere_rad = 6300;
-  Sphere s{sphere_org, sphere_rad};
-  RaySegment rs{{sphere_org, {1., 0., 0.}}, LargeNumber};
-  HitId hit, last_hit;
-  const int N = 100;
-  for (int num = 0; num < N; ++num)
-  {
-    bool bhit = s.Intersect(rs.ray, 0., rs.length, hit); //, last_hit, HitId());
-    ASSERT_TRUE(bhit);
-    RaySurfaceIntersection intersect{hit, rs};
-    double rho = Length(intersect.pos-sphere_org);
-    auto m  = OrthogonalSystemZAligned(intersect.normal);
-    auto new_dir = m * SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare());
-    rs = MakeSegmentAt(intersect, new_dir);
-    rho = Length(rs.ray.org-sphere_org);
-    EXPECT_LE(rho, sphere_rad);
-    last_hit = hit;
-  }
-}
-
-
-TEST(TestMath, SphereIntersectionMadness3)
-{
-  Sampler sampler;
-  Scene scene;
-  double rad1 = 6300.;
-  double rad2 = 6350.;
-  scene.AddPrimitive<Sphere>(Double3{0.}, rad1);
-  scene.AddPrimitive<Sphere>(Double3{0.}, rad2);
-  scene.BuildAccelStructure();
-  Double3 start_point = {0.5*(rad1+rad2), 0., 0.};
-  double max_dist_from_start = 0.;
-  RaySegment rs{{start_point, {1., 0., 0.}}, LargeNumber};
-  HitId hit, last_hit;
-  const int N = 100;
-  for (int num = 0; num < N; ++num)
-  {
-    hit = scene.MakeIntersectionCalculator().First(rs.ray, rs.length);
-    ASSERT_TRUE((bool)hit);
-    RaySurfaceIntersection intersect{hit, rs};
-    double rho = Length(intersect.pos);
-    max_dist_from_start = std::max(max_dist_from_start, Length(intersect.pos-start_point));
-    EXPECT_LE(rho-RAY_EPSILON, rad2);
-    EXPECT_GE(rho+RAY_EPSILON, rad1);
-    auto m  = OrthogonalSystemZAligned(intersect.normal);
-    auto new_dir = m * SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare());
-    rs = MakeSegmentAt(intersect, new_dir);
-    last_hit = hit;
-  }
-  EXPECT_GE(max_dist_from_start, rad1*1.e-3);
-}
-
 
 
 TEST(Display, Open)
@@ -449,9 +492,9 @@ public:
       auto s = cam->TakeDirectionSampleFrom(
         cam->PixelToUnit({_pixel_x, _pixel_y}), pos, sampler,
         PathContext{Color::LambdaIdxClosestToRGBPrimaries()});
-      HitId hit;
+      Double3 barry;
       double length = 100.;
-      bool is_hit = imageplane.Intersect({pos, s.coordinates}, 0., length, hit);
+      bool is_hit = imageplane.Intersect({pos, s.coordinates}, 0., length, barry);
       ASSERT_TRUE(is_hit);
       Double3 endpos = pos + length * s.coordinates;
       possum += endpos;
@@ -557,12 +600,22 @@ namespace
   
 void CheckSceneParsedWithScopes(const Scene &scene)
 {
-  auto Getter = [&scene](int i) -> auto 
+  ASSERT_EQ(scene.GetNumGeometries(), 2);
+  ASSERT_TRUE(scene.GetGeometry(1).type == Geometry::PRIMITIVES_SPHERES);
+  const auto &spheres = static_cast<const Spheres &>(scene.GetGeometry(1));
+  auto Getter = [&spheres](int i) -> Float3 
   { 
-    return scene.GetPrimitive(i).CalcBounds().Center();
+    float rad;
+    Float3 center;
+    std::tie(center, rad) = spheres.Get(i);
+    return center;
   };
-  ASSERT_EQ(scene.GetNumPrimitives(), 4);
-  std::array<Double3,4> c{ 
+  auto GetMaterial = [&spheres, &scene](int i) -> auto
+  {
+    return scene.GetMaterialOf({&spheres, i});
+  };
+  ASSERT_EQ(spheres.Size(), 4);
+  std::array<Float3,4> c{ 
     Getter(0),
     Getter(1),
     Getter(2),
@@ -573,10 +626,9 @@ void CheckSceneParsedWithScopes(const Scene &scene)
   ASSERT_NEAR(c[1][0], 5., 1.e-3);
   ASSERT_NEAR(c[2][0], 8.+11., 1.e-3); // Using the child scope transform.
   ASSERT_NEAR(c[3][0], 14.+5., 1.e-3); // Using the parent scope transform.
-  ASSERT_EQ(scene.GetPrimitive(3).shader, scene.GetPrimitive(1).shader); // Shaders don't persist beyond scopes.
-  ASSERT_NE(scene.GetPrimitive(2).shader, scene.GetPrimitive(1).shader); // Shader within the scope was actually created and assigned.
-  ASSERT_NE(scene.GetPrimitive(2).shader, scene.GetPrimitive(0).shader); // Shader within the scope is not the default.
-  ASSERT_NE(scene.GetPrimitive(2).shader, nullptr); // And ofc it should not be null.
+  ASSERT_TRUE(GetMaterial(3) == GetMaterial(1)); // Shaders don't persist beyond scopes.
+  ASSERT_TRUE(!(GetMaterial(2) == GetMaterial(1))); // Shader within the scope was actually created and assigned.
+  ASSERT_TRUE(!(GetMaterial(2) == GetMaterial(0))); // Shader within the scope is not the default.
 }
   
 }
@@ -591,6 +643,7 @@ m testing/scenes/unitcube.dae
 )""";
   Scene scene;
   scene.ParseNFFString(scenestr);
+  scene.BuildAccelStructure();
   constexpr double tol = 1.e-2;
   Box outside; 
   outside.Extend({-0.5-tol, -0.5-tol, -0.5-tol}); 
@@ -598,15 +651,10 @@ m testing/scenes/unitcube.dae
   Box inside;
   inside.Extend({-0.5+tol, -0.5+tol, -0.5+tol});
   inside.Extend({0.5-tol, 0.5-tol, 0.5-tol});
-  EXPECT_EQ(scene.GetNumPrimitives(), 6 * 2);
-  for (int i=0; i<scene.GetNumPrimitives(); ++i)
-  {
-    auto* prim = dynamic_cast<const Triangle*>(&scene.GetPrimitive(i));
-    ASSERT_NE(prim, nullptr);
-    Box b = prim->CalcBounds();
-    ASSERT_TRUE(b.InBox(outside));
-    ASSERT_TRUE(!b.InBox(inside));
-  }
+  ASSERT_EQ(scene.GetNumGeometries(), 2);
+  ASSERT_TRUE(scene.GetGeometry(0).type == Geometry::PRIMITIVES_TRIANGLES);
+  ASSERT_TRUE(scene.GetBoundingBox().InBox(outside));
+  ASSERT_FALSE(scene.GetBoundingBox().InBox(inside));
 }
 
 
@@ -631,7 +679,8 @@ m testing/scenes/cornelbox.dae
 )""";
   Scene scene;
   scene.ParseNFFString(scenestr);
-  Box b = scene.CalcBounds();
+  scene.BuildAccelStructure();
+  Box b = scene.GetBoundingBox();
   double size = Length(b.max - b.min);
   ASSERT_GE(size, 1.);
   ASSERT_LE(size, 3.);

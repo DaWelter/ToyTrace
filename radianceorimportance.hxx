@@ -47,7 +47,7 @@ public:
 class AreaEmitter : public Emitter
 {
 public:
-  virtual AreaSample TakeAreaSample(const Primitive& primitive, Sampler &sampler, const PathContext &context) const = 0; 
+  virtual AreaSample TakeAreaSample(const PrimRef& primitive, Sampler &sampler, const PathContext &context) const = 0; 
   virtual DirectionalSample TakeDirectionSampleFrom(const PosSampleCoordinates &area, Sampler &sampler, const PathContext &context) const
   {
     assert(!"Not Implemented");

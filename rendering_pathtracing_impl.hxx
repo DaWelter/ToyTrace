@@ -652,7 +652,7 @@ public:
     assert (node.geom_type == GeometryType::SURFACE);
 
     const RaySurfaceIntersection &intersection = node.interaction.ray_surface;
-    return intersection.shader().Pdf(reverse_incident_dir, intersection, -node.incident_dir, context);
+    return GetShaderOf(intersection, scene).Pdf(reverse_incident_dir, intersection, -node.incident_dir, context);
   }
 
 

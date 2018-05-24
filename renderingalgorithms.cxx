@@ -17,77 +17,16 @@ double UpperBoundToBoundingBoxDiameter(const Scene &scene)
 bool IterateIntersectionsBetween::Next(RaySegment &seg, RaySurfaceIntersection &intersection)
 {
   tfar = this->seg.length;
-  HitId hit = intersector.First(this->seg.ray, tnear, tfar);
+  using Real = float;
+  auto factor = Real(1)+std::numeric_limits<Real>::epsilon(); // TODO: correct this mess eventually if using only float (?)
+  auto offset_tnear = factor*tnear;
+  bool hit = scene.FirstIntersectionEmbree(this->seg.ray, offset_tnear, tfar, intersection);
   seg.ray = this->seg.ray;
   seg.ray.org += tnear*this->seg.ray.dir;
   seg.length = tfar - tnear;
   tnear = tfar;
-  if (hit)
-  {
-    intersection = RaySurfaceIntersection{hit, seg};
-    return true;
-  }
-  else
-  {
-    return false;
-  }
+  return hit;
 }
-
-
-
-PathLogger::PathLogger()
-  : file{"paths.log"},// {"paths2.log"}},
-    max_num_paths{100},
-    num_paths_written{0},
-    total_path_index{0}
-{
-  file.precision(std::numeric_limits<double>::digits10);
-}
-
-
-void PathLogger::PreventLogFromGrowingTooMuch()
-{
-  if (num_paths_written > max_num_paths)
-  {
-    //files[0].swap(files[1]);
-    file.seekp(std::ios_base::beg);
-    num_paths_written = 0;
-  }
-}
-
-
-void PathLogger::AddSegment(const Double3 &x1, const Double3 &x2, const Spectral3 &beta_at_end_before_scatter, SegmentType type)
-{
-  const auto &b = beta_at_end_before_scatter;
-  file << static_cast<char>(type) << ", "
-       << x1[0] << ", " << x1[1] << ", " << x1[2] << ", "
-       << x2[0] << ", " << x2[1] << ", " << x2[2] << ", "
-       <<  b[0] << ", " <<  b[1] << ", " <<  b[2] << "\n";
-  file.flush();
-}
-
-void PathLogger::AddScatterEvent(const Double3 &pos, const Double3 &out_dir, const Spectral3 &beta_after, ScatterType type)
-{
-  const auto &b = beta_after;
-  file << static_cast<char>(type) << ", "
-       <<     pos[0] << ", " <<     pos[1] << ", " <<     pos[2] << ", "
-       << out_dir[0] << ", " << out_dir[1] << ", " << out_dir[2] << ", "
-       <<       b[0] << ", " <<       b[1] << ", " <<       b[2] << "\n";
-  file.flush();
-}
-
-
-void PathLogger::NewTrace(const Spectral3 &beta_init)
-{
-  ++total_path_index;
-  ++num_paths_written;
-  PreventLogFromGrowingTooMuch();
-  const auto &b = beta_init;
-  file << "n, " << total_path_index << ", " << b[0] << ", " <<  b[1] << ", " <<  b[2] << "\n";
-  file.flush();
-}
-
-
 
 
 MediumTracker::MediumTracker(const Scene& _scene)
@@ -98,7 +37,7 @@ MediumTracker::MediumTracker(const Scene& _scene)
 }
 
 
-void MediumTracker::initializePosition(const Double3& pos, IntersectionCalculator &intersector)
+void MediumTracker::initializePosition(const Double3& pos)
 {
   std::fill(media.begin(), media.end(), nullptr);
   current = &scene.GetEmptySpaceMedium();
@@ -111,8 +50,7 @@ void MediumTracker::initializePosition(const Double3& pos, IntersectionCalculato
       Double3 start = pos;
       start[0] += distance_to_go;
       IterateIntersectionsBetween iter{
-        {{start, {-1., 0., 0.}}, distance_to_go}, 
-        intersector};
+        {{start, {-1., 0., 0.}}, distance_to_go}, scene};
       RaySegment seg;
       RaySurfaceIntersection intersection;
       while (iter.Next(seg, intersection))
@@ -168,11 +106,10 @@ class NormalVisualizer : public IRenderingAlgo
 {
   ToyVector<IRenderingAlgo::SensorResponse> rgb_responses;
   const Scene &scene;
-  IntersectionCalculator intersector;
   Sampler sampler;
 public:
   NormalVisualizer(const Scene &_scene, const AlgorithmParameters &_params)
-    : scene{_scene}, intersector{_scene.MakeIntersectionCalculator()}
+    : scene{_scene}
   {
   }
   
@@ -186,10 +123,10 @@ public:
     smpl_dir.value *= smpl_pos.value;
     
     RaySegment seg{{smpl_pos.coordinates, smpl_dir.coordinates}, LargeNumber};
-    HitId hit = intersector.First(seg.ray, seg.length);
-    if (hit)
+    RaySurfaceIntersection intersection;
+    bool is_hit = scene.FirstIntersectionEmbree(seg.ray, 0., seg.length, intersection);
+    if (is_hit)
     {
-      RaySurfaceIntersection intersection{hit, seg};
       RGB col = (intersection.normal.array() * 0.5 + 0.5).cast<Color::RGBScalar>();
       return col;
     }
@@ -204,6 +141,7 @@ public:
     return rgb_responses;
   }
 };
+
 
 
 std::unique_ptr<IRenderingAlgo> RenderAlgorithmFactory(const Scene &_scene, const RenderingParameters &_params)

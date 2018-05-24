@@ -71,14 +71,23 @@ struct very_strong_typedef : public \
     {
       return value_ < rhs.value_;
     }
+    
+    bool operator<(T rhs) const
+    {
+      return value_ < rhs;
+    }
 
+    friend inline bool operator==(strong_type a, strong_type b)
+    {
+      return a.value_ == b.value_;
+    }
+    
     // Function definitions for use with argument dependent lookup
     // http://en.cppreference.com/w/cpp/language/adl
     friend inline type value(strong_type x)
     {
       return x.value_;
     }
-    
     
     friend inline strong_type pow(strong_type x, strong_type e) 
     { 

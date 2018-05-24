@@ -18,12 +18,11 @@
 
 #include "ray.hxx"
 #include "sampler.hxx"
-#include "sphere.hxx"
-#include "triangle.hxx"
+#include "primitive.hxx"
 #include "util.hxx"
 #include "shader.hxx"
 #include "sampler.hxx"
-
+#include "embreeaccelerator.hxx"
 #include "cubature.h"
 
 
@@ -426,7 +425,6 @@ TEST_F(RandomSamplingFixture, DiscDistribution)
 }
 
 
-
 TEST_F(RandomSamplingFixture, TriangleSampling)
 {
   Eigen::Matrix3d m;
@@ -438,10 +436,13 @@ TEST_F(RandomSamplingFixture, TriangleSampling)
   Z = Double3{0. , 0. , 1.};
   Eigen::Matrix3d minv = m.inverse();
   Double3 offset{0.1, 0.1, 0.1};
-  Triangle t(
-    offset,
-    offset+X,
-    offset+Y);
+  Mesh triangle{0,0};
+  AppendSingleTriangle(triangle,
+    (offset).cast<float>(),
+    (offset+X).cast<float>(),
+    (offset+Y).cast<float>(),
+    Float3{0.f,0.f,0.f});
+  triangle.MakeFlatNormals();
   static constexpr int NUM_SAMPLES = 100;
   for (int i=0; i<NUM_SAMPLES; ++i)
   {
@@ -452,10 +453,9 @@ TEST_F(RandomSamplingFixture, TriangleSampling)
       EXPECT_GE(barry[1], 0.); EXPECT_LE(barry[1], 1.);
       EXPECT_GE(barry[2], 0.); EXPECT_LE(barry[2], 1.);
     }
-    HitId hit = t.SampleUniformPosition(sampler);
-    Double3 pos, normal, shading_normal;
-    t.GetLocalGeometry(hit, pos, normal, shading_normal);
-    Double3 local = minv * (pos - offset);
+    HitId hit = triangle.SampleUniformPosition(0, sampler);
+    SurfaceInteraction si{hit};
+    Double3 local = minv * (si.pos - offset);
     EXPECT_NEAR(local[2], 0., 1.e-3);
     EXPECT_GE(local[0], 0.); EXPECT_LE(local[0], 1.);
     EXPECT_GE(local[1], 0.); EXPECT_LE(local[1], 1.);
@@ -1148,20 +1148,18 @@ class ShaderScatterer : public Scatterer
 {
   std::unique_ptr<Shader> shader;
   PathContext context;
-  std::unique_ptr<TexturedSmoothTriangle> triangle;
-  
+  Mesh mesh;
   mutable RaySurfaceIntersection last_intersection;
   mutable Double3 last_incident_dir;
   double ior_below_over_above; // Ratio
+  EmbreeAccelerator embree;
   
   RaySurfaceIntersection& MakeIntersection(const Double3 &reverse_incident_dir) const
   {
     if (last_incident_dir != reverse_incident_dir)
     {
       RaySegment seg{{reverse_incident_dir, -reverse_incident_dir}, LargeNumber};
-      HitId hit;
-      bool ok = triangle->Intersect(seg.ray, 0., seg.length, hit);
-      last_intersection = RaySurfaceIntersection{hit, seg};
+      bool ok = embree.FirstIntersection(seg.ray, 0., seg.length, last_intersection);
       last_incident_dir = reverse_incident_dir;
     }
     return last_intersection;
@@ -1195,15 +1193,20 @@ class ShaderScatterer : public Scatterer
     }
     return value;
   }
-  
+    
 public:
   ShaderScatterer(std::unique_ptr<Shader> _shader)
     : shader{std::move(_shader)},
+      mesh{0,0},
       last_incident_dir{NaN},
       ior_below_over_above{1.}
   {
-    SetShadingNormal(Double3{0,0,1});
+    AppendSingleTriangle(mesh, 
+      {-1, -1, 0}, {1, -1, 0}, {0, 1, 0}, {0, 0, 1});
+    SetShadingNormal({0,0,1});
     context = PathContext{Color::LambdaIdxClosestToRGBPrimaries()};
+    embree.Add(mesh);
+    embree.Build();
   }
   
   void SetIorRatio(double _ior_below_over_above)
@@ -1212,11 +1215,11 @@ public:
   }
     
   void SetShadingNormal(const Double3 &shading_normal)
-  {
-    triangle = std::make_unique<TexturedSmoothTriangle>(
-      Double3{ -1, -1, 0}, Double3{ 1, -1, 0 }, Double3{ 0, 1, 0 },
-      shading_normal, shading_normal, shading_normal,
-      Double3{0, 0, 0}, Double3{1, 0, 0}, Double3{0.5, 1, 0});
+  {    
+    Float3 n =  shading_normal.cast<float>();
+    mesh.normals.row(0) = n;
+    mesh.normals.row(1) = n;
+    mesh.normals.row(2) = n;
     last_incident_dir = Double3{NaN}; // Force regeneration of intersection!
   }
   

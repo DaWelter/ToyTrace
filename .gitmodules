@@ -1,3 +1,6 @@
 [submodule "external/cubature"]
 	path = external/cubature
 	url = https://github.com/stevengj/cubature.git
+[submodule "external/GSL"]
+	path = external/GSL
+	url = https://github.com/Microsoft/GSL

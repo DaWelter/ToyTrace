@@ -1,11 +1,10 @@
 #include "scene.hxx"
-#include "perspectivecamera.hxx"
-#include "sphere.hxx"
+#include "camera.hxx"
 #include "infiniteplane.hxx"
-#include "triangle.hxx"
 #include "shader.hxx"
 #include "util.hxx"
 #include "atmosphere.hxx"
+#include "light.hxx"
 
 #define LINESIZE 1000
 
@@ -36,11 +35,11 @@ inline Double3 TransformNormal(const Eigen::Transform<double,3,Eigen::Affine> &t
 template<class Thing>
 class SymbolTable
 {
-  Thing* currentThing;
-  std::unordered_map<std::string, Thing*> things;
+  Thing currentThing;
+  std::unordered_map<std::string, Thing> things;
   std::string name_of_this_table;
 public:
-  SymbolTable(const std::string &_name, const std::string &default_name, Thing* default_thing) :
+  SymbolTable(const std::string &_name, const std::string &default_name, Thing default_thing) :
     currentThing(default_thing), name_of_this_table(_name)
   {
     things[default_name] = default_thing;
@@ -66,13 +65,13 @@ public:
     }
   }
   
-  void set_and_activate(const char* name, Thing* thing)
+  void set_and_activate(const char* name, Thing thing)
   {
     currentThing = thing;
     things[name] = thing;
   }
   
-  Thing* operator()() const
+  Thing operator()() const
   {
     return currentThing;
   }
@@ -82,18 +81,17 @@ public:
 
 struct Scope
 {
-  SymbolTable<const Shader> shaders;
-  SymbolTable<const Medium> mediums;
-  SymbolTable<AreaEmitter> areaemitters;
+  SymbolTable<Shader*> shaders;
+  SymbolTable<Medium*> mediums;
+  SymbolTable<AreaEmitter*> areaemitters;
   Eigen::Transform<double,3,Eigen::Affine> currentTransform;
-
+  
   Scope(const Scene &scene) :
-    shaders("Shader", "invisible", &scene.GetInvisibleShader()),
-    mediums("Medium", "default", &scene.GetEmptySpaceMedium()),
+    shaders("Shader", "invisible", scene.invisible_shader),
+    mediums("Medium", "default", scene.empty_space_medium),
     areaemitters("AreaEmitter", "none", nullptr),
     currentTransform(decltype(currentTransform)::Identity())
   {
-    shaders.set_and_activate("default", new DiffuseShader(Color::RGBToSpectrum({0.8_rgb, 0.8_rgb, 0.8_rgb}), nullptr));
   }
 };
 
@@ -104,6 +102,8 @@ struct Scope
 class NFFParser
 {
   Scene* scene;
+  std::unordered_map<Material, MaterialIndex, Material::Hash> to_material_index;
+  
   RenderingParameters *render_params;
   std::vector<fs::path> search_paths;
   fs::path    filename;
@@ -126,6 +126,9 @@ public:
     input{_is},
     lineno{0}
   {
+    for (int i = 0; i<scene->materials.size(); ++i)
+      to_material_index[scene->materials[i]] = MaterialIndex(i);
+    
     if (!filename.empty())
     {
       this->search_paths.emplace_back(
@@ -147,61 +150,14 @@ public:
   void Parse(Scope &scope);
 private:
   void ParseMesh(const char *filename, Scope &scope);
-
+  MaterialIndex GetMaterialIndexOfCurrentParams(const Scope &scope);
+  MaterialIndex MaterialInsertAndOrGetIndex(const Material &m);
+  void InsertAndActivate(const char*, Scope &scope, std::unique_ptr<Medium> x);
+  void InsertAndActivate(const char*, Scope &scope, std::unique_ptr<Shader> x);
   bool NextLine();
   std::runtime_error MakeException(const std::string &msg) const;
   fs::path MakeFullPath(const fs::path &filename) const;
-  void AssignCurrentMaterialParams(Primitive &primitive, const Scope &scope);
 };
-
-
-void NFFParser::AssignCurrentMaterialParams(Primitive& primitive, const Scope &scope)
-{
-  primitive.shader = scope.shaders();
-  primitive.medium = scope.mediums();
-  assert(primitive.shader && primitive.medium);
-  if (scope.areaemitters())
-  {
-    scene->MakePrimitiveEmissive(primitive, *scope.areaemitters());
-  }
-}
-
-
-fs::path NFFParser::MakeFullPath(const fs::path &filename) const
-{
-  if (filename.is_relative())
-  {
-    for (auto parent_path : this->search_paths)
-    {
-      auto trial = parent_path / filename;
-      if (fs::exists(trial))
-        return trial;
-    }
-    throw MakeException("Cannot find a file in the search paths matching the name "+filename.string());
-  }
-  else
-    return filename;
-}
-
-
-std::runtime_error NFFParser::MakeException(const std::string &msg) const
-{
-  std::stringstream os;
-  if (!filename.empty())
-    os << filename << ":";
-  os << lineno << ": " << msg << " [" << line << "]";
-  return std::runtime_error(os.str());
-}
-
-
-bool NFFParser::NextLine()
-{
-  line = peek_line;
-  line_stream_state = peek_stream_state;
-  ++lineno;
-  peek_stream_state = (bool)std::getline(input, peek_line);
-  return line_stream_state;
-}
 
 
 
@@ -316,7 +272,7 @@ void NFFParser::Parse(Scope &scope)
       NextLine();
       auto cd = ParseCameraData();
       MakeConsistentResolutionSettings(cd);
-      scene->SetCamera<FisheyeHemisphereCamera>(cd.pos,cd.at-cd.pos,cd.up,cd.resX,cd.resY);
+      scene->camera = std::make_unique<FisheyeHemisphereCamera>(cd.pos,cd.at-cd.pos,cd.up,cd.resX,cd.resY);
       continue;
     }
     
@@ -336,7 +292,7 @@ void NFFParser::Parse(Scope &scope)
       if (1 != std::sscanf(line.c_str(),"angle %lg\n",&angle)) 
         throw MakeException("Error");
       NextLine();
-      scene->SetCamera<PerspectiveCamera>(cd.pos,cd.at-cd.pos,cd.up,angle,cd.resX,cd.resY);
+      scene->camera = std::make_unique<PerspectiveCamera>(cd.pos,cd.at-cd.pos,cd.up,angle,cd.resX,cd.resY);
       continue;
     }
     
@@ -350,77 +306,64 @@ void NFFParser::Parse(Scope &scope)
       if (n == 4)
       {
           pos = scope.currentTransform*pos;
-          AssignCurrentMaterialParams(
-            scene->AddPrimitive<Sphere>(pos,rad), scope);
+          MaterialIndex current_material_index = GetMaterialIndexOfCurrentParams(scope);
+          scene->spheres->Append(pos.cast<float>(), rad, current_material_index);
       }
       else throw MakeException("Error");
       continue;
     }
 
-/* polygon (with normals and uv) */
-    if (!strcmp(token,"tpp")) 
-	{
-		int vertices;
-    sscanf(line.c_str(),"tpp %d",&vertices);
-		Double3 *vertex = new Double3[vertices];
-		Double3 *normal = new Double3[vertices];
-		Double3 *uv     = new Double3[vertices];
-
-    for (int i=0;i<vertices;i++)
+    /* polygon (with normals and uv) */
+    if (!strcmp(token,"p")) 
     {
-      if (!NextLine() ||
-          sscanf(line.c_str(),"%lg %lg %lg %lg %lg %lg %lg %lg %lg\n",
-        &vertex[i][0],&vertex[i][1],&vertex[i][2],
-        &normal[i][0],&normal[i][1],&normal[i][2],
-        &uv[i][0],&uv[i][1],&uv[i][2]) < 9)
-        throw MakeException("Error reading TexturedSmoothTriangle");
-      vertex[i] = scope.currentTransform * vertex[i];
-      normal[i] = TransformNormal(scope.currentTransform, normal[i]);
-		}
+      int num_vertices;
+      sscanf(line.c_str(),"p %d",&num_vertices);
+      
+      if (num_vertices < 3)
+        throw MakeException("Polygon must be specified with at least 3 vertices");
+      
+      Mesh mesh(num_vertices-2, num_vertices);
+      bool must_compute_normal = false;
+      
+      for (int i=0;i<num_vertices;i++)
+      {
+        Double3 v{0.};
+        Double3 n{0.};
+        Double2 uv{0.};
+        if (!NextLine())
+          throw MakeException("Cannot read specified number of vertices");
+        int n_read = sscanf(line.c_str(),"%lg %lg %lg %lg %lg %lg %lg %lg\n", 
+                            &v[0],&v[1],&v[2], &n[0],&n[1],&n[2], &uv[0],&uv[1]);
+        if (n_read < 3)
+          throw MakeException("Cannot vertex coordinates");
+        
+        // Compute normals from vertices if one vertex has no or invalid normal specification.
+        must_compute_normal |= (n_read < 6);
+        v = scope.currentTransform * v;
+        n = TransformNormal(scope.currentTransform, n);
+        mesh.vertices.row(i) = v.cast<float>();
+        mesh.normals.row(i) = n.cast<float>();
+        mesh.uvs.row(i) = uv.cast<float>();
+      }
 
-    for (int i=2;i<vertices;i++) {
-      AssignCurrentMaterialParams(
-        scene->AddPrimitive<TexturedSmoothTriangle>(
-            vertex[0],
-            vertex[i-1],
-            vertex[i],
-            normal[0],
-            normal[i-1],
-            normal[i],
-            uv[0],
-            uv[i-1],
-            uv[i]), scope);
-		}
-		delete[] vertex;
-		delete[] normal;
-    delete[] uv;
-		continue;
-    }
+      MaterialIndex current_material_index = GetMaterialIndexOfCurrentParams(scope);
+      
+      for (int i=0; i<num_vertices-2; i++) 
+      {
+        mesh.vert_indices(i, 0) = 0;
+        mesh.vert_indices(i, 1) = i+1;
+        mesh.vert_indices(i, 2) = i+2;
+        mesh.material_indices[i] = current_material_index;
+      }
 
-   
-    /* polygon */
-
-    if (!strcmp(token,"p")) {
-		int vertices;
-		sscanf(line.c_str(),"p %d",&vertices);
-		Double3 *vertex = new Double3[vertices];
-    for (int i=0;i<vertices;i++)
-    {
-      if (!NextLine() || sscanf(line.c_str(),"%lg %lg %lg\n",&vertex[i][0],&vertex[i][1],&vertex[i][2]) < 3)
-        throw MakeException("Error reading Triangle");
-      vertex[i] = scope.currentTransform*vertex[i];
-    }
-    for (int i=2;i<vertices;i++) 
-    {
-        AssignCurrentMaterialParams(
-          scene->AddPrimitive<Triangle>(
-            vertex[0],
-            vertex[i-1],
-            vertex[i]), scope);
-        }
-      delete[] vertex;
+      if (must_compute_normal)
+        mesh.MakeFlatNormals();
+      
+      // TODO: This is O(n*n)! Collect all meshes and concatenate them all at once in the end.
+      scene->Append(mesh);
       continue;
     }
+    
     
     /* shader parameters */
     if (!strcmp(token, "shader"))
@@ -434,7 +377,7 @@ void NFFParser::Parse(Scope &scope)
       else throw MakeException("shader directive needs name of the shader.");
       continue;
     }
-    
+   
     
     auto MaybeReadTexture = [this](const char *identifier) -> std::unique_ptr<Texture>
     {
@@ -466,10 +409,9 @@ void NFFParser::Parse(Scope &scope)
       if (num == 5)
       {
         std::unique_ptr<Texture> diffuse_texture = MaybeReadTexture("diffusetexture");
-        scope.shaders.set_and_activate(name,
-          new DiffuseShader(
-            Color::RGBToSpectrum(kd * rgb), 
-            std::move(diffuse_texture)));
+        InsertAndActivate(name, scope,
+          std::make_unique<DiffuseShader>(
+            Color::RGBToSpectrum(kd * rgb), std::move(diffuse_texture)));
       }
       else throw MakeException("Error");
       continue;
@@ -483,8 +425,8 @@ void NFFParser::Parse(Scope &scope)
       int num = std::sscanf(line.c_str(),"specularreflective %s %lg %lg %lg %lg\n",name, &rgb[0],&rgb[1],&rgb[2],&k);
       if (num == 5)
       {
-        scope.shaders.set_and_activate(name, 
-          new SpecularReflectiveShader(
+        InsertAndActivate(name, scope,
+          std::make_unique<SpecularReflectiveShader>(
             Color::RGBToSpectrum(k * rgb)
           ));
       }
@@ -499,8 +441,8 @@ void NFFParser::Parse(Scope &scope)
       int num = std::sscanf(line.c_str(), "speculartransmissivedielectric %s %lg\n", name, &ior_ratio);
       if (num == 2)
       {
-        scope.shaders.set_and_activate(name,
-          new SpecularTransmissiveDielectricShader(ior_ratio));
+        InsertAndActivate(name, scope,
+          std::make_unique<SpecularTransmissiveDielectricShader>(ior_ratio));
       }
       else throw MakeException("Error");
       continue;
@@ -515,8 +457,8 @@ void NFFParser::Parse(Scope &scope)
       if (num == 5)
       {
         std::unique_ptr<Texture> diffuse_texture = MaybeReadTexture("diffusetexture");
-        scope.shaders.set_and_activate(name,
-          new SpecularDenseDielectricShader(
+        InsertAndActivate(name, scope,
+          std::make_unique<SpecularDenseDielectricShader>(
             specular_coeff,
             Color::RGBToSpectrum(diffuse_coeff),
             std::move(diffuse_texture)));
@@ -536,10 +478,11 @@ void NFFParser::Parse(Scope &scope)
       if(num == 6)
       {
         std::unique_ptr<Texture> glossy_texture = MaybeReadTexture("exponenttexture");
-        scope.shaders.set_and_activate(name, new MicrofacetShader(
-          Color::RGBToSpectrum(k*ks_rgb),
-          phong_exponent,
-          std::move(glossy_texture)));
+        InsertAndActivate(name, scope, 
+          std::make_unique<MicrofacetShader>(
+            Color::RGBToSpectrum(k*ks_rgb),
+            phong_exponent,
+            std::move(glossy_texture)));
       }
       else throw MakeException("Error");
       continue;
@@ -583,27 +526,25 @@ void NFFParser::Parse(Scope &scope)
       }
       else if(num == 3)
       {
-        auto *medium = new MonochromaticHomogeneousMedium(
+        auto medium = std::make_unique<MonochromaticHomogeneousMedium>(
           value(buffer[0]), 
           value(buffer[1]), 
           scope.mediums.size());
         auto pf = MaybeReadPF();
         if (pf)
           medium->phasefunction = std::move(pf);
-        scope.mediums.set_and_activate(
-          name, medium);
+        InsertAndActivate(name, scope, std::move(medium));
       }
       else if(num == 7)
       {
-        auto *medium = new HomogeneousMedium(
+        auto medium = std::make_unique<HomogeneousMedium>(
           Color::RGBToSpectrum({buffer[0], buffer[1], buffer[2]}),
           Color::RGBToSpectrum({buffer[3], buffer[4], buffer[5]}), 
           scope.mediums.size());
         auto pf = MaybeReadPF();
         if (pf)
           medium->phasefunction = std::move(pf);
-        scope.mediums.set_and_activate(
-          name, medium);
+        InsertAndActivate(name, scope, std::move(medium));
       }
       else throw MakeException("Error");
       continue;
@@ -623,8 +564,8 @@ void NFFParser::Parse(Scope &scope)
       else if(num == 5)
       {
         auto medium = Atmosphere::MakeSimple(planet_center, radius, scope.mediums.size());
-        scope.mediums.set_and_activate(
-          name, medium.release());
+        InsertAndActivate(
+          name, scope, std::move(medium));
       }
       else
       {
@@ -648,8 +589,8 @@ void NFFParser::Parse(Scope &scope)
       {
         auto full_datafile_path = MakeFullPath(datafile);
         auto medium = Atmosphere::MakeTabulated(planet_center, radius, full_datafile_path.string(), scope.mediums.size());
-        scope.mediums.set_and_activate(
-          name, medium.release());
+        InsertAndActivate(
+          name, scope, std::move(medium));
       }
       else
       {
@@ -791,7 +732,7 @@ void NFFParser::Parse(Scope &scope)
 		if (num == 3) {
 			// light source with position only
 			col = RGB::Constant(1._rgb);
-			scene->AddLight(std::make_unique<RadianceOrImportance::PointLight>(
+			scene->lights.push_back(std::make_unique<RadianceOrImportance::PointLight>(
         Color::RGBToSpectrum(col),
         pos
       ));
@@ -931,94 +872,91 @@ private:
     }
   }
     
-  void ReadMesh(Scope &scope, const aiMesh* mesh, const NodeRef &ndref)
+  void ReadMesh(Scope &scope, const aiMesh* aimesh, const NodeRef &ndref)
   {
     auto m = ndref.local_to_world;
     auto m_linear = aiMatrix3x3(m);
-    bool hasuv = mesh->GetNumUVChannels()>0;
-    bool hasnormals = mesh->HasNormals();
-
-    std::vector<int> triangle_indices; triangle_indices.reserve(1024);
-    for (unsigned int face_idx = 0; face_idx < mesh->mNumFaces; ++face_idx)
+    bool hasuv = aimesh->GetNumUVChannels()>0;
+    bool hasnormals = aimesh->HasNormals();
+    
+    std::vector<UInt3> vert_indices; vert_indices.reserve(1024);
+    for (unsigned int face_idx = 0; face_idx < aimesh->mNumFaces; ++face_idx)
     {
-      const aiFace* face = &mesh->mFaces[face_idx];
+      const aiFace* face = &aimesh->mFaces[face_idx];
       for (int i=2; i<face->mNumIndices; i++)
       {
-        triangle_indices.push_back(face->mIndices[0]);
-        triangle_indices.push_back(face->mIndices[i-1]);
-        triangle_indices.push_back(face->mIndices[i]);
+        vert_indices.push_back(
+          UInt3(face->mIndices[0],
+                 face->mIndices[i-1],
+                 face->mIndices[i]));
       }
     }
-    std::vector<Double3> vertices; vertices.reserve(1024);
-    for (int i=0; i<mesh->mNumVertices; ++i)
+    
+    Mesh mesh(vert_indices.size(), aimesh->mNumVertices);
+    for (int i=0; i<vert_indices.size(); ++i)
+      mesh.vert_indices.row(i) = vert_indices[i];
+    
+    for (int i=0; i<aimesh->mNumVertices; ++i)
     {
-      vertices.push_back(
+      Double3 v = 
             scope.currentTransform *
-              aiVector3_to_myvector(m*mesh->mVertices[i]));
-      assert(vertices.back().allFinite());
+              aiVector3_to_myvector(m*aimesh->mVertices[i]);
+      assert(v.allFinite());
+      mesh.vertices.row(i) = v.cast<float>();
     }
 
-    std::vector<Double3> normals; normals.reserve(1024);
     if (hasnormals)
     {
-      for (int i=0; i<mesh->mNumVertices; ++i)
+      for (int i=0; i<aimesh->mNumVertices; ++i)
       {
-        normals.push_back(
+        Double3 n =
           TransformNormal(scope.currentTransform,
-            aiVector3_to_myvector(m_linear*mesh->mNormals[i])));
-        assert(normals.back().allFinite());
+            aiVector3_to_myvector(m_linear*aimesh->mNormals[i]));
+        assert(n.allFinite());
+        mesh.normals.row(i) = n.cast<float>();
       }
     }
-    std::vector<Double3> uvs; uvs.reserve(1024);
+    else
+      mesh.MakeFlatNormals();
+    
     if (hasuv)
     {
-      for (int i=0; i<mesh->mNumVertices; ++i)
+      for (int i=0; i<aimesh->mNumVertices; ++i)
       {
-        uvs.push_back(
+        Double3 uv = 
               aiVector3_to_myvector(
-                mesh->mTextureCoords[0][i]));
-        assert(uvs.back().allFinite());
+                aimesh->mTextureCoords[0][i]);
+        assert(uv.allFinite());
+        mesh.uvs(i, 0) = uv[0];
+        mesh.uvs(i, 1) = uv[1];
       }
     }
-
-    for (int tri_start = 0; tri_start < triangle_indices.size(); tri_start+=3)
+    else
+      mesh.uvs.setConstant(0.);
+    
+    MaterialIndex mat_idx = parser.GetMaterialIndexOfCurrentParams(scope);
+    for (int i=0; i<mesh.NumTriangles(); ++i)
+      mesh.material_indices[i] = mat_idx;
+    
+    scene.Append(mesh);
+    
+    // TODO: delete me!
+    for (int tri_index = 0; tri_index < mesh.NumTriangles(); ++tri_index)
     {
-      int a = triangle_indices[tri_start];
-      int b = triangle_indices[tri_start+1];
-      int c = triangle_indices[tri_start+2];
-      if (hasuv || hasnormals)
-      {
-        Double3 uv[3] = {Double3{0.}, Double3{0.}, Double3{0.}};
-        Double3 no[3];
-        if (hasnormals)
-        {
-          no[0] = normals[a];
-          no[1] = normals[b];
-          no[2] = normals[c];
-        }
-        else
-        {
-          no[0] = no[1] = no[2] = Normalized(Cross(vertices[b]-vertices[a], vertices[c]-vertices[a]));
-        }
-        if (hasuv)
-        {
-          uv[0] = uvs[a];
-          uv[1] = uvs[b];
-          uv[2] = uvs[c];
-        }
-        parser.AssignCurrentMaterialParams(
-          scene.AddPrimitive<TexturedSmoothTriangle>(
-            vertices[a], vertices[b], vertices[c],
-            no[0], no[1], no[2],
-            uv[0], uv[1], uv[2]
-         ), scope);
-      }
-      else
-      {
-        parser.AssignCurrentMaterialParams(
-          scene.AddPrimitive<Triangle>(
-              vertices[a], vertices[b], vertices[c]), scope);
-      }
+      int a = mesh.vert_indices(tri_index, 0);
+      int b = mesh.vert_indices(tri_index, 1);
+      int c = mesh.vert_indices(tri_index, 2);
+
+      Double2 uv[3];
+      Double3 no[3];
+
+      no[0] = mesh.normals.row(a).cast<double>();
+      no[1] = mesh.normals.row(b).cast<double>();
+      no[2] = mesh.normals.row(c).cast<double>();
+
+      uv[0] = mesh.uvs.row(a).cast<double>();
+      uv[1] = mesh.uvs.row(b).cast<double>();
+      uv[2] = mesh.uvs.row(c).cast<double>();
     }
   }
   
@@ -1091,3 +1029,71 @@ void Scene::ParseNFF(std::istream &is, RenderingParameters *render_params)
   Scope scope{*this};
   NFFParser(this, render_params, is, std::string()).Parse(scope);
 }
+
+
+bool NFFParser::NextLine()
+{
+  line = peek_line;
+  line_stream_state = peek_stream_state;
+  ++lineno;
+  peek_stream_state = (bool)std::getline(input, peek_line);
+  return line_stream_state;
+}
+
+
+MaterialIndex NFFParser::MaterialInsertAndOrGetIndex(const Material& m)
+{
+  return GetOrInsertFromFactory(to_material_index, m, [this, &m]() {
+    scene->materials.push_back(m);
+    return MaterialIndex(scene->materials.size()-1);
+  });
+}
+
+
+void NFFParser::InsertAndActivate(const char* name, Scope& scope, std::unique_ptr< Medium > x)
+{
+  scope.mediums.set_and_activate(name, x.get());
+  scene->media.emplace_back(std::move(x));
+}
+
+
+void NFFParser::InsertAndActivate(const char* name, Scope& scope, std::unique_ptr< Shader > x)
+{
+  scope.shaders.set_and_activate(name, x.get());
+  scene->shaders.emplace_back(std::move(x));
+}
+
+
+MaterialIndex NFFParser::GetMaterialIndexOfCurrentParams(const Scope &scope)
+{
+  Material mat{scope.shaders(), scope.mediums(), scope.areaemitters()};
+  return MaterialInsertAndOrGetIndex(mat);
+}
+
+
+fs::path NFFParser::MakeFullPath(const fs::path &filename) const
+{
+  if (filename.is_relative())
+  {
+    for (auto parent_path : this->search_paths)
+    {
+      auto trial = parent_path / filename;
+      if (fs::exists(trial))
+        return trial;
+    }
+    throw MakeException("Cannot find a file in the search paths matching the name "+filename.string());
+  }
+  else
+    return filename;
+}
+
+
+std::runtime_error NFFParser::MakeException(const std::string &msg) const
+{
+  std::stringstream os;
+  if (!filename.empty())
+    os << filename << ":";
+  os << lineno << ": " << msg << " [" << line << "]";
+  return std::runtime_error(os.str());
+}
+

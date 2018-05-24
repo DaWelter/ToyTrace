@@ -317,6 +317,32 @@ TEST(BasicAssumptions, EigenTypes)
 };
 
 
+TEST(BasicAssumptions, CommaInitializers)
+{
+  Eigen::Matrix<float, 3, 2> m;
+  using M31 = Eigen::Matrix<float, 3, 1>;
+  using M12 = Eigen::Matrix<float, 1, 2>;
+  using M21 = Eigen::Matrix<float, 2, 1>;
+  M31 v; v << 1, 2, 3;
+  m << v, v;
+  std::cout << "-- col by col fill ---" << std::endl;
+  std::cout << m << std::endl;
+  M12 w; w << 5, 6;
+  m << w, w, w;
+  std::cout << "-- row by row fill ---" << std::endl;
+  std::cout << m << std::endl;
+  M21 s; s << 8, 9;
+  ///m << s, s, s, s; // Not working because it tries to stack the vectors vertically. So the number of components do not match.
+  auto r = s.transpose();
+  m << r, r, r;
+  std::cout << "-- row by row fill (transposed vec) ---" << std::endl;
+  std::cout << m << std::endl;
+  m.transpose() << s, s, s;
+  std::cout << "-- row by row fill (transposed dst) ---" << std::endl;
+  std::cout << m << std::endl;
+}
+
+
 TEST(BasicAssumptions, AlignmentAllocator)
 {
   std::vector<double, boost::alignment::aligned_allocator<double, 128>> v{1., 2., 3.};

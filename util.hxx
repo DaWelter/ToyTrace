@@ -1,11 +1,13 @@
 #pragma once
 
 #include <iostream>
+#include <sstream>
 #include <cassert>
 #include <cmath>
 #include <limits>
 #include <type_traits>
 #include <vector>
+#include <unordered_map>
 
 #include <boost/align/aligned_allocator.hpp>
 
@@ -19,6 +21,17 @@ template<class T>
 inline T Heaviside(const T &x)
 {
   return x>T{} ? T{1} : T{0};
+}
+
+
+inline double Rcp(double x)
+{
+  return 1./x;
+}
+
+inline float Rcp(float x)
+{
+  return 1.f/x;
 }
 
 
@@ -153,8 +166,9 @@ struct iter_pair : std::pair<I, I>
 };
 
 
-// What an unprofessional choice of name. What would be better? VectorWithAssertInSquareBacketOperator? CheckedVector? Simply Vector? Doh!
-template<class T, class Alloc = std::allocator<T>>
+// std::vector with 16 byte aligment as required by Eigen's fixed size types.
+// This class also comes with range checking in debug mode.
+template<class T, class Alloc = boost::alignment::aligned_allocator<T, 16>>
 class ToyVector : public std::vector<T, Alloc>
 {
   using B = std::vector<T, Alloc>;
@@ -174,3 +188,24 @@ public:
   }
 };
 
+
+template<class K, class T, class F, class Hash, class Pred>
+inline T GetOrInsertFromFactory(std::unordered_map<K, T, Hash, Pred> &m, const K &k, F factory)
+{
+  auto it = m.find(k);
+  if (it == m.end())
+  {
+    auto& t = m[k] = factory();
+    return t;
+  }
+  else
+    return it->second;
+}
+
+
+template<class T>
+inline T ASSERT_NOT_NULL(T x, typename std::enable_if<std::is_pointer<T>::value>::type* = 0)
+{
+  assert(x != nullptr);
+  return x;
+}

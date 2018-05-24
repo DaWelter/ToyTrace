@@ -5,6 +5,7 @@
 #include "texture.hxx"
 #include "sampler.hxx"
 #include "ray.hxx"
+#include "scene.hxx"
 
 enum TransportType : char 
 {
@@ -122,4 +123,25 @@ inline void ComputeProbabilitiesHistoryScheme(
   for (; it_probs != probs.end(); ++it_probs)
     it_probs->get() *= norm_inv;
 }
+}
+
+
+inline const Material& GetMaterialOf(const SurfaceInteraction &ia, const Scene &scene)
+{
+  return scene.GetMaterialOf(ia.hitid);
+}
+
+inline const Shader& GetShaderOf(const SurfaceInteraction &ia, const Scene &scene)
+{
+  return *ASSERT_NOT_NULL(GetMaterialOf(ia, scene).shader);
+}
+
+inline const Medium& GetMediumOf(const SurfaceInteraction &ia, const Scene &scene)
+{
+  return *ASSERT_NOT_NULL(GetMaterialOf(ia, scene).medium);
+}
+
+inline const RadianceOrImportance::AreaEmitter& GetEmitterOf(const SurfaceInteraction &ia, const Scene &scene)
+{
+  return *ASSERT_NOT_NULL(GetMaterialOf(ia, scene).emitter);
 }

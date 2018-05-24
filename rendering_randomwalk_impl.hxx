@@ -5,6 +5,9 @@
 #include <type_traits>
 
 #include "scene.hxx"
+#include "shader.hxx"
+#include "light.hxx"
+#include "camera.hxx"
 #include "util.hxx"
 #include "shader_util.hxx"
 #include "renderbuffer.hxx"
@@ -29,45 +32,14 @@ class IterateIntersectionsBetween
 {
   const RaySegment seg;
   double tnear, tfar;
-  IntersectionCalculator &intersector; 
+  const Scene &scene;
 public:
-  IterateIntersectionsBetween(const RaySegment &seg, IntersectionCalculator &intersector)
-    : seg{seg}, tnear{0.}, tfar{seg.length}, intersector{intersector}
+  IterateIntersectionsBetween(const RaySegment &seg, const Scene &scene)
+    : seg{seg}, tnear{0.}, tfar{seg.length}, scene{scene}
   {}
   bool Next(RaySegment &seg, RaySurfaceIntersection &intersection);
   double GetT() const { return tnear; }
 };
-
-
-
-// WARNING: THIS IS NOT THREAD SAFE. DON'T WRITE TO THE SAME FILE FROM MULTIPLE THREADS!
-class PathLogger
-{
-  std::ofstream file;
-  int max_num_paths;
-  int num_paths_written;
-  int total_path_index;
-  void PreventLogFromGrowingTooMuch();
-public:
-  enum SegmentType : int {
-    EYE_SEGMENT = 'e',
-    LIGHT_PATH = 'l',
-    EYE_LIGHT_CONNECTION = 'c',
-  };
-  enum ScatterType : int {
-    SCATTER_VOLUME = 'v',
-    SCATTER_SURFACE = 's'
-  };
-  PathLogger();
-  void AddSegment(const Double3 &x1, const Double3 &x2, const Spectral3 &beta_at_end_before_scatter, SegmentType type);
-  void AddScatterEvent(const Double3 &pos, const Double3 &out_dir, const Spectral3 &beta_after, ScatterType type);
-  void NewTrace(const Spectral3 &beta_init);
-};
-#ifndef NDEBUG
-#  define PATH_LOGGING(x)
-#else
-#  define PATH_LOGGING(x)
-#endif
 
 
 /* This thing tracks overlapping media volumes. Since it is a bit complicated
@@ -91,13 +63,7 @@ class MediumTracker
 public:
   explicit MediumTracker(const Scene &_scene);
   MediumTracker(const MediumTracker &_other) = default;
-  void initializePosition(const Double3 &pos, IntersectionCalculator &intersector);
-  void initializePosition(const Double3 &pos, IntersectionCalculator &&intersector)
-  { // Take control of the temporary that was passed in here. Now it has a name and
-    // therefore repeated calling of initializePosition will invoke the one with the
-    // lvalue in the parameter list.
-    initializePosition(pos, intersector);
-  }
+  void initializePosition(const Double3 &pos);
   void goingThroughSurface(const Double3 &dir_of_travel, const RaySurfaceIntersection &intersection);
   const Medium& getCurrentMedium() const;
 };
@@ -113,9 +79,9 @@ inline const Medium& MediumTracker::getCurrentMedium() const
 inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const RaySurfaceIntersection& intersection)
 {
   if (Dot(dir_of_travel, intersection.geometry_normal) < 0)
-    enterVolume(intersection.primitive().medium);
+    enterVolume(&GetMediumOf(intersection, scene));
   else
-    leaveVolume(intersection.primitive().medium);
+    leaveVolume(&GetMediumOf(intersection, scene));
 }
 
 
@@ -176,32 +142,51 @@ inline void MediumTracker::leaveVolume(const Medium* medium)
 }
 
 
-struct LightPicker
+
+class NewLightPicker
 {
   const Scene &scene;
   Sampler &sampler;
+  ToyVector<std::pair<int,int>> arealight_refs;
+  
+  void FindAreaLightGeometry()
+  {
+    for (int geom_idx=0; geom_idx<scene.GetNumGeometries(); ++geom_idx)
+    {
+      const auto &geom = scene.GetGeometry(geom_idx);
+      for (int prim_idx=0; prim_idx<geom.Size(); ++prim_idx)
+      {
+        auto &mat = scene.GetMaterialOf(geom_idx, prim_idx);
+        if (mat.emitter)
+        {
+          arealight_refs.push_back(std::make_pair(geom_idx, prim_idx));
+        }
+      }
+    }
+  }
+  
+public:
+  NewLightPicker(const Scene &_scene, Sampler &_sampler) 
+    : scene{_scene}, sampler{_sampler}
+  {
+    FindAreaLightGeometry();
+    const double nl = scene.GetNumLights();
+    const double ne = scene.GetNumEnvLights();
+    const double na = arealight_refs.size();
+    const double prob_pick_env_light = ne/(nl+ne+na);
+    const double prob_pick_area_light = na/(nl+ne+na);
+    emitter_type_selection_probabilities = { prob_pick_env_light, prob_pick_area_light, 1.-prob_pick_area_light-prob_pick_env_light };
+  }
+  
+public:
+  using LightPick = std::tuple<const ROI::PointEmitter*, double>;
+  using AreaLightPick = std::tuple<PrimRef, double>;
+  
   static constexpr int IDX_PROB_ENV = 0;
   static constexpr int IDX_PROB_AREA = 1;
   static constexpr int IDX_PROB_POINT = 2;
   std::array<double, 3> emitter_type_selection_probabilities;
-  
-  LightPicker(const Scene &_scene, Sampler &_sampler) : scene{_scene}, sampler{_sampler}
-  {
-    const double nl = scene.GetNumLights();
-    const double ne = scene.GetNumEnvLights();
-    const double na = scene.GetNumAreaLights();
-    const double prob_pick_env_light = ne/(nl+ne+na);
-    const double prob_pick_area_light = na/(nl+ne+na);
-//     std::copy(
-//       emitter_type_selection_probabilities.begin(),
-//       emitter_type_selection_probabilities.end(),
-//               {{ prob_pick_env_light, prob_pick_area_light, 1.-prob_pick_area_light-prob_pick_env_light }};
-    emitter_type_selection_probabilities = { prob_pick_env_light, prob_pick_area_light, 1.-prob_pick_area_light-prob_pick_env_light };
-  }
-  
-  using LightPick = std::tuple<const ROI::PointEmitter*, double>;
-  using AreaLightPick = std::tuple<const Primitive*, const ROI::AreaEmitter*, double>;
-  
+
   LightPick PickLight()
   {
     const int nl = scene.GetNumLights();
@@ -219,23 +204,19 @@ struct LightPicker
   
   AreaLightPick PickAreaLight()
   {
-    const int na = scene.GetNumAreaLights();
+    const int na = arealight_refs.size();
     assert (na > 0);
-    const Primitive* prim;
-    const ROI::AreaEmitter* emitter;
-    std::tie(prim, emitter) = scene.GetAreaLight(sampler.UniformInt(0, na-1));
+    int geom_idx, prim_idx;
+    std::tie(geom_idx, prim_idx) = arealight_refs[sampler.UniformInt(0, na-1)];
     double pmf_of_light = 1./na;
-    return AreaLightPick{prim, emitter, pmf_of_light}; 
+    return AreaLightPick{{&scene.GetGeometry(geom_idx),prim_idx}, pmf_of_light};
   }
 
   double PmfOfLight(const ROI::AreaEmitter &) const
   {
-    return 1./scene.GetNumAreaLights();
+    return 1./arealight_refs.size();
   }
 };
-
-
-  
 
 
 
@@ -400,19 +381,18 @@ class RadianceEstimatorBase
 {
 protected:
   Sampler sampler;
-  IntersectionCalculator intersector;
   const Scene &scene;
   double sufficiently_long_distance_to_go_outside_the_scene_bounds;
   int max_path_node_count;
 private:
   ROI::TotalEnvironmentalRadianceField envlight;
 protected:
-  LightPicker light_picker;
+  NewLightPicker light_picker;
   //ROI::PointEmitterArray::Response sensor_connection_response;
   int sensor_connection_unit = {};
 public:
   RadianceEstimatorBase(const Scene &_scene, const AlgorithmParameters &algo_params = AlgorithmParameters{})
-    : sampler{}, intersector{_scene.MakeIntersectionCalculator()}, scene{_scene},     
+    : sampler{}, scene{_scene},     
       sufficiently_long_distance_to_go_outside_the_scene_bounds{10.*UpperBoundToBoundingBoxDiameter(_scene)},
       max_path_node_count{algo_params.max_ray_depth+1},
       envlight{_scene}, light_picker{_scene, sampler}
@@ -567,8 +547,7 @@ public:
   {
     assert (source_node.node_type != RW::NodeType::SCATTER);
     medium_tracker.initializePosition(
-      source_node.node_type != RW::NodeType::ENV ? source_node.coordinates() : Double3{Infinity},
-      intersector);
+      source_node.node_type != RW::NodeType::ENV ? source_node.coordinates() : Double3{Infinity});
   }
   
 
@@ -607,7 +586,8 @@ public:
     else if (collision.hit)
     {
       node.geom_type   = RW::GeometryType::SURFACE;
-      if (collision.hit.primitive->emitter)
+      const auto &mat = scene.GetMaterialOf(collision.hit);
+      if (mat.emitter)
       {
         node.node_type = RW::NodeType::AREA_LIGHT;
         node.interaction.emitter_area = SurfaceInteraction{collision.hit};
@@ -637,7 +617,7 @@ public:
   {
     RW::PathNode node;
     int which_kind = TowerSampling<3>(light_picker.emitter_type_selection_probabilities.data(), sampler.Uniform01());
-    if (which_kind == LightPicker::IDX_PROB_ENV)
+    if (which_kind == NewLightPicker::IDX_PROB_ENV)
     {
       const auto &emitter = this->GetEnvLight();
       auto smpl = emitter.TakeDirectionSample(sampler, context);
@@ -650,14 +630,14 @@ public:
       node.interaction.emitter_env.radiance = smpl.value;
       pdf = smpl.pdf_or_pmf;
     }
-    else if(which_kind == LightPicker::IDX_PROB_AREA)
+    else if(which_kind == NewLightPicker::IDX_PROB_AREA)
     {
-      const Primitive* primitive;
-      const ROI::AreaEmitter* emitter;
+      PrimRef prim_ref;
       double pmf_of_light;
-      std::tie(primitive, emitter, pmf_of_light) = light_picker.PickAreaLight();
-      
-      auto smpl = emitter->TakeAreaSample(*primitive, sampler, context);
+      std::tie(prim_ref, pmf_of_light) = light_picker.PickAreaLight();
+      const auto &mat = scene.GetMaterialOf(prim_ref);
+      assert(mat.emitter);
+      auto smpl = mat.emitter->TakeAreaSample(prim_ref, sampler, context);
       node.node_type   = RW::NodeType::AREA_LIGHT;
       node.geom_type   = RW::GeometryType::SURFACE;
       node.interaction.emitter_area = SurfaceInteraction{
@@ -716,7 +696,7 @@ public:
     if (node.geom_type == GeometryType::SURFACE)
     {
       const RaySurfaceIntersection &intersection = node.interaction.ray_surface;
-      auto smpl = intersection.shader().SampleBSDF(reverse_incident_dir, intersection, sampler, context);
+      auto smpl = GetShaderOf(intersection,scene).SampleBSDF(reverse_incident_dir, intersection, sampler, context);
       smpl.value *= BsdfCorrectionFactor(reverse_incident_dir, intersection, smpl.coordinates, context.transport);
       return smpl;
     }
@@ -750,7 +730,7 @@ public:
     else if (node.node_type == NodeType::AREA_LIGHT)
     {
       const SurfaceInteraction &interaction = node.interaction.emitter_area;
-      auto smpl = interaction.primitive().emitter->TakeDirectionSampleFrom(interaction.hitid, sampler, context);
+      auto smpl = GetEmitterOf(interaction,scene).TakeDirectionSampleFrom(interaction.hitid, sampler, context);
       return smpl.as<ScatterSample>();
     }
     else if (node.node_type == NodeType::POINT_LIGHT)
@@ -779,7 +759,7 @@ public:
     if (node.geom_type == GeometryType::SURFACE)
     {
       const RaySurfaceIntersection &intersection = node.interaction.ray_surface;
-      auto  fs = intersection.shader().EvaluateBSDF(reverse_incident_dir, intersection, out_direction, context, pdf);
+      auto  fs = GetShaderOf(intersection, scene).EvaluateBSDF(reverse_incident_dir, intersection, out_direction, context, pdf);
       fs *= BsdfCorrectionFactor(reverse_incident_dir, intersection, out_direction, context.transport);
       return fs;
     }
@@ -829,7 +809,7 @@ public:
     else if (node.node_type == NodeType::AREA_LIGHT)
     {
       const SurfaceInteraction &interaction = node.interaction.emitter_area;
-      return interaction.primitive().emitter->Evaluate(interaction.hitid, out_direction, context, pdf);
+      return GetEmitterOf(interaction, scene).Evaluate(interaction.hitid, out_direction, context, pdf);
     }
     else if (node.node_type == NodeType::POINT_LIGHT)
     {
@@ -846,17 +826,17 @@ public:
     if (node.node_type == RW::NodeType::AREA_LIGHT)
     {
       const SurfaceInteraction &interaction = node.interaction.emitter_area;
-      assert (interaction.primitive().emitter);
-      double pdf = interaction.primitive().emitter->EvaluatePdf(node.interaction.emitter_area.hitid, context);
-      pdf *= light_picker.PmfOfLight(*interaction.primitive().emitter);
-      pdf *= light_picker.emitter_type_selection_probabilities[LightPicker::IDX_PROB_AREA];
+      const auto &emitter = GetEmitterOf(interaction, scene);
+      double pdf = emitter.EvaluatePdf(node.interaction.emitter_area.hitid, context);
+      pdf *= light_picker.PmfOfLight(emitter);
+      pdf *= light_picker.emitter_type_selection_probabilities[NewLightPicker::IDX_PROB_AREA];
       return pdf;
     }
     else if(node.node_type == RW::NodeType::ENV)
     {
       const EnvironmentalRadianceFieldInteraction &interaction = node.interaction.emitter_env;
       double pdf = interaction.emitter->EvaluatePdf(interaction.pos, context);
-      pdf *= light_picker.emitter_type_selection_probabilities[LightPicker::IDX_PROB_ENV];
+      pdf *= light_picker.emitter_type_selection_probabilities[NewLightPicker::IDX_PROB_ENV];
       return pdf;
     }
     else // Other things are either not emitters or cannot be hit by definition.
@@ -972,7 +952,7 @@ public:
   {
     if (node.geom_type == RW::GeometryType::SURFACE)
     {
-      position += AntiSelfIntersectionOffset(node.geometry_normal(), RAY_EPSILON, exitant_dir);
+      position += AntiSelfIntersectionOffset(node.interaction.emitter_area, exitant_dir);
     }
   }
   
@@ -993,13 +973,13 @@ public:
     static constexpr int MAX_ITERATIONS = 100; // For safety, in case somethign goes wrong with the intersections ...
     Spectral3 result{1.};
     RaySurfaceIntersection intersection;
-    IterateIntersectionsBetween iter{seg, intersector};
+    IterateIntersectionsBetween iter{seg, scene};
     for (int n = 0; n < MAX_ITERATIONS; ++n)
     {
       bool hit = iter.Next(seg, intersection);
       if (hit)
       {
-        result *= intersection.shader().EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, context, nullptr);
+        result *= GetShaderOf(intersection, scene).EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, context, nullptr);
         if (result.isZero())
           break;
       }
@@ -1032,7 +1012,7 @@ public:
     Spectral3 total_weight{1.};
     
     RaySurfaceIntersection intersection;
-    IterateIntersectionsBetween iter{collision.segment, intersector};
+    IterateIntersectionsBetween iter{collision.segment, scene};
     
     for (int interfaces_crossed=0; interfaces_crossed < MAX_ITERATIONS; ++interfaces_crossed)
     {
@@ -1045,7 +1025,7 @@ public:
       total_weight *= medium_smpl.weight;
       
       const bool did_not_interact = medium_smpl.t >= segment.length;
-      const bool hit_invisible_wall = hit && &intersection.shader() == &scene.GetInvisibleShader();
+      const bool hit_invisible_wall = hit && &GetShaderOf(intersection,scene) == &scene.GetInvisibleShader();
       bool cont = did_not_interact && hit_invisible_wall;
       
       if (volume_pdf_coeff)

@@ -5,7 +5,6 @@
 
 #include "shader_util.hxx"
 
-class Scene;
 
 struct TagScatterSample {};
 using ScatterSample = Sample<Double3, Spectral3, TagScatterSample>;

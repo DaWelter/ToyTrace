@@ -3,6 +3,7 @@
 #include "scene.hxx"
 #include "util.hxx"
 #include "shader_util.hxx"
+#include "camera.hxx"
 
 class IRenderingAlgo
 {

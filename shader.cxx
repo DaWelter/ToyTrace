@@ -10,7 +10,7 @@ inline Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Textur
   Spectral3 ret{color};
   if (tex)
   {
-    Double3 uv = surface_hit.primitive().GetUV(surface_hit.hitid);
+    Float2 uv = surface_hit.GetTexCoords();
     RGB col = tex->GetTexel(uv[0], uv[1]);
     ret *= Color::RGBToSpectralSelection(col, lambda_idx); // TODO: optimize, I don't have to compute the full spectrum.
   }
@@ -22,7 +22,7 @@ inline double MaybeMultiplyTextureLookup(double _value, const Texture *tex, cons
 {
   if (tex)
   {
-    Double3 uv = surface_hit.primitive().GetUV(surface_hit.hitid);
+    Float2 uv = surface_hit.GetTexCoords();
     RGB col = tex->GetTexel(uv[0], uv[1]);
     _value *= (value(col[0])+value(col[1])+value(col[2]))/3.;
   }

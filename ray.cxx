@@ -1,6 +1,7 @@
 #include "ray.hxx"
 #include "primitive.hxx"
 #include "util.hxx"
+#include "scene.hxx"
 
 
 RaySegment RaySegment::FromTo(const Double3 &src, const Double3 &dest) 
@@ -25,32 +26,52 @@ RaySegment RaySegment::FromTo(const Double3 &src, const Double3 &dest)
 SurfaceInteraction::SurfaceInteraction(const HitId& _hitid)
   : hitid(_hitid)
 {
-  assert(hitid.primitive);
-  hitid.primitive->GetLocalGeometry(hitid, this->pos, this->geometry_normal, this->smooth_normal);
+  assert((bool)hitid);
+  hitid.geom->GetLocalGeometry(*this);
 }
 
+
+void RaySurfaceIntersection::SetOrientedNormals(const Double3 &incident)
+{
+  double sign = -Sign(Dot(incident, geometry_normal));
+  normal = sign*geometry_normal;
+  shading_normal = sign*smooth_normal;
+}
 
 
 RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySegment &_incident_segment)
   : SurfaceInteraction(_hitid)
 {
-  double sign = -Sign(Dot(_incident_segment.ray.dir, geometry_normal));
-  normal = sign*geometry_normal;
-  shading_normal = sign*smooth_normal;
+  SetOrientedNormals(_incident_segment.ray.dir);
   assert(LengthSqr(normal)>0.9);
   assert(LengthSqr(shading_normal)>0.9);
 }
 
+// const Shader& SurfaceInteraction::GetShader() const
+// {
+//   assert(scene && hitid);
+//   const auto &mat = scene->GetMaterialOf(hitid);
+//   return scene->GetShader(mat.shader_index);
+// }
+// 
+// 
+// const Medium& SurfaceInteraction::GetMedium() const
+// {
+//   assert(scene && hitid);
+//   const auto &mat = scene->GetMaterialOf(hitid);
+//   return scene->GetMedium(mat.medium_index);  
+// }
+// 
+// 
+// const RadianceOrImportance::AreaEmitter* SurfaceInteraction::GetEmitter() const
+// {
+//   assert(scene && hitid);
+//   const auto &mat = scene->GetMaterialOf(hitid);
+//   return mat.emitter;
+// }
 
-const Primitive& SurfaceInteraction::primitive() const
-{ 
-  assert((bool)hitid); 
-  return *hitid.primitive; 
+Float2 SurfaceInteraction::GetTexCoords() const
+{
+  // TODO Implement me
+  return Float2{0.,0.};
 }
-
-const Shader& SurfaceInteraction::shader() const
-{ 
-  assert((bool)hitid && hitid.primitive->shader); 
-  return *hitid.primitive->shader; 
-}
-  

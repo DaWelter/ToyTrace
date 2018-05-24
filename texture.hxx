@@ -16,18 +16,18 @@ class Texture
 public:
   Texture(const boost::filesystem::path &filename);
 
-  RGB GetTexel(double u, double v) const
+  RGB GetTexel(float u, float v) const
   {
-    double dummy;
-    u = modf(u, &dummy);
-    v = modf(v, &dummy);
-    if (u < 0) u = 1. + u;
-    if (v < 0) v = 1. + v;
-    if (u > 1. - Epsilon) u -= Epsilon;
-    if (v > 1. - Epsilon) v -= Epsilon;
+    float dummy;
+    u = std::modf(u, &dummy);
+    v = std::modf(v, &dummy);
+    if (u < 0.f) u = 1. + u;
+    if (v < 0.f) v = 1. + v;
+    if (u > 1.f - Epsilon) u -= Epsilon;
+    if (v > 1.f - Epsilon) v -= Epsilon;
     int x = u * bm.width();
     int y = v * bm.height();
-    y = bm.height() - y - 1;
+    y = bm.height() - y - 1.f;
     //x = bm.width() - x - 1; // Nope. I don't think this is it.
     auto rgb = bm.get_pixel_uc3(x, y);
     RGB c;

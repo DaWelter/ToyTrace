@@ -28,6 +28,14 @@ find_path(CImg_INCLUDE_DIR
     /usr/local/include
 )
 message(STATUS "CImg: ${CImg_INCLUDE_DIR}")
+find_path(Embree_INCLUDE_DIR
+  NAMES rtcore.h
+  PATHS
+    ${CMAKE_INSTALL_PREFIX}/include
+    /usr/include
+    /usr/local/include)
+find_library(Embree_LIBRARY NAMES libembree3)
+message(STATUS "Embree: ${Embree_INCLUDE_DIR}, ${Embree_LIBRARY}")
 
 set(Cubature_DIR "external/cubature")
 
@@ -42,19 +50,20 @@ find_path(Rapidjson_INCLUDE_DIR
 )
 message(STATUS "Rapidjson: ${Rapidjson_INCLUDE_DIR}")
 
-include_directories(${PNG_INCLUDE_DIR} ${JPEG_INCLUDE_DIR} ${CImg_INCLUDE_DIR} ${Rapidjson_INCLUDE_DIR})
-link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSIMP_LIBRARY} ${X11_LIBRARIES})
+include_directories(${PNG_INCLUDE_DIR} ${JPEG_INCLUDE_DIR} ${CImg_INCLUDE_DIR} ${Rapidjson_INCLUDE_DIR} ${Embree_INCLUDE_DIR})
+link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSIMP_LIBRARY} ${X11_LIBRARIES} ${Embree_LIBRARY})
 
-set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx bsptree.cxx 
+set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx
             phasefunctions.cxx atmosphere.cxx spectral.cxx primitive.cxx renderingalgorithms.cxx 
-            light.cxx texture.cxx)
+            light.cxx texture.cxx embreeaccelerator.cxx scene.cxx)
 add_executable(toytrace toytrace.cxx ${SOURCES})
 target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE} ${Boost_FILESYSTEM_LIBRARY_RELEASE})
 
 add_executable(tests tests.cxx tests3.cxx tests_sampling.cxx ${Cubature_DIR}/hcubature.c ${SOURCES})
 add_executable(tests2 tests2.cxx)
+add_executable(determine_ray_offset_experimentally determine_ray_offset_experimentally.cxx ${SOURCES})
 
-foreach(EXE tests tests2)
+foreach(EXE tests tests2 determine_ray_offset_experimentally)
   target_include_directories(${EXE} PUBLIC ${GTEST_INCLUDE_DIRS} ${Cubature_DIR})
   target_link_libraries(${EXE} ${GTEST_LIBRARIES}  ${Boost_FILESYSTEM_LIBRARY_RELEASE} pthread)
 endforeach()

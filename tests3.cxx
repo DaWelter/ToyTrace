@@ -20,12 +20,11 @@ void RenderingMediaTransmission1Helper(
   int NHITS)
 {
   MediumTracker mt(scene);
-  IntersectionCalculator intersector = scene.MakeIntersectionCalculator();
-  mt.initializePosition({0, 0, -10}, intersector);
+  mt.initializePosition({0, 0, -10});
   ASSERT_EQ(&mt.getCurrentMedium(), &scene.GetEmptySpaceMedium());
   RaySegment seg{ray, LargeNumber};
   std::printf("Media Trace:\n");
-  IterateIntersectionsBetween iter{seg, intersector};
+  IterateIntersectionsBetween iter{seg, scene};
   RaySurfaceIntersection intersection;
   int i = 0;
   for (; iter.Next(seg, intersection); ++i)
@@ -72,13 +71,17 @@ s 0 0 6 0.5
   Scene scene;
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
+  auto GetMedium = [&scene](int i) {
+    return scene.GetMaterialOf({&scene.GetGeometry(1), i}).medium;
+  };
+  
   for (int i=0; i<5; ++i)
   {
-    std::printf("Medium of prim %i = %p\n", i, scene.GetPrimitive(i).medium);
+    std::printf("Medium of prim %i = %p\n", i, GetMedium(i));
   }
   const Medium *vac = &scene.GetEmptySpaceMedium();
-  const Medium *m1 = scene.GetPrimitive(0).medium;
-  const Medium *m2 = scene.GetPrimitive(1).medium;
+  const Medium *m1 = GetMedium(0);
+  const Medium *m2 = GetMedium(1);
   const Medium *media_after_intersect[] = {
     m1, vac, m2, m2, m1, vac, m1, m2, m1, vac
   };
@@ -113,9 +116,12 @@ m testing/scenes/unitcube.dae
   Scene scene;
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
+  auto GetMedium = [&scene](int i) {
+    return scene.GetMaterialOf({&scene.GetGeometry(0), i}).medium;
+  };
   const Medium *vac = &scene.GetEmptySpaceMedium();
-  const Medium *m1 = scene.GetPrimitive(0).medium;
-  const Medium *m2 = scene.GetPrimitive(12).medium;
+  const Medium *m1 = GetMedium(0);
+  const Medium *m2 = GetMedium(12);
   const Medium *media_after_intersect[] = {
     m1, vac, m2, m2, m1, vac
   };
@@ -148,7 +154,7 @@ m testing/scenes/unitcube.dae
   MediumTracker medium_tracker(scene);
   double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
   RaySegment seg{{{ray_offset,0.,-10.}, {0.,0.,1.}}, LargeNumber};
-  medium_tracker.initializePosition(seg.ray.org, scene.MakeIntersectionCalculator());
+  medium_tracker.initializePosition(seg.ray.org);
   ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
   VolumePdfCoefficients volume_pdf_coeff{};
   auto res = rt.TransmittanceEstimate(seg, medium_tracker, PathContext{lambda_idx}, &volume_pdf_coeff);
@@ -211,7 +217,7 @@ m testing/scenes/unitcube.dae
   MediumTracker medium_tracker(scene);
   double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
   Ray ray{{ray_offset,0.,camera_start}, {0.,0.,1.}};
-  medium_tracker.initializePosition(ray.org, scene.MakeIntersectionCalculator());
+  medium_tracker.initializePosition(ray.org);
   ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
   
   int num_escaped = 0;
@@ -223,7 +229,7 @@ m testing/scenes/unitcube.dae
   {
     VolumePdfCoefficients volume_pdf_coeff{};
     RadianceEstimatorBase::CollisionData collision(ray);
-    medium_tracker.initializePosition(ray.org, scene.MakeIntersectionCalculator());
+    medium_tracker.initializePosition(ray.org);
     rt.TrackToNextInteraction(collision, medium_tracker, PathContext{lambda_idx}, &volume_pdf_coeff);
     EXPECT_EQ(collision.segment.ray.org[2], ray.org[2]);
     
@@ -231,7 +237,7 @@ m testing/scenes/unitcube.dae
       double x = collision.smpl.t + camera_start;
       double tr = AnalyticTrApprox(x);
       double s = AnalyticSigmaApprox(x);
-      CheckVolumePdfCoefficientsForMedium(volume_pdf_coeff, tr, 0., s, 1.e-6);
+      CheckVolumePdfCoefficientsForMedium(volume_pdf_coeff, tr, 0., s, 1.e-5);
     }
     
     if (RadianceEstimatorBase::IsNotEscaped(collision))

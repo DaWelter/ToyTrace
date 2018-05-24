@@ -297,9 +297,7 @@ int main(int argc, char *argv[])
     return -1;
   }
   
-  if (scene.GetNumAreaLights() <= 0 &&
-      scene.GetNumEnvLights() <= 0 &&
-      scene.GetNumLights() <= 0)
+  if (!scene.HasLights())
   {
     std::cout << "There are no lights. Aborting." << std::endl;
     return -1;
@@ -540,8 +538,9 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
     
     render_params.algo_name = vm["algo"].as<std::string>();
     if (render_params.algo_name != "pt" &&
-        render_params.algo_name != "bdpt")
-      throw po::error("Algorithm must be pt or bdpt");
+        render_params.algo_name != "bdpt" &&
+        render_params.algo_name != "normalvis")
+      throw po::error("Algorithm must be pt or bdpt or normalvis");
     
     int max_spp = -1;
     if (vm.count("max-spp"))

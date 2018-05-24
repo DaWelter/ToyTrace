@@ -2,11 +2,15 @@
 #define VEC3F_HXX
 
 #include <iostream>
+
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Geometry>
 #include <eigen3/Eigen/LU>
+// WARNING IMPORTANT!!!!! 
+// READ https://eigen.tuxfamily.org/dox/group__TopicStlContainers.html
 
 #include <boost/optional/optional.hpp>
+
 
 template<class T, int d>
 class Vec : public Eigen::Matrix<T, d, 1>
@@ -43,11 +47,13 @@ typedef Eigen::Matrix<double, 2, 1> Float2;
 #else
 typedef Vec<double, 3> Double3;
 typedef Vec<double, 2> Double2;
-typedef Vec<double, 3> Float3;
-typedef Vec<double, 2> Float2;
+typedef Vec<float, 3> Float3;
+typedef Vec<float, 2> Float2;
 #define VECDARG class T,int d
 #define VECD Vec<T, d>
 #endif
+
+using UInt3 = Eigen::Array<unsigned int, 3, 1>;
 
 using Index3 = Eigen::Array<int, 3, 1>;
 
@@ -168,6 +174,14 @@ template<class Derived>
 auto Reflected(const Eigen::MatrixBase<Derived>& reverse_incident_dir, const Eigen::MatrixBase<Derived>& normal)
 {
   return (2.*reverse_incident_dir.dot(normal)*normal - reverse_incident_dir);
+}
+
+// Return n if the vector component of dir in the direction of n is positive, else -n.
+template<class Derived>
+inline auto AlignedNormal(const Eigen::MatrixBase<Derived>&n, const Eigen::MatrixBase<Derived>&dir)
+{
+  using Scalar = typename Derived::Scalar;
+  return Dot(n, dir)>0 ? Scalar{1}*n : Scalar{-1}*n;
 }
 
 

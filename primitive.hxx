@@ -1,75 +1,109 @@
 #ifndef PRIMITIVE_HXX
 #define PRIMITIVE_HXX
 
+#include "types.hxx"
+#include "util.hxx"
+#include "box.hxx"
 
-class Shader;
-class Medium;
-namespace RadianceOrImportance {
-class AreaEmitter;
-}
-class Sampler;
 
-#include<vector>
-#include"ray.hxx"
-#include"box.hxx"
+static constexpr int INVALID_PRIM_INDEX {-1};
 
-class Primitive
+struct PrimRef // Reference to Primitive
 {
-public:
-  Primitive() 
-	  : shader(nullptr), medium(nullptr), emitter{nullptr}
-  {}
-  virtual ~Primitive() {}
+  const Geometry *geom = { nullptr };
+  int index = INVALID_PRIM_INDEX;
   
-  const Shader *shader;
-  const Medium *medium;
-  const RadianceOrImportance::AreaEmitter *emitter;
-  
-  virtual bool Intersect(const Ray &ray, double tnear, double &tfar, HitId &hit) const = 0;
-  
-//   virtual void Intersect(const Ray &ray, double ray_length, HitVector &hits) const
-//   {
-//     HitId hit;
-//     if (Intersect(ray, ray_length, hit))
-//       hits.push_back(HitRecord{hit, ray_length});
-//   }
-  
-  virtual void GetLocalGeometry(
-      const HitId &hit,
-      Double3 &hit_point,
-      Double3 &normal,
-      Double3 &shading_normal) const = 0;
-  
-  virtual Box   CalcBounds() const = 0;
-  
-  virtual bool  Occluded(const Ray &ray, double t) const
+  operator bool() const
   {
-    HitId hit;
-    return Intersect(ray, 0, t, hit);
-  }
-  
-  virtual Double3 GetUV(const HitId &hit) const
-  { 
-	  return Double3{0, 0, 0};
-  }
-  
-  virtual bool InBox(const Box &box) const
-  {
-    Box boundingbox = CalcBounds();
-    return boundingbox.Intersect(box);
-  }
-  
-  virtual HitId SampleUniformPosition(Sampler &sampler) const
-  {
-    assert(!"Not Implemented");
-    return HitId{};
-  };
-  
-  virtual double Area() const
-  {
-    assert(!"Not Implemented");
-    return 0;
+    assert(geom == nullptr || index!=INVALID_PRIM_INDEX);
+    return geom != nullptr;
   }
 };
+
+
+struct HitId : public PrimRef
+{
+  HitId() = default;
+  HitId(const Geometry* _geom, int index, const Double3 &_barry) 
+    : PrimRef{_geom, index}, barry{_barry}
+  {}
+  Double3 barry;
+};
+
+
+class Geometry
+{
+public:
+  unsigned int identifier = { (unsigned int)-1 }; // Used by embree. It's the geometry identifier.
+  enum Type {
+    PRIMITIVES_TRIANGLES,
+    PRIMITIVES_SPHERES
+  } const type;
+  ToyVector<MaterialIndex> material_indices; // Per primitive    
+  
+  Geometry(Type _t) : type{_t} {}
+  virtual ~Geometry() = default;
+  virtual HitId SampleUniformPosition(int index, Sampler &sampler) const = 0;
+  virtual double Area(int index) const = 0;
+  virtual int Size() const = 0;
+  virtual void GetLocalGeometry(SurfaceInteraction &interaction) const = 0;
+};
+
+
+class Mesh : public Geometry
+{
+  public:
+    // Float because Embree :-(
+    // Also, see https://eigen.tuxfamily.org/dox/group__TopicStorageOrders.html
+    // Memory address varies fastest w.r.t column index.
+    using Vectors3d = Eigen::Matrix<float, Eigen::Dynamic, 3, Eigen::RowMajor>;
+    using Vectors2d = Eigen::Matrix<float, Eigen::Dynamic, 2, Eigen::RowMajor>;
+    // Embree requires unsigned int for triangle indices!
+    using Indices3d = Eigen::Matrix<unsigned int, Eigen::Dynamic, 3, Eigen::RowMajor>;
+    Vectors3d vertices;
+    Indices3d vert_indices; // Vertex indices per triangle.
+    Vectors3d normals; // Per vertex.
+    Vectors2d uvs; // Per vertex.
+
+    Mesh(int num_triangles, int num_vertices);
+    
+    void Append(const Mesh &other);
+    void MakeFlatNormals();
+    
+    inline int NumVertices() const { return vertices.rows(); }
+    inline int NumTriangles() const { return vert_indices.rows(); }
+    
+    HitId SampleUniformPosition(int index, Sampler &sampler) const override;
+    double Area(int index) const override;
+    int Size() const override { return int{NumTriangles()}; }
+    void GetLocalGeometry(SurfaceInteraction &interaction) const override;
+};
+
+void AppendSingleTriangle(Mesh &mesh,
+  const Float3 &a, const Float3 &b, const Float3 &c, const Float3 &n);
+
+
+class Spheres : public Geometry
+{
+  public:
+    using Vector4f = Eigen::Matrix<float, 1, 4>;
+    ToyVector<Vector4f> spheres; // position and radius;
+    
+    Spheres();
+    void Append(const Float3 pos, const float radius, MaterialIndex material_index);
+    void Append(const Spheres &other);
+    inline int NumSpheres() const { return spheres.size(); }
+    inline std::pair<Float3, float> Get(int i) const;
+    HitId SampleUniformPosition(int index, Sampler &sampler) const override;
+    double Area(int index) const override;
+    int Size() const override { return int{NumSpheres()}; }
+    void GetLocalGeometry(SurfaceInteraction &interaction) const override;
+};
+
+inline std::pair<Float3, float> Spheres::Get(int i) const 
+{ 
+  return std::pair<Float3, float>(spheres[i].head<3>(), spheres[i][3]);
+}
+
 
 #endif

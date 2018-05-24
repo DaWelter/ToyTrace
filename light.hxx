@@ -10,7 +10,8 @@
 
 namespace RadianceOrImportance
 {
-
+  
+  
 class PointLight : public PointEmitter
 {
   SpectralN col; // Total power distributed uniformely over the unit sphere.
@@ -53,20 +54,19 @@ class AreaUniformMixin : public Base
 public:
   using Base::Base;
   
-  AreaSample TakeAreaSample(const Primitive& primitive, Sampler &sampler, const PathContext &context) const override
+  AreaSample TakeAreaSample(const PrimRef &prim_ref, Sampler &sampler, const PathContext &context) const override
   {
     AreaSample smpl;
-    smpl.coordinates = primitive.SampleUniformPosition(sampler);
-    smpl.pdf_or_pmf = 1./primitive.Area();
+    smpl.coordinates = prim_ref.geom->SampleUniformPosition(prim_ref.index, sampler);
+    smpl.pdf_or_pmf = 1./prim_ref.geom->Area(prim_ref.index);
     smpl.value = Nothing{};
     return smpl;
   }
   
-  double EvaluatePdf(const PosSampleCoordinates &area, const PathContext &context) const override
+  double EvaluatePdf(const HitId &prim_ref, const PathContext &context) const override
   {
-    const auto* primitive = area.primitive;
-    assert (primitive && primitive->Area() > 0.);
-    return 1./primitive->Area();
+    assert (prim_ref.geom && prim_ref.geom->Area(prim_ref.index) > 0.);
+    return 1./prim_ref.geom->Area(prim_ref.index);
   }
 };
 
