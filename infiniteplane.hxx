@@ -14,14 +14,14 @@ public:
     Normalize(normal);
   };
 
-  bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const override
+  bool Intersect(const Ray &ray, double tnear, double &ray_length, HitId &hit) const override
   {
     double s = Dot(origin,normal);
     double nv = Dot(ray.dir,normal);
     if(nv*nv < 1.0e-9)
       return false;
     double t = (s-Dot(ray.org,normal))/(nv);
-    if(t<Epsilon || t>ray_length+Epsilon)
+    if(t<=tnear || t>ray_length)
       return false;
     hit.primitive = this;
     hit.barry = ray.PointAt(t);

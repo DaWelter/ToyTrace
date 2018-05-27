@@ -27,14 +27,15 @@ double UpperBoundToBoundingBoxDiameter(const Scene &scene);
 
 class IterateIntersectionsBetween
 {
-  RaySegment next_seg;
-  const Double3 target;
+  const RaySegment seg;
+  double tnear, tfar;
   IntersectionCalculator &intersector; 
 public:
   IterateIntersectionsBetween(const RaySegment &seg, IntersectionCalculator &intersector)
-    : next_seg{seg}, target{seg.EndPoint()}, intersector{intersector}
+    : seg{seg}, tnear{0.}, tfar{seg.length}, intersector{intersector}
   {}
   bool Next(RaySegment &seg, RaySurfaceIntersection &intersection);
+  double GetT() const { return tnear; }
 };
 
 
@@ -1012,6 +1013,9 @@ public:
       {
         medium_tracker.goingThroughSurface(seg.ray.dir, intersection);
       }
+      if (!hit)
+        break;
+      assert (n < MAX_ITERATIONS-1);
     }
     return result;
   }
@@ -1023,42 +1027,50 @@ public:
     const PathContext &context,
     VolumePdfCoefficients *volume_pdf_coeff = nullptr)
   {
+    static constexpr int MAX_ITERATIONS = 100; // For safety, in case somethign goes wrong with the intersections ...
+    
     Spectral3 total_weight{1.};
-    RaySegment segment = collision.segment;
-    double distance_traveled = 0.;
-    for (int interfaces_crossed=0;; ++interfaces_crossed)
+    
+    RaySurfaceIntersection intersection;
+    IterateIntersectionsBetween iter{collision.segment, intersector};
+    
+    for (int interfaces_crossed=0; interfaces_crossed < MAX_ITERATIONS; ++interfaces_crossed)
     {
+      double prev_t = iter.GetT();
+      RaySegment segment;
+      bool hit = iter.Next(segment, intersection);
+
       const Medium& medium = medium_tracker.getCurrentMedium();
-      
-      const auto &hit = collision.hit = intersector.First(segment.ray, segment.length);
       const auto &medium_smpl = collision.smpl = medium.SampleInteractionPoint(segment, sampler, context);
       total_weight *= medium_smpl.weight;
-      bool cont = medium_smpl.t >= segment.length && hit && hit.primitive->shader == &scene.GetInvisibleShader();
+      
+      const bool did_not_interact = medium_smpl.t >= segment.length;
+      const bool hit_invisible_wall = hit && &intersection.shader() == &scene.GetInvisibleShader();
+      bool cont = did_not_interact && hit_invisible_wall;
       
       if (volume_pdf_coeff)
       {
-        RaySegment s{segment};
-        s.length = std::min(medium_smpl.t, segment.length);
-        VolumePdfCoefficients local_coeff = medium_tracker.getCurrentMedium().ComputeVolumePdfCoefficients(s, context);
+        double back_l = segment.length;
+        segment.length = std::min(medium_smpl.t, segment.length);
+        VolumePdfCoefficients local_coeff = medium_tracker.getCurrentMedium().ComputeVolumePdfCoefficients(segment, context);
         Accumulate(*volume_pdf_coeff, local_coeff, interfaces_crossed==0, !cont);
+        segment.length = back_l;
       }
       
       if (cont)
       {
-        RaySurfaceIntersection intersection{hit, segment};
         medium_tracker.goingThroughSurface(segment.ray.dir, intersection);
-        distance_traveled += segment.length;
-        segment.ray.org = intersection.pos;
-        segment.ray.org += AntiSelfIntersectionOffset(intersection, RAY_EPSILON, segment.ray.dir);
-        segment.length = LargeNumber;
       }
       else
       {
         collision.smpl.weight = total_weight;
-        collision.segment.length = distance_traveled + segment.length;
-        collision.smpl.t += distance_traveled;
+        collision.segment.length = iter.GetT();
+        collision.smpl.t = prev_t + medium_smpl.t;
+        collision.hit = intersection.hitid;
         return;
       }
+      
+      assert (interfaces_crossed < MAX_ITERATIONS-1);
     }
   }
 };

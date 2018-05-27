@@ -68,7 +68,7 @@ bool TreeNode::Intersect(const Ray &ray, double min, double max, IntersectionChe
     bool res=false;
     for(unsigned int i=0;i<primitive.size();i++) 
     {
-      res |= intersectionChecker.intersect(ray, *primitive[i]);
+      res |= intersectionChecker.intersect(ray, min, *primitive[i]);
     }
     return res;
   }
@@ -88,9 +88,12 @@ bool TreeNode::Intersect(const Ray &ray, double min, double max, IntersectionChe
     first=1; last=0;
   }
   
-  if(dist<0 || dist>max) 
+  // Facing away from split plane or distance is further than max checking distance ...
+  // ... or dist is NaN in case of which the split plane is also not hit, and the following
+  // expression evaluates to true.
+  const bool split_plane_is_not_hit = !(dist>=0 && dist<=max);
+  if(split_plane_is_not_hit)
   {
-    // Facing away from split plane or distance is further than max checking distance.
     if(child[first]) return child[first]->Intersect(ray, min, max, intersectionChecker);
     else return false;
   } 
@@ -119,8 +122,8 @@ bool TreeNode::Intersect(const Ray &ray, double min, double max, IntersectionChe
 }
 
 
-template
-bool TreeNode::Intersect<IntersectionRecorder>(const Ray &ray, double min, double max, IntersectionRecorder &intersectionChecker) const;
+// template
+// bool TreeNode::Intersect<IntersectionRecorder>(const Ray &ray, double min, double max, IntersectionRecorder &intersectionChecker) const;
 
 template
 bool TreeNode::Intersect<FirstIntersection>(const Ray &ray, double min, double max, FirstIntersection &intersectionChecker) const;
@@ -138,9 +141,14 @@ std::unique_ptr<TreeNode> BuildBspTree(const std::vector<Primitive *> &list, con
 
 HitId IntersectionCalculator::First(const Ray &ray, double &ray_length)
 {
+  return First(ray, 0., ray_length);
+}
+
+HitId IntersectionCalculator::First(const Ray &ray, double tnear, double &tfar)
+{
   HitId hit;
-  FirstIntersection intersectionChecker {ray_length, hit};
-  root.Intersect(ray, 0, ray_length, intersectionChecker);
+  FirstIntersection intersectionChecker {tfar, hit};
+  root.Intersect(ray, tnear, tfar, intersectionChecker);
   return hit;
 }
 

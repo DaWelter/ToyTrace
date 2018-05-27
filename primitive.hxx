@@ -25,14 +25,14 @@ public:
   const Medium *medium;
   const RadianceOrImportance::AreaEmitter *emitter;
   
-  virtual bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const = 0;
+  virtual bool Intersect(const Ray &ray, double tnear, double &tfar, HitId &hit) const = 0;
   
-  virtual void Intersect(const Ray &ray, double ray_length, HitVector &hits) const
-  {
-    HitId hit;
-    if (Intersect(ray, ray_length, hit))
-      hits.push_back(HitRecord{hit, ray_length});
-  }
+//   virtual void Intersect(const Ray &ray, double ray_length, HitVector &hits) const
+//   {
+//     HitId hit;
+//     if (Intersect(ray, ray_length, hit))
+//       hits.push_back(HitRecord{hit, ray_length});
+//   }
   
   virtual void GetLocalGeometry(
       const HitId &hit,
@@ -45,7 +45,7 @@ public:
   virtual bool  Occluded(const Ray &ray, double t) const
   {
     HitId hit;
-    return Intersect(ray, t, hit);
+    return Intersect(ray, 0, t, hit);
   }
   
   virtual Double3 GetUV(const HitId &hit) const

@@ -12,7 +12,7 @@ public:
 	: Primitive(), center(_center),radius(_radius)
   {}
 
-  inline bool PotentialDistances(const Ray &ray, double ray_length, double &t1, double &t2) const
+  inline bool PotentialDistances(const Ray &ray, double tnear, double tfar, double &tplus, double &tminus) const
   {
     Double3 q = ray.org-center;
     double C = Dot(q,q) - radius * radius;
@@ -23,47 +23,53 @@ public:
     if (under_the_sqrt < 0.)
       return false;
     double dt = std::sqrt(under_the_sqrt)*0.5/A;
-    t1=t+dt;
-    t2=t-dt;
+    tplus =t+dt;
+    tminus=t-dt;
     // The cases where 1) hit point lies behind the start point, 2) hit point lies beyond the end of the ray.
-    if (t1-RAY_EPSILON<0. || t2+RAY_EPSILON>ray_length) return false;
+    //if (tplus<=tnear || tminus>tfar) return false;
     return true;
   }
 
-  void Intersect(const Ray &ray, double ray_length, HitVector &hits) const override
-  {
-    double t1, t2;
-    if(!PotentialDistances(ray, ray_length, t1, t2))
-      return;
-    if (t2-RAY_EPSILON > 0.) // Hit in front of sphere.
-    {
-      HitRecord r{{this, ray.PointAt(t2)}, t2};
-      ReProjectHitPoint(r.barry);
-      hits.push_back(r);
-    }
-    if (t1+RAY_EPSILON < ray_length)
-    {
-      HitRecord r{{this, ray.PointAt(t1)}, t1};
-      ReProjectHitPoint(r.barry);
-      hits.push_back(r);
-    }
-  }
+//   void Intersect(const Ray &ray, double &ray_length, HitVector &hits) const override
+//   {
+//     double t1, t2;
+//     if(!PotentialDistances(ray, ray_length, t1, t2))
+//       return;
+//     if (t2-RAY_EPSILON > 0.) // Hit in front of sphere.
+//     {
+//       HitRecord r{{this, ray.PointAt(t2)}, t2};
+//       ReProjectHitPoint(r.barry);
+//       hits.push_back(r);
+//     }
+//     if (t1+RAY_EPSILON < ray_length)
+//     {
+//       HitRecord r{{this, ray.PointAt(t1)}, t1};
+//       ReProjectHitPoint(r.barry);
+//       hits.push_back(r);
+//     }
+//   }
   
-  bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const override
+  bool Intersect(const Ray &ray, double tnear, double &tfar, HitId &hit) const override
   {
-    double t1, t2;
-    if(!PotentialDistances(ray, ray_length, t1, t2))
+    double tplus, tminus;
+    if(!PotentialDistances(ray, tnear, tfar, tplus, tminus))
       return false;
-    double t = t2;
-    if (t-RAY_EPSILON <= 0.)
+    double tmp = tfar;
+    bool is_hit = false;
+    if (tplus > tnear && tplus <= tfar)
     {
-      t = t1;
-      if (t + RAY_EPSILON > ray_length)
-        return false;
+      tfar = tplus;
+      is_hit = true;
     }
-    hit = HitId{ this, ray.PointAt(t) };
+    if (tminus > tnear && tminus <= tfar)
+    {
+      tfar = tminus;
+      is_hit = true;
+    }
+    if (!is_hit)
+      return false;
+    hit = HitId{ this, ray.PointAt(tfar) };
     ReProjectHitPoint(hit.barry);
-    ray_length = t;
     return true;
   }
   

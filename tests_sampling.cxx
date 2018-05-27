@@ -1160,7 +1160,7 @@ class ShaderScatterer : public Scatterer
     {
       RaySegment seg{{reverse_incident_dir, -reverse_incident_dir}, LargeNumber};
       HitId hit;
-      bool ok = triangle->Intersect(seg.ray, seg.length, hit);
+      bool ok = triangle->Intersect(seg.ray, 0., seg.length, hit);
       last_intersection = RaySurfaceIntersection{hit, seg};
       last_incident_dir = reverse_incident_dir;
     }

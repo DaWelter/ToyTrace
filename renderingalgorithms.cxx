@@ -16,14 +16,15 @@ double UpperBoundToBoundingBoxDiameter(const Scene &scene)
 
 bool IterateIntersectionsBetween::Next(RaySegment &seg, RaySurfaceIntersection &intersection)
 {
-  seg = next_seg;
-  HitId hit = intersector.First(seg.ray, seg.length);
+  tfar = this->seg.length;
+  HitId hit = intersector.First(this->seg.ray, tnear, tfar);
+  seg.ray = this->seg.ray;
+  seg.ray.org += tnear*this->seg.ray.dir;
+  seg.length = tfar - tnear;
+  tnear = tfar;
   if (hit)
   {
     intersection = RaySurfaceIntersection{hit, seg};
-    next_seg = RaySegment::FromTo(
-      intersection.pos + AntiSelfIntersectionOffset(intersection, RAY_EPSILON, seg.ray.dir),
-      target);
     return true;
   }
   else

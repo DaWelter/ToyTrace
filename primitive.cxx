@@ -2,7 +2,7 @@
 #include "sampler.hxx"
 #include "sphere.hxx"
 
-bool Triangle::Intersect(const Ray &ray, double &ray_length, HitId &hit) const
+bool Triangle::Intersect(const Ray &ray, double tnear, double &tfar, HitId &hit) const
 {
   Double3 n;
   Double3 edge[3];
@@ -15,8 +15,8 @@ bool Triangle::Intersect(const Ray &ray, double &ray_length, HitId &hit) const
   double d = Dot(p[0],n);
   double r = Dot(ray.dir,n);
   if(fabs(r)<Epsilon) return false;
-  double s = (d-Dot(ray.org,n))/r;
-  if(s<Epsilon || s>ray_length+Epsilon) return false;
+  double s = (d-Dot(ray.org,n))/r; // s is the fraction of ray dir, where the hit point is.
+  if(s<=tnear || s>tfar) return false;
   Double3 q = ray.org+s*ray.dir;
 
   double edge_func[3];
@@ -31,7 +31,7 @@ bool Triangle::Intersect(const Ray &ray, double &ray_length, HitId &hit) const
   hit.barry[1] = edge_func[2] * normalization;
   hit.barry[2] = edge_func[0] * normalization;
   assert(hit.barry.allFinite());
-  ray_length = s;
+  tfar = s;
   hit.primitive = this;
   return true;
 }

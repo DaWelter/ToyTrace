@@ -170,7 +170,7 @@ protected:
   {
     RaySegment rs{ray, LargeNumber};
     HitId hit;
-    bool bhit = prim.Intersect(rs.ray, rs.length, hit);
+    bool bhit = prim.Intersect(rs.ray, 0., rs.length, hit);
     ASSERT_TRUE(bhit == expect_hit);
     if (bhit)
     {
@@ -319,7 +319,7 @@ TEST(TestMath, SphereIntersectionMadness)
     // front side of the sphere.
     RaySegment rs{{org, dir}, LargeNumber};
     HitId hit1;
-    bool bhit = s.Intersect(rs.ray, rs.length, hit1);
+    bool bhit = s.Intersect(rs.ray, 0., rs.length, hit1);
     ASSERT_TRUE(bhit);
     RaySurfaceIntersection intersect1{hit1, rs};
     ASSERT_LE(Length(org - intersect1.pos), Length(org - sphere_org));
@@ -329,7 +329,7 @@ TEST(TestMath, SphereIntersectionMadness)
     auto m  = OrthogonalSystemZAligned(intersect1.geometry_normal);
     auto new_dir = m * SampleTrafo::ToUniformHemisphere(sampler.UniformUnitSquare());
     rs = MakeSegmentAt(intersect1, new_dir);
-    bhit = s.Intersect(rs.ray, rs.length, hit1);
+    bhit = s.Intersect(rs.ray, 0., rs.length, hit1);
     ASSERT_FALSE(bhit);
     ASSERT_EQ(rs.length, LargeNumber);
   }
@@ -347,7 +347,7 @@ TEST(TestMath, SphereIntersectionMadness2)
   const int N = 100;
   for (int num = 0; num < N; ++num)
   {
-    bool bhit = s.Intersect(rs.ray, rs.length, hit); //, last_hit, HitId());
+    bool bhit = s.Intersect(rs.ray, 0., rs.length, hit); //, last_hit, HitId());
     ASSERT_TRUE(bhit);
     RaySurfaceIntersection intersect{hit, rs};
     double rho = Length(intersect.pos-sphere_org);
@@ -451,7 +451,7 @@ public:
         PathContext{Color::LambdaIdxClosestToRGBPrimaries()});
       HitId hit;
       double length = 100.;
-      bool is_hit = imageplane.Intersect({pos, s.coordinates}, length, hit);
+      bool is_hit = imageplane.Intersect({pos, s.coordinates}, 0., length, hit);
       ASSERT_TRUE(is_hit);
       Double3 endpos = pos + length * s.coordinates;
       possum += endpos;

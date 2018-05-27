@@ -14,7 +14,7 @@ public:
 		p[0]=a; p[1]=b; p[2]=c;
 	}
 
-  bool Intersect(const Ray &ray, double &ray_length, HitId &hit) const override;
+  bool Intersect(const Ray &ray, double tnear, double &ray_length, HitId &hit) const override;
   virtual void GetLocalGeometry(
       const HitId &hit,
       Double3 &hit_point,
