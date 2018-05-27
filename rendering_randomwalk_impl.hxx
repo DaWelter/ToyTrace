@@ -25,6 +25,19 @@ inline static Double3 Position(const Medium::InteractionSample &s, const RaySegm
 double UpperBoundToBoundingBoxDiameter(const Scene &scene);
 
 
+class IterateIntersectionsBetween
+{
+  RaySegment next_seg;
+  const Double3 target;
+  IntersectionCalculator &intersector; 
+public:
+  IterateIntersectionsBetween(const RaySegment &seg, IntersectionCalculator &intersector)
+    : next_seg{seg}, target{seg.EndPoint()}, intersector{intersector}
+  {}
+  bool Next(RaySegment &seg, RaySurfaceIntersection &intersection);
+};
+
+
 
 // WARNING: THIS IS NOT THREAD SAFE. DON'T WRITE TO THE SAME FILE FROM MULTIPLE THREADS!
 class PathLogger
@@ -976,32 +989,30 @@ public:
   
   Spectral3 TransmittanceEstimate(RaySegment seg, MediumTracker &medium_tracker, const PathContext &context, VolumePdfCoefficients *volume_pdf_coeff = nullptr)
   {
-    // TODO: Russian roulette.
+    static constexpr int MAX_ITERATIONS = 100; // For safety, in case somethign goes wrong with the intersections ...
     Spectral3 result{1.};
-    auto SegmentContribution = [&seg, &medium_tracker, &context, volume_pdf_coeff, this](double t1, double t2, bool first, bool last) -> Spectral3
+    RaySurfaceIntersection intersection;
+    IterateIntersectionsBetween iter{seg, intersector};
+    for (int n = 0; n < MAX_ITERATIONS; ++n)
     {
-      RaySegment subseg{{seg.ray.PointAt(t1), seg.ray.dir}, t2-t1};
+      bool hit = iter.Next(seg, intersection);
+      if (hit)
+      {
+        result *= intersection.shader().EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, context, nullptr);
+        if (result.isZero())
+          break;
+      }
       if (volume_pdf_coeff)
       {
-        VolumePdfCoefficients local_coeff = medium_tracker.getCurrentMedium().ComputeVolumePdfCoefficients(subseg, context);
-        Accumulate(*volume_pdf_coeff, local_coeff, first, last);
+        VolumePdfCoefficients local_coeff = medium_tracker.getCurrentMedium().ComputeVolumePdfCoefficients(seg, context);
+        Accumulate(*volume_pdf_coeff, local_coeff, n == 0, !hit);
       }
-      return medium_tracker.getCurrentMedium().EvaluateTransmission(subseg, sampler, context);
-    };
-
-    intersector.All(seg.ray, seg.length);
-    double t = 0;
-    for (const auto &hit : intersector.Hits())
-    {
-      RaySurfaceIntersection intersection{hit, seg};
-      result *= intersection.shader().EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, context, nullptr);
-      if (result.isZero())
-        return result;
-      result *= SegmentContribution(t, hit.t, t == 0, false);
-      medium_tracker.goingThroughSurface(seg.ray.dir, intersection);
-      t = hit.t;
+      result *= medium_tracker.getCurrentMedium().EvaluateTransmission(seg, sampler, context);
+      if (hit)
+      {
+        medium_tracker.goingThroughSurface(seg.ray.dir, intersection);
+      }
     }
-    result *= SegmentContribution(t, seg.length, false, true);
     return result;
   }
 

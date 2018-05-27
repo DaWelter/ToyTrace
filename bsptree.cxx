@@ -145,18 +145,18 @@ HitId IntersectionCalculator::First(const Ray &ray, double &ray_length)
 }
 
 
-void IntersectionCalculator::All(const Ray &ray, double ray_length)
-{
-  temporary_hit_storage.clear();
-  IntersectionRecorder intersectionChecker {ray_length, temporary_hit_storage};
-  root.Intersect(ray, 0, ray_length, intersectionChecker);
-  using RecordType = std::remove_reference<decltype(temporary_hit_storage[0])>::type;
-  std::sort(temporary_hit_storage.begin(), temporary_hit_storage.end(),
-    [](const RecordType &a, const RecordType &b) -> bool { return a.t < b.t; }
-  );
-  // Reject hits occuring within Eps of the previous hit.
-  auto it = std::unique(temporary_hit_storage.begin(), temporary_hit_storage.end(),
-    [](const RecordType &a, const RecordType &b) -> bool { assert(a.t <= b.t); return b.t-a.t < RAY_EPSILON; }
-  );
-  temporary_hit_storage.resize(it - temporary_hit_storage.begin());
-}
+// void IntersectionCalculator::All(const Ray &ray, double ray_length)
+// {
+//   temporary_hit_storage.clear();
+//   IntersectionRecorder intersectionChecker {ray_length, temporary_hit_storage};
+//   root.Intersect(ray, 0, ray_length, intersectionChecker);
+//   using RecordType = std::remove_reference<decltype(temporary_hit_storage[0])>::type;
+//   std::sort(temporary_hit_storage.begin(), temporary_hit_storage.end(),
+//     [](const RecordType &a, const RecordType &b) -> bool { return a.t < b.t; }
+//   );
+//   // Reject hits occuring within Eps of the previous hit.
+//   auto it = std::unique(temporary_hit_storage.begin(), temporary_hit_storage.end(),
+//     [](const RecordType &a, const RecordType &b) -> bool { assert(a.t <= b.t); return b.t-a.t < RAY_EPSILON; }
+//   );
+//   temporary_hit_storage.resize(it - temporary_hit_storage.begin());
+// }

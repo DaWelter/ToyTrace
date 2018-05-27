@@ -117,12 +117,12 @@ public:
   
   HitId First(const Ray &ray, double &ray_length);
 
-  void All(const Ray &ray, double ray_length);
+//   void All(const Ray &ray, double ray_length);
   
-  auto Hits() const 
-  {
-    return iter_pair<decltype(temporary_hit_storage.cbegin())>(
-      temporary_hit_storage.cbegin(),
-      temporary_hit_storage.cend());
-  }
+//   auto Hits() const 
+//   {
+//     return iter_pair<decltype(temporary_hit_storage.cbegin())>(
+//       temporary_hit_storage.cbegin(),
+//       temporary_hit_storage.cend());
+//   }
 };

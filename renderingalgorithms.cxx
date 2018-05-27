@@ -14,6 +14,25 @@ double UpperBoundToBoundingBoxDiameter(const Scene &scene)
 }
 
 
+bool IterateIntersectionsBetween::Next(RaySegment &seg, RaySurfaceIntersection &intersection)
+{
+  seg = next_seg;
+  HitId hit = intersector.First(seg.ray, seg.length);
+  if (hit)
+  {
+    intersection = RaySurfaceIntersection{hit, seg};
+    next_seg = RaySegment::FromTo(
+      intersection.pos + AntiSelfIntersectionOffset(intersection, RAY_EPSILON, seg.ray.dir),
+      target);
+    return true;
+  }
+  else
+  {
+    return false;
+  }
+}
+
+
 
 PathLogger::PathLogger()
   : file{"paths.log"},// {"paths2.log"}},
@@ -90,12 +109,14 @@ void MediumTracker::initializePosition(const Double3& pos, IntersectionCalculato
       double distance_to_go = 2. * (bb.max-bb.min).maxCoeff(); // Times to due to the diagonal.
       Double3 start = pos;
       start[0] += distance_to_go;
-      RaySegment seg{{start, {-1., 0., 0.}}, distance_to_go};
-      intersector.All(seg.ray, seg.length);
-      for (const auto &hit : intersector.Hits())
+      IterateIntersectionsBetween iter{
+        {{start, {-1., 0., 0.}}, distance_to_go}, 
+        intersector};
+      RaySegment seg;
+      RaySurfaceIntersection intersection;
+      while (iter.Next(seg, intersection))
       {
-        RaySurfaceIntersection intersection(hit, seg);
-        goingThroughSurface(seg.ray.dir, intersection);        
+        goingThroughSurface(seg.ray.dir, intersection);
       }
     }
   }
@@ -105,6 +126,7 @@ void MediumTracker::initializePosition(const Double3& pos, IntersectionCalculato
 
 namespace RandomWalk
 {
+
   
 void Bdpt::NotifyPassesFinished(int pass_count)
 {

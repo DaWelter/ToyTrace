@@ -25,11 +25,12 @@ void RenderingMediaTransmission1Helper(
   ASSERT_EQ(&mt.getCurrentMedium(), &scene.GetEmptySpaceMedium());
   RaySegment seg{ray, LargeNumber};
   std::printf("Media Trace:\n");
-  intersector.All(seg.ray, seg.length);
-  EXPECT_EQ(intersector.Hits().end()-intersector.Hits().begin(), NHITS);
-  for (int i=0; i<NHITS; ++i)
+  IterateIntersectionsBetween iter{seg, intersector};
+  RaySurfaceIntersection intersection;
+  int i = 0;
+  for (; iter.Next(seg, intersection); ++i)
   {
-    RaySurfaceIntersection intersection{*(intersector.Hits().begin()+i), seg};
+    EXPECT_LE(i, NHITS-1);
     mt.goingThroughSurface(seg.ray.dir, intersection);
     std::printf("IS[%i]: pos=%f, med_expect=%p, got=%p\n", i, intersection.pos[2], media_after_intersect[i], &mt.getCurrentMedium());
     EXPECT_NEAR(intersection.pos[2], intersect_pos[i], 1.e-6);
