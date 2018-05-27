@@ -33,13 +33,7 @@ struct RaySegment
   
   RaySegment() : length(NaN) {}
   RaySegment(const Ray &_ray, double _length) : ray(_ray), length(_length) {}
-  static RaySegment FromTo(const Double3 &src, const Double3 &dest) 
-  {
-    Double3 delta = dest-src;
-    double l = Length(delta);
-    delta = l>0 ? (delta / l).eval() : Double3(NaN, NaN, NaN);
-    return RaySegment{{src, delta}, l};
-  }
+  static RaySegment FromTo(const Double3 &src, const Double3 &dest);
   
   auto EndPoint() const -> decltype(ray.PointAt(length))
   { 
