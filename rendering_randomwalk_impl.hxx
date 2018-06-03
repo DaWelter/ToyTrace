@@ -487,8 +487,6 @@ public:
     MediumTracker medium_tracker = eye_medium_tracker;
     MaybeHandlePassageThroughSurface(eye_node, segment_to_light.ray.dir, medium_tracker);
     
-    segment_to_light.ShortenBothEndsBy(RAY_EPSILON);
-    
     auto transmittance = TransmittanceEstimate(segment_to_light, medium_tracker, eye_context, volume_pdf_coeff);
 
     bool is_wrt_solid_angle = eye_node.node_type == RW::NodeType::ENV || light_node.node_type == RW::NodeType::ENV;

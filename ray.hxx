@@ -8,9 +8,6 @@
 #include "scene.hxx"
 
 
-static constexpr double RAY_EPSILON = 1.e-6;
-
-
 struct Ray
 {
   Ray() {}
@@ -38,12 +35,6 @@ struct RaySegment
   { 
     // Want to return some expression template construct. Not an actual Double3. To facilitate optimization.
     return ray.PointAt(length);
-  }
-  
-  inline void ShortenBothEndsBy(double epsilon)
-  {
-    ray.org += epsilon*ray.dir;
-    length -= 2.*epsilon;
   }
   
   RaySegment Reversed() const
