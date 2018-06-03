@@ -116,6 +116,9 @@ void EmbreeAccelerator::FirstIntersectionTriangle(const RTCHit &rthit, const Ray
   rtcInterpolate1(
     geom,
     rthit.primID, rthit.u, rthit.v, RTC_BUFFER_TYPE_VERTEX_ATTRIBUTE, 0, n_sh.data(), nullptr, nullptr, 3);
+  rtcInterpolate1(
+    geom,
+    rthit.primID, rthit.u, rthit.v, RTC_BUFFER_TYPE_VERTEX_ATTRIBUTE, 1, intersection.tex_coord.data(), nullptr, nullptr, 2);
   HitId &hit = intersection.hitid;
   hit.barry[0] = rthit.u;
   hit.barry[1] = rthit.v;
@@ -142,6 +145,7 @@ void EmbreeAccelerator::FirstIntersectionSphere(const RTCHit &rthit, const Ray &
   hit.barry = delta.cast<double>();
   intersection.geometry_normal = hit.barry;
   intersection.smooth_normal = intersection.geometry_normal;
+  intersection.tex_coord = ToSphericalCoordinates(delta);
 }
 
 

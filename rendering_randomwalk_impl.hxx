@@ -554,17 +554,17 @@ public:
     CollisionData (const Ray &ray) :
       smpl{},
       segment{ray, LargeNumber},
-      hit{}
+      intersection{}
     {}
     Medium::InteractionSample smpl;
     RaySegment segment;
-    HitId hit;
+    RaySurfaceIntersection intersection;
   };
 
   
   static inline bool IsNotEscaped(const CollisionData &d)
   {
-    return (d.smpl.t < d.segment.length || d.hit);
+    return (d.smpl.t < d.segment.length || d.intersection.hitid);
   }
   
   
@@ -581,19 +581,19 @@ public:
         medium_tracker.getCurrentMedium()
       };
     }
-    else if (collision.hit)
+    else if (collision.intersection.hitid)
     {
       node.geom_type   = RW::GeometryType::SURFACE;
-      const auto &mat = scene.GetMaterialOf(collision.hit);
+      const auto &mat = scene.GetMaterialOf(collision.intersection.hitid);
       if (mat.emitter)
       {
         node.node_type = RW::NodeType::AREA_LIGHT;
-        node.interaction.emitter_area = SurfaceInteraction{collision.hit};
+        node.interaction.emitter_area = collision.intersection; // TODO: should this not use the RaySurfaceIntersection struct?
       }
       else 
       {
         node.node_type = RW::NodeType::SCATTER;
-        node.interaction.ray_surface = RaySurfaceIntersection{collision.hit, collision.segment};
+        node.interaction.ray_surface = collision.intersection;
       }
     }
     else
@@ -1009,7 +1009,7 @@ public:
     
     Spectral3 total_weight{1.};
     
-    RaySurfaceIntersection intersection;
+    RaySurfaceIntersection &intersection = collision.intersection;
     IterateIntersectionsBetween iter{collision.segment, scene};
     
     for (int interfaces_crossed=0; interfaces_crossed < MAX_ITERATIONS; ++interfaces_crossed)
@@ -1022,9 +1022,9 @@ public:
       const auto &medium_smpl = collision.smpl = medium.SampleInteractionPoint(segment, sampler, context);
       total_weight *= medium_smpl.weight;
       
-      const bool did_not_interact = medium_smpl.t >= segment.length;
+      const bool did_not_interact_w_medium = medium_smpl.t >= segment.length;
       const bool hit_invisible_wall = hit && &GetShaderOf(intersection,scene) == &scene.GetInvisibleShader();
-      bool cont = did_not_interact && hit_invisible_wall;
+      bool cont = did_not_interact_w_medium && hit_invisible_wall;
       
       if (volume_pdf_coeff)
       {
@@ -1044,7 +1044,6 @@ public:
         collision.smpl.weight = total_weight;
         collision.segment.length = iter.GetT();
         collision.smpl.t = prev_t + medium_smpl.t;
-        collision.hit = intersection.hitid;
         return;
       }
       

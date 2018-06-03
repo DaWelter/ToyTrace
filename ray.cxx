@@ -69,9 +69,3 @@ RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySeg
 //   const auto &mat = scene->GetMaterialOf(hitid);
 //   return mat.emitter;
 // }
-
-Float2 SurfaceInteraction::GetTexCoords() const
-{
-  // TODO Implement me
-  return Float2{0.,0.};
-}

@@ -16,8 +16,10 @@ class Texture
 public:
   Texture(const boost::filesystem::path &filename);
 
-  RGB GetTexel(float u, float v) const
+  RGB GetTexel(Float2 uv) const
   {
+    float u = uv[0];
+    float v = uv[1];
     float dummy;
     u = std::modf(u, &dummy);
     v = std::modf(v, &dummy);

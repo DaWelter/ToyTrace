@@ -11,6 +11,15 @@
 
 #include <boost/optional/optional.hpp>
 
+// Uh ... in global namespace. I should probably change that ...
+constexpr auto Epsilon = std::numeric_limits<double>::epsilon();
+constexpr auto Pi      = double(3.14159265358979323846264338327950288419716939937510);
+constexpr auto Infinity= std::numeric_limits<double>::infinity();
+constexpr auto LargeNumber = std::numeric_limits<double>::max()/16;
+constexpr auto NaN = std::numeric_limits<double>::quiet_NaN();
+constexpr auto UnitSphereSurfaceArea = 4.*Pi;
+constexpr auto UnitHalfSphereSurfaceArea = 2.*Pi;
+
 
 template<class T, int d>
 class Vec : public Eigen::Matrix<T, d, 1>
@@ -251,14 +260,36 @@ inline Eigen::Array<T,M,1> Take(const Eigen::Array<T,N,1>& u, const Eigen::Array
 }
 
 
-
-constexpr auto Epsilon = std::numeric_limits<double>::epsilon();
-constexpr auto Pi      = double(3.14159265358979323846264338327950288419716939937510);
-constexpr auto Infinity= std::numeric_limits<double>::infinity();
-constexpr auto LargeNumber = std::numeric_limits<double>::max()/16;
-constexpr auto NaN = std::numeric_limits<double>::quiet_NaN();
-constexpr auto UnitSphereSurfaceArea = 4.*Pi;
-constexpr auto UnitHalfSphereSurfaceArea = 2.*Pi;
+// From Cartesian to spherical coordinates. Y is up.
+template<class Derived>
+inline auto ToSphericalCoordinates(const Eigen::MatrixBase<Derived> &xyz)
+{
+  using Scalar = typename Eigen::internal::traits<Derived>::Scalar;
+  
+  const Scalar x = xyz[0];
+  const Scalar y = xyz[1];
+  const Scalar z = xyz[2];
+  const Scalar ax = std::abs(x);
+  const Scalar az = std::abs(z);
+  const Scalar r = xyz.norm();
+  Scalar theta = std::acos(y/r);
+  Scalar phi;
+  if (ax > az)
+  {
+    phi = std::atan2(z,ax);
+    phi = (x > 0.) ? phi : Pi - phi;
+  }
+  else
+  {
+    phi = std::atan2(x,az);
+    phi = (z > 0.) ? Pi/2.-phi : 3./2.*Pi + phi;
+  }
+  // To UV
+  theta /= Pi;
+  phi   /= 2.*Pi;
+  theta = 1.-theta;  
+  return Eigen::Matrix<Scalar,2,1>{theta, phi};
+}
 
 
 #endif

@@ -60,7 +60,7 @@ struct SurfaceInteraction : public InteractionPoint
   HitId hitid;
   Double3 geometry_normal;
   Double3 smooth_normal;
-  Float2 GetTexCoords() const;
+  Float2 tex_coord;
   
   SurfaceInteraction(const HitId &hitid);
   SurfaceInteraction() = default;
