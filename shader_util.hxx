@@ -21,6 +21,8 @@ struct PathContext
   {}
   Index3 lambda_idx {};
   TransportType transport { RADIANCE };
+  int pixel_x = {-1};
+  int pixel_y = {-1};
 };
 
 

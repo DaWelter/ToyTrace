@@ -734,6 +734,7 @@ public:
     
     auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
     PathContext context{lambda_selection.first, TransportType::RADIANCE};
+    std::tie(context.pixel_x, context.pixel_y) = scene.GetCamera().UnitToPixel(pixel_index);
     PathContext light_context{context}; light_context.transport = IMPORTANCE;
     MediumTracker medium_tracker{scene};
     
