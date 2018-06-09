@@ -388,7 +388,6 @@ private:
   ROI::TotalEnvironmentalRadianceField envlight;
 protected:
   NewLightPicker light_picker;
-  //ROI::PointEmitterArray::Response sensor_connection_response;
   int sensor_connection_unit = {};
 public:
   RadianceEstimatorBase(const Scene &_scene, const AlgorithmParameters &algo_params = AlgorithmParameters{})
@@ -477,7 +476,7 @@ public:
       return result;
 
     RaySegment &segment_to_light = result.segment = CalculateSegmentToTarget(eye_node, light_node);
-
+      
     Spectral3 scatter_factor = Evaluate(eye_node, segment_to_light, eye_context, pdf_source);
     Spectral3 target_scatter_factor = Evaluate(light_node, segment_to_light.Reversed(), light_context, pdf_target);
 
@@ -906,7 +905,7 @@ public:
 
   bool RouletteTerminationAllowedAtLength(int n)
   {
-    static constexpr int MIN_NODE_COUNT = 3;
+    static constexpr int MIN_NODE_COUNT = 5;
     return n > MIN_NODE_COUNT;
   }
   
