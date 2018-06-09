@@ -106,4 +106,7 @@ inline std::pair<Float3, float> Spheres::Get(int i) const
 }
 
 
+void FillPosBoundsTriangle(SurfaceInteraction &interaction, const Float3 &p0, const Float3 &p1, const Float3 &p2);
+void FillPosBoundsSphere(SurfaceInteraction &interaction);
+
 #endif

@@ -128,6 +128,7 @@ void Mesh::GetLocalGeometry(SurfaceInteraction& ia) const
   assert  (ia.pos.allFinite());
   assert  (ia.geometry_normal.allFinite());
   assert  (ia.smooth_normal.allFinite());
+  FillPosBoundsTriangle(ia, vertices.row(a), vertices.row(b), vertices.row(c));
 }
 
 
@@ -150,7 +151,6 @@ double Mesh::Area(int index) const
   const Float3 n(Cross(vertices.row(b)-vertices.row(a),vertices.row(c)-vertices.row(a)));
   return 0.5*Length(n);
 }
-
 
 
 void AppendSingleTriangle(
@@ -214,4 +214,24 @@ void Spheres::GetLocalGeometry(SurfaceInteraction& ia) const
   ia.geometry_normal = Normalized(ia.hitid.barry);
   ia.smooth_normal = ia.geometry_normal;
   ia.pos = (center.cast<double>() + ia.hitid.barry);
+  FillPosBoundsSphere(ia);
+}
+
+
+//////////////////////////////////////////////////////////////////////
+void FillPosBoundsTriangle(SurfaceInteraction &interaction, const Float3 &p0, const Float3 &p1, const Float3 &p2)
+{
+  // Compute the position error bounds, according to PBRT Chpt 3.9, pg. 227
+  auto b = interaction.hitid.barry.cast<float>();
+  interaction.pos_bounds =
+    ((p0*b[0]).cwiseAbs() +
+     (p1*b[1]).cwiseAbs() +
+     (p2*b[2]).cwiseAbs())*Gamma<float>(7);
+}
+
+
+void FillPosBoundsSphere(SurfaceInteraction &interaction)
+{
+  // PBRT. pg.225 Chpt. 3
+  interaction.pos_bounds = interaction.pos.cast<float>().cwiseAbs()*Gamma<float>(5); 
 }

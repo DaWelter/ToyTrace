@@ -68,6 +68,7 @@ struct SurfaceInteraction : public InteractionPoint
   Double3 geometry_normal;
   Double3 smooth_normal;
   Float2 tex_coord;
+  Float3 pos_bounds; // Bounds within which the true hitpoint (computed without roundoff errors) lies. See PBRT chapt 3.
   
   SurfaceInteraction(const HitId &hitid);
   SurfaceInteraction() = default;

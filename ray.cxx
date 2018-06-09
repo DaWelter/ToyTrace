@@ -50,12 +50,7 @@ RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySeg
 
 Double3 AntiSelfIntersectionOffset(const SurfaceInteraction &interaction, const Double3 &exitant_dir)
 {
-  static constexpr float EXPERIMENTALLY_DETERMINED_MAGIC_NUMBER = 16.f;
-  const auto pos = interaction.pos.cast<float>();
   const auto normal = interaction.geometry_normal;
-  float val = pos.cwiseAbs().maxCoeff();
-  float eps = EXPERIMENTALLY_DETERMINED_MAGIC_NUMBER*
-              val*std::numeric_limits<float>::epsilon();
-  assert(eps > 0.f);
-  return eps * (Dot(exitant_dir, normal) > 0. ? 1. : -1.) * normal;
+  const auto delta = Dot(interaction.pos_bounds, normal.cast<float>().cwiseAbs());
+  return delta*(Dot(exitant_dir, normal) > 0. ? 1. : -1.)*normal;
 }

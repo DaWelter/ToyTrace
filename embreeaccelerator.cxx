@@ -130,6 +130,10 @@ void EmbreeAccelerator::FirstIntersectionTriangle(const RTCHit &rthit, const Ray
   intersection.geometry_normal[1] = rthit.Ng_y;
   intersection.geometry_normal[2] = rthit.Ng_z;
   Normalize(intersection.geometry_normal);
+  
+  const auto &mesh = static_cast<const Mesh&>(*hit.geom);
+  const auto tri = mesh.vert_indices.row(hit.index);
+  FillPosBoundsTriangle(intersection, mesh.vertices.row(tri[0]), mesh.vertices.row(tri[1]), mesh.vertices.row(tri[2]));
 }
 
 
@@ -139,13 +143,13 @@ void EmbreeAccelerator::FirstIntersectionSphere(const RTCHit &rthit, const Ray &
   HitId &hit = intersection.hitid;
   Float3 delta; delta << rthit.Ng_x, rthit.Ng_y, rthit.Ng_z;
   Normalize(delta);
-  
   Float3 pos; float radius; std::tie(pos, radius) = spheres->Get(rthit.primID);
   intersection.pos = (pos + radius*delta).cast<double>();
   hit.barry = delta.cast<double>();
   intersection.geometry_normal = hit.barry;
   intersection.smooth_normal = intersection.geometry_normal;
   intersection.tex_coord = ToSphericalCoordinates(delta);
+  FillPosBoundsSphere(intersection);
 }
 
 
