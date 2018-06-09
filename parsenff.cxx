@@ -448,6 +448,21 @@ void NFFParser::Parse(Scope &scope)
       continue;
     }
     
+    if (!strcmp(token, "specularpurerefractive"))
+    {
+      double ior_ratio = 1.;
+      char name[LINESIZE];
+      int num = std::sscanf(line.c_str(), "specularpurerefractive %s %lg\n", name, &ior_ratio);
+      if (num == 2)
+      {
+        InsertAndActivate(name, scope,
+          std::make_unique<SpecularPureRefractiveShader>(ior_ratio));
+      }
+      else throw MakeException("Error");
+      continue;
+    }
+    
+    
     if (!strcmp(token, "speculardensedielectric"))
     {
       RGB diffuse_coeff;

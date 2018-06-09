@@ -259,6 +259,50 @@ Spectral3 SpecularTransmissiveDielectricShader::EvaluateBSDF(const Double3 &reve
 
 
 
+SpecularPureRefractiveShader::SpecularPureRefractiveShader(double _ior_ratio) : Shader{}, ior_ratio{_ior_ratio}
+{
+
+}
+
+
+ScatterSample SpecularPureRefractiveShader::SampleBSDF(const Double3& reverse_incident_dir, const RaySurfaceIntersection& surface_hit, Sampler& sampler, const PathContext& context) const
+{
+  ScatterSample smpl;
+  double shn_dot_i = std::abs(Dot(surface_hit.shading_normal, reverse_incident_dir));
+  bool entering = Dot(surface_hit.geometry_normal, reverse_incident_dir) > 0.;
+  double eta_i_over_t = entering ? 1./ior_ratio  : ior_ratio; // eta_i refers to ior on the side of the incomming random walk! 
+    
+  double radiance_weight = (context.transport==RADIANCE) ? Sqr(eta_i_over_t) : 1.;
+  
+  boost::optional<Double3> wt = Refracted(reverse_incident_dir, surface_hit.shading_normal, eta_i_over_t);
+  
+  if (!wt) // Total reflection. Neglected!
+  {
+    smpl.value = {0.};
+    smpl.pdf_or_pmf = Pdf::MakeFromDelta(1.);
+    smpl.coordinates = reverse_incident_dir;
+    return smpl;
+  }
+  smpl.coordinates = *wt;
+  smpl.pdf_or_pmf = Pdf::MakeFromDelta(1.);
+  if (OnSameSide(reverse_incident_dir, surface_hit, *wt))
+    smpl.value = Spectral3{0.}; // Should be on other side of geometric surface, but we are not!
+  else
+  {
+    smpl.value = Spectral3{-1./Dot(*wt, surface_hit.shading_normal)*radiance_weight};
+  }
+  return smpl;
+}
+
+
+Spectral3 SpecularPureRefractiveShader::EvaluateBSDF(const Double3& reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext& context, double* pdf) const
+{
+  if (pdf)
+    *pdf = 0.;
+  return Spectral3{0.};
+}
+
+
 
 namespace MicrofacetDetail
 {
