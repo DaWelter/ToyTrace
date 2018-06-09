@@ -43,6 +43,13 @@ struct RaySegment
   }
 };
 
+inline void MoveOrg(RaySegment &seg, float t)
+{
+  seg.ray.org += seg.ray.dir;
+  seg.length -= t;
+}
+
+
 
 inline std::ostream &operator<<(std::ostream &o,const Ray &ray)
 { o << "Ray[" << ray.org << "+t*" << ray.dir << "]"; return o; }
@@ -89,15 +96,4 @@ struct VolumeInteraction : public InteractionPoint
 };
 
 
-inline Double3 AntiSelfIntersectionOffset(const SurfaceInteraction &interaction, const Double3 &exitant_dir)
-{
-  static constexpr float EXPERIMENTALLY_DETERMINED_MAGIC_NUMBER = 512.f;
-  const auto pos = interaction.pos.cast<float>();
-  const auto normal = interaction.geometry_normal;
-  float val = pos.cwiseAbs().maxCoeff();
-  float eps = EXPERIMENTALLY_DETERMINED_MAGIC_NUMBER*
-              val*std::numeric_limits<float>::epsilon();
-  assert(eps > 0.f);
-  return eps * (Dot(exitant_dir, normal) > 0. ? 1. : -1.) * normal;
-}
-
+Double3 AntiSelfIntersectionOffset(const SurfaceInteraction &interaction, const Double3 &exitant_dir);

@@ -12,7 +12,7 @@
 inline RaySegment MakeSegmentAt(const RaySurfaceIntersection &intersection, const Double3 &ray_dir, float eps_factor)
 {
   float val = intersection.pos.cwiseAbs().maxCoeff();
-  float eps = eps_factor*(val - std::nextafter(val, 0.f));
+  float eps = eps_factor*std::numeric_limits<float>::epsilon()*val;
   assert(eps > 0.f);
   return RaySegment{
     {intersection.pos + eps*AlignedNormal(intersection.geometry_normal, ray_dir), ray_dir},

@@ -47,25 +47,15 @@ RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySeg
   assert(LengthSqr(shading_normal)>0.9);
 }
 
-// const Shader& SurfaceInteraction::GetShader() const
-// {
-//   assert(scene && hitid);
-//   const auto &mat = scene->GetMaterialOf(hitid);
-//   return scene->GetShader(mat.shader_index);
-// }
-// 
-// 
-// const Medium& SurfaceInteraction::GetMedium() const
-// {
-//   assert(scene && hitid);
-//   const auto &mat = scene->GetMaterialOf(hitid);
-//   return scene->GetMedium(mat.medium_index);  
-// }
-// 
-// 
-// const RadianceOrImportance::AreaEmitter* SurfaceInteraction::GetEmitter() const
-// {
-//   assert(scene && hitid);
-//   const auto &mat = scene->GetMaterialOf(hitid);
-//   return mat.emitter;
-// }
+
+Double3 AntiSelfIntersectionOffset(const SurfaceInteraction &interaction, const Double3 &exitant_dir)
+{
+  static constexpr float EXPERIMENTALLY_DETERMINED_MAGIC_NUMBER = 16.f;
+  const auto pos = interaction.pos.cast<float>();
+  const auto normal = interaction.geometry_normal;
+  float val = pos.cwiseAbs().maxCoeff();
+  float eps = EXPERIMENTALLY_DETERMINED_MAGIC_NUMBER*
+              val*std::numeric_limits<float>::epsilon();
+  assert(eps > 0.f);
+  return eps * (Dot(exitant_dir, normal) > 0. ? 1. : -1.) * normal;
+}

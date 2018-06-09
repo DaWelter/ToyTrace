@@ -180,27 +180,16 @@ void EmbreeAccelerator::SphereIntersectFunc(const RTCIntersectFunctionNArguments
   
   Eigen::Map<const Eigen::Vector3f> ray_dir{&rtray.dir_x};
   Eigen::Map<const Eigen::Vector3f> ray_org{&rtray.org_x};
-//   Float3 ray_org{
-//     RTCRayN_org_x(rtrayn, 1, 0),
-//     RTCRayN_org_y(rtrayn, 1, 0),
-//     RTCRayN_org_z(rtrayn, 1, 0)};
-//   Float3 ray_dir{
-//     RTCRayN_dir_x(rtrayn, 1, 0),
-//     RTCRayN_dir_y(rtrayn, 1, 0),
-//     RTCRayN_dir_z(rtrayn, 1, 0)};
-
   Float3 sphere_p; float sphere_r; std::tie(sphere_p, sphere_r) = spheres->Get(args->primID);  
   Float3 v = ray_org - sphere_p;
   const float A = Dot(ray_dir,ray_dir);
   const float B = 2.0f*Dot(v,ray_dir);
   const float C = Dot(v,v) - Sqr(sphere_r);
-  const float D = B*B - 4.0f*A*C;
-  if (D < 0.0f) return;
-  const float Q = std::sqrt(D);
-  const float rcpA = Rcp(A);
-  const float t0 = 0.5f*rcpA*(-B-Q);
-  const float t1 = 0.5f*rcpA*(-B+Q);
-
+  float t0, t1;
+  std::tie(t0, t1) = Quadratic(A, B, C);
+  if (std::isnan(t0))
+    return;
+  
   RTCHit potentialHit;
   potentialHit.u = 0.0f;
   potentialHit.v = 0.0f;

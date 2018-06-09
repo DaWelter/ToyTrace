@@ -43,14 +43,34 @@ inline T Sign(const T &x)
 }
 
 
-// Straight from PBRT
-static constexpr double MachineEpsilon =
-  std::numeric_limits<double>::epsilon() * 0.5;
-
 // Also from PBRT. Used to compute error bounds for floating point arithmetic. See pg. 216.
-inline constexpr double Gamma(int n) {
-    return (n * MachineEpsilon) / (1 - n * MachineEpsilon);
+template<class T>
+inline constexpr T Gamma(int n) {
+    constexpr T eps_half = std::numeric_limits<T>::epsilon();
+    return (n * eps_half) / (1 - n * eps_half);
 }
+
+
+template<class T>
+inline std::pair<T,T> Quadratic(T a, T b, T c)
+{
+  //from PBRT pg. 1080
+  const T d = b*b - T(4)*a*c;
+  if (d < T(0))
+    return std::pair<T,T>(
+      std::numeric_limits<T>::quiet_NaN(),
+      std::numeric_limits<T>::quiet_NaN());
+  const T sd = std::sqrt(d);
+  const T q = b<0 ? -b+sd : -b-sd;
+  T t0 = q/T(2)/a;
+  T t1 = T(2)*c/q;
+  if (t0 > t1)
+    std::swap(t0 ,t1);
+  return std::make_pair(t0, t1);
+}
+
+
+
 
 namespace strconcat_internal
 {
