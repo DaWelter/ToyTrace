@@ -206,25 +206,31 @@ Spectral3 Combined::Evaluate(const Double3& reverse_indcident_dir, const Double3
 SimpleCombined::SimpleCombined(const Spectral3& weight1, const PhaseFunction& pf1, const Spectral3& weight2, const PhaseFunction& pf2)
   : pf{&pf1, &pf2}, weights{ weight1, weight2}
 {
-  double select_prob_normalization = 0;
+  double select_prob_normalization = 0.;
   Spectral3 weight_normalization{0.};
   for (int i=0; i<NUM_CONSTITUENTS; ++i)
   {
-    assert((weights[i] > 0.).all());
     selection_probability[i] = weights[i].sum();
     select_prob_normalization += selection_probability[i];
     weight_normalization += weights[i];
   }
-  assert(select_prob_normalization>0.);
-  assert((weight_normalization>0.).all());
-  select_prob_normalization = 1./select_prob_normalization;
-  weight_normalization = 1./weight_normalization;
-  for (int i=0; i<NUM_CONSTITUENTS; ++i)
+  if (select_prob_normalization>0.)
   {
-    selection_probability[i] *= select_prob_normalization;
-    weights[i] *= weight_normalization;
+    assert((weight_normalization>0.).all());
+    select_prob_normalization = 1./select_prob_normalization;
+    weight_normalization = 1./weight_normalization;
+    for (int i=0; i<NUM_CONSTITUENTS; ++i)
+    {
+      selection_probability[i] *= select_prob_normalization;
+      weights[i] *= weight_normalization;
+    }
+    // Weights now sum to one component wise.
   }
-  // Weights now sum to one component wise.
+  else
+  {
+    for (int i=0; i<NUM_CONSTITUENTS; ++i)
+      selection_probability[i] = 1./NUM_CONSTITUENTS;
+  }
 }
 
 
