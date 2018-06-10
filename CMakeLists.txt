@@ -61,9 +61,9 @@ target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE} ${Boost_
 
 add_executable(tests tests.cxx tests3.cxx tests_sampling.cxx ${Cubature_DIR}/hcubature.c ${SOURCES})
 add_executable(tests2 tests2.cxx)
-add_executable(determine_ray_offset_experimentally determine_ray_offset_experimentally.cxx ${SOURCES})
+#add_executable(determine_ray_offset_experimentally determine_ray_offset_experimentally.cxx ${SOURCES})
 
-foreach(EXE tests tests2 determine_ray_offset_experimentally)
+foreach(EXE tests tests2) # determine_ray_offset_experimentally)
   target_include_directories(${EXE} PUBLIC ${GTEST_INCLUDE_DIRS} ${Cubature_DIR})
   target_link_libraries(${EXE} ${GTEST_LIBRARIES}  ${Boost_FILESYSTEM_LIBRARY_RELEASE} pthread)
 endforeach()
