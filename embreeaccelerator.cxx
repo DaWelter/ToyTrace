@@ -165,6 +165,12 @@ void EmbreeAccelerator::SphereBoundsFunc(const struct RTCBoundsFunctionArguments
   bounds_o->upper_x = pos[0]+radius;
   bounds_o->upper_y = pos[1]+radius;
   bounds_o->upper_z = pos[2]+radius;
+  bounds_o->lower_x = std::nextafter(bounds_o->lower_x, -std::numeric_limits<float>::infinity());
+  bounds_o->lower_y = std::nextafter(bounds_o->lower_y, -std::numeric_limits<float>::infinity());
+  bounds_o->lower_z = std::nextafter(bounds_o->lower_z, -std::numeric_limits<float>::infinity());
+  bounds_o->upper_x = std::nextafter(bounds_o->upper_x,  std::numeric_limits<float>::infinity());
+  bounds_o->upper_y = std::nextafter(bounds_o->upper_y,  std::numeric_limits<float>::infinity());
+  bounds_o->upper_z = std::nextafter(bounds_o->upper_z,  std::numeric_limits<float>::infinity());
 }
 
 

@@ -45,6 +45,17 @@ Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_
   // The lowest point gives the largest collision coefficients along the path.
   auto lowest_point = geometry.ComputeLowestPointAlong(segment);
   double altitude = geometry.ComputeAltitude(lowest_point);
+  if (altitude < 0.)
+  {
+    // It can totallly happen that the origin here lies below the surface.
+    // It happens when a scattering event is located below the surface due
+    // to roundoff errors. The intersection point of a nearby surface will
+    // also be computed to lie below the surface.
+    smpl.t = 0;
+    smpl.weight = Spectral3{0.};
+    return smpl;
+  }
+    
   double sigma_t_majorant = constituents.ComputeSigmaTMajorante(altitude, context.lambda_idx);
   if (sigma_t_majorant <= 0.)
   {
@@ -102,6 +113,12 @@ Spectral3 AtmosphereTemplate<ConstituentDistribution_, Geometry_>::EvaluateTrans
   // The lowest point gives the largest collision coefficients along the path.
   auto lowest_point = geometry.ComputeLowestPointAlong(segment);
   double lowest_altitude = geometry.ComputeAltitude(lowest_point);
+  if (lowest_altitude < 0.)
+  {
+    estimate = Spectral3{0.};
+    return estimate;
+  }
+  
   double sigma_t_majorant = constituents.ComputeSigmaTMajorante(lowest_altitude, context.lambda_idx);
   if (sigma_t_majorant <= 0.)
     return estimate;
