@@ -76,18 +76,18 @@ bool EmbreeAccelerator::FirstIntersection(const Ray &ray, double tnear, double &
   rtray.dir_y = ray.dir[1];
   rtray.dir_z = ray.dir[2];
   rtray.time = 0.;
-  rtray.tfar = std::numeric_limits<float>::infinity();
+  rtray.tfar = static_cast<float>(ray_length);
   rtray.mask = -1;
   rtray.id = 0;
   rtray.flags = 0;
   RTCHit &rthit = rtrayhit.hit;
   rthit.geomID = RTC_INVALID_GEOMETRY_ID;
   rthit.primID = RTC_INVALID_GEOMETRY_ID;
-  rthit.instID[0] = RTC_INVALID_GEOMETRY_ID;
-  
+  rthit.instID[0] = RTC_INVALID_GEOMETRY_ID; 
   rtcIntersect1(rtscene, &context, &rtrayhit);
   if (rthit.geomID == RTC_INVALID_GEOMETRY_ID)
     return false;
+  assert(rtray.tfar > rtray.tnear);
   ray_length = rtray.tfar;
   const Geometry* prim = (const Geometry*)rtcGetGeometryUserData(rtcGetGeometry(rtscene, rthit.geomID));
   intersection.hitid.geom = prim;
@@ -189,11 +189,14 @@ void EmbreeAccelerator::SphereIntersectFunc(const RTCIntersectFunctionNArguments
   ASSERT_NORMALIZED(ray_dir);
   const float A = 1.f; //Dot(ray_dir,ray_dir);
   const float B = 2.0f*Dot(v,ray_dir);
-  const float Berr = DotAbs(v, ray_dir)*Gamma<float>(3);
   const float C = Dot(v,v) - Sqr(sphere_r);
+  const float Berr = DotAbs(v, ray_dir)*Gamma<float>(3);
   const float Cerr = (2.f*Dot(v,v) + Sqr(sphere_r))*Gamma<float>(3);
   float t0, t1, err0, err1;
   const bool has_solution = Quadratic(A, B, C, 0.f, Berr, Cerr, t0, t1, err0, err1);
+//   float t0, t1;
+//   float err0 = 0.f, err1 = 0.f;
+//   const bool has_solution = Quadratic(A, B, C, t0, t1);
   if (!has_solution)
     return;
   RTCHit potentialHit;
@@ -265,6 +268,8 @@ void EmbreeAccelerator::SphereIntersectFunc(const RTCIntersectFunctionNArguments
     else
       rtray.tfar = old_t;
   }
+  
+  assert(rtray.tfar > rtray.tnear);
 }
 
 
