@@ -45,7 +45,7 @@ Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_
   // The lowest point gives the largest collision coefficients along the path.
   auto lowest_point = geometry.ComputeLowestPointAlong(segment);
   double altitude = geometry.ComputeAltitude(lowest_point);
-  if (altitude < 0.)
+  if (altitude < GetLowerAltitudeCutoff())
   {
     // It can totallly happen that the origin here lies below the surface.
     // It happens when a scattering event is located below the surface due
@@ -113,7 +113,7 @@ Spectral3 AtmosphereTemplate<ConstituentDistribution_, Geometry_>::EvaluateTrans
   // The lowest point gives the largest collision coefficients along the path.
   auto lowest_point = geometry.ComputeLowestPointAlong(segment);
   double lowest_altitude = geometry.ComputeAltitude(lowest_point);
-  if (lowest_altitude < 0.)
+  if (lowest_altitude < GetLowerAltitudeCutoff())
   {
     estimate = Spectral3{0.};
     return estimate;
@@ -358,8 +358,13 @@ inline double Lerp(double x0, double x1, double f)
 void TabulatedConstituents::ComputeCollisionCoefficients(double altitude, Spectral3& sigma_s, Spectral3& sigma_a, const Index3& lambda_idx) const
 {
   double real_index = RealTableIndex(altitude);
+  if (real_index >= static_cast<double>(AltitudeTableSize()-1)) // Compare in double because overflow
+  {
+    sigma_a = sigma_s = Spectral3::Zero();
+    return;
+  }
   int idx = real_index; // Cutting the fractional part amounts to going to the grid site which is lower in altitude.
-  if (idx >= 0 && idx < AltitudeTableSize()-1)
+  if (idx >= 0)
   {
     double f = real_index - idx; // The fractional part.
     sigma_s = Lerp(this->sigma_s[AEROSOLES][idx], this->sigma_s[AEROSOLES][idx+1], f, lambda_idx) + 
@@ -367,17 +372,13 @@ void TabulatedConstituents::ComputeCollisionCoefficients(double altitude, Spectr
     sigma_a = Lerp(this->sigma_t[idx], this->sigma_t[idx+1], f, lambda_idx);
     sigma_a -= sigma_s;
   }
-  else if (idx < 0)
+  else
   {
     sigma_s = Take(this->sigma_s[AEROSOLES][0], lambda_idx) +
               Take(this->sigma_s[MOLECULES][0], lambda_idx);
     sigma_a = Take(this->sigma_t[0], lambda_idx);
     sigma_a -= sigma_s;
   }
-  else
-  {
-    sigma_a = sigma_s = Spectral3::Zero();
-  }  
 }
 
 

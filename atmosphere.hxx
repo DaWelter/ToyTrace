@@ -30,6 +30,7 @@ private:
   PhaseFunctions::HenleyGreenstein phasefunction_hg;
   PhaseFunctions::Rayleigh phasefunction_rayleigh;
   inline const PhaseFunctions::PhaseFunction& GetPhaseFunction(int idx) const;
+  inline double GetLowerAltitudeCutoff() const { return constituents.lower_altitude_cutoff; }
   
 public:
   AtmosphereTemplate(const Geometry &geometry_, const ConstituentDistribution &constituents_, int _priority);
