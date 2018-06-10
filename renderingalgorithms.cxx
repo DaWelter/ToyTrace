@@ -16,16 +16,34 @@ double UpperBoundToBoundingBoxDiameter(const Scene &scene)
 
 bool IterateIntersectionsBetween::Next(RaySegment &seg, RaySurfaceIntersection &intersection)
 {
+#if 0
   tfar = this->seg.length;
-  using Real = float;
-  auto factor = Real(1)+std::numeric_limits<Real>::epsilon(); // TODO: correct this mess eventually if using only float (?)
-  auto offset_tnear = factor*tnear;
+  auto offset_tnear = 0; 
+  // Not clear how to set the offset because the uncertainty tnear is known if it stems from a previous intersection.
+  // This is because the accuracy of tfar as computed by Embree is unkown. Maybe it is as found in PBRT pg  234. But
+  // still in order to compute that I would have to need all the data about the triangles and do a lot of redundant
+  // computation, essentially having to implement my own ray-triangle intersection routine.
+  // Moreover, Embree reports intersection where tfar<tnear!
+  // Therefore this approach is not feasible.
   bool hit = scene.FirstIntersectionEmbree(this->seg.ray, offset_tnear, tfar, intersection);
   seg.ray = this->seg.ray;
   seg.ray.org += tnear*this->seg.ray.dir;
   seg.length = tfar - tnear;
   tnear = tfar;
   return hit;
+#else
+  // Embree does not appear to report intersections where tfar<0 though. 
+  // So like in my previous approach, I let the origin jump to the last intersection point.
+  seg.ray.org = this->current_org;
+  seg.ray.dir = this->original_seg.ray.dir;
+  seg.length = this->original_seg.length-current_dist;
+  bool hit = scene.FirstIntersectionEmbree(seg.ray, 0., seg.length, intersection);
+  auto offset = AntiSelfIntersectionOffset(intersection, this->original_seg.ray.dir);
+  this->current_org = intersection.pos + offset;
+  // The distance taken so far is computed by projection of intersection point.
+  this->current_dist = Dot(this->current_org-this->original_seg.ray.org, this->original_seg.ray.dir);
+  return hit;
+#endif
 }
 
 

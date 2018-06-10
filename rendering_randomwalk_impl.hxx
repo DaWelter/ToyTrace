@@ -30,15 +30,21 @@ double UpperBoundToBoundingBoxDiameter(const Scene &scene);
 
 class IterateIntersectionsBetween
 {
-  const RaySegment seg;
+#if 0
+  RaySegment seg;
   double tnear, tfar;
+#else
+  const RaySegment original_seg;
+  Double3 current_org;
+  double current_dist;
+#endif
   const Scene &scene;
 public:
   IterateIntersectionsBetween(const RaySegment &seg, const Scene &scene)
-    : seg{seg}, tnear{0.}, tfar{seg.length}, scene{scene}
+    : original_seg{seg}, current_org{seg.ray.org}, current_dist{0.}, scene{scene}
   {}
   bool Next(RaySegment &seg, RaySurfaceIntersection &intersection);
-  double GetT() const { return tnear; }
+  double GetT() const { return current_dist; }
 };
 
 
@@ -487,6 +493,7 @@ public:
     MaybeHandlePassageThroughSurface(eye_node, segment_to_light.ray.dir, medium_tracker);
     
     auto transmittance = TransmittanceEstimate(segment_to_light, medium_tracker, eye_context, volume_pdf_coeff);
+    //Spectral3 transmittance{1.};
 
     bool is_wrt_solid_angle = eye_node.node_type == RW::NodeType::ENV || light_node.node_type == RW::NodeType::ENV;
     double r2_factor = is_wrt_solid_angle ? 1. : 1./Sqr(segment_to_light.length);
