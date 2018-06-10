@@ -52,24 +52,75 @@ inline constexpr T Gamma(int n) {
 
 
 template<class T>
-inline std::pair<T,T> Quadratic(T a, T b, T c)
+inline bool Quadratic(T a, T b, T c, float &t0, float &t1)
 {
   //from PBRT pg. 1080
   const T d = b*b - T(4)*a*c;
   if (d < T(0))
-    return std::pair<T,T>(
-      std::numeric_limits<T>::quiet_NaN(),
-      std::numeric_limits<T>::quiet_NaN());
+    return false;
   const T sd = std::sqrt(d);
   const T q = b<0 ? -b+sd : -b-sd;
-  T t0 = q/T(2)/a;
-  T t1 = T(2)*c/q;
+  t0 = q/T(2)/a;
+  t1 = T(2)*c/q;
   if (t0 > t1)
     std::swap(t0 ,t1);
-  return std::make_pair(t0, t1);
+  return true;
 }
 
 
+namespace quadratic_internal
+{
+
+template<class T>
+inline T Errorformula1(T A, T B, T C, T D, T sD, T eA, T eB, T eC)
+{
+  constexpr T eps = std::numeric_limits<T>::epsilon();
+  const T xi = B<T(0) ? T(1) : T(-1);
+  const T G = B-xi*sD;
+  const T Ainv = T(1)/A;
+  const T sDinv = T(1)/sD;
+  const T E1 = std::abs(G*Ainv) + T(3)/T(4)*std::abs(sD*Ainv) + std::abs(C*sDinv) + std::abs(B*B*Ainv*sDinv)/T(4);
+  const T E2 = eA*std::abs((C*xi*Ainv*sDinv - G*Ainv*Ainv/T(2))) + eB/T(2)*std::abs(Ainv*(B*xi*sDinv-T(1))) + eC*std::abs(sDinv);
+  return eps*E1 + E2;
+}
+
+template<class T>
+inline T Errorformula2(T A, T B, T C, T D, T sD, T eA, T eB, T eC)
+{
+  constexpr T eps = std::numeric_limits<T>::epsilon();
+  const T xi = B<T(0) ? T(1) : T(-1);
+  const T G = B - xi*sD;
+  const T sDinv = T(1)/sD;
+  const T GGsDinv = T(1)/(G*G*sD);
+  const T E1 = std::abs(GGsDinv)*(T(4)*std::abs(C*G*sD) + T(3)*std::abs(C*D) + T(4)*std::abs(A*C*C) + std::abs(B*B*C));
+  const T E2 = std::abs(GGsDinv)*(eA*T(4)*std::abs(C*C)+ T(2)*eB*std::abs(C*(B*xi - sD)) + eC*std::abs((T(4)*A*C*xi - T(2)*G*sD)));
+  return eps*E1 + E2;
+}
+
+};
+
+
+template<class T>
+inline bool Quadratic(T a, T b, T c, T ea, T eb, T ec, T &t0, T &t1, T &err0, T &err1)
+{
+  using namespace quadratic_internal;
+  //from PBRT pg. 1080
+  const T d = b*b - T(4)*a*c;
+  if (d < T(0))
+    return false;
+  const T sd = std::sqrt(d);
+  err0 = Errorformula1(a, b, c, d, sd, ea, eb, ec);
+  err1 = Errorformula2(a, b, c, d, sd, ea, eb, ec);
+  const T q = b<0 ? -b+sd : -b-sd;
+  t0 = q/T(2)/a;
+  t1 = T(2)*c/q;
+  if (t0 > t1)
+  {
+    std::swap(t0 ,t1);
+    std::swap(err0, err1);
+  }
+  return true;
+}
 
 
 namespace strconcat_internal

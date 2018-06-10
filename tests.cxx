@@ -80,6 +80,31 @@ TEST(TestMath, OrthogonalSystemZAligned)
 }
 
 
+TEST(TestMath, Quadratic)
+{
+  float a = 1;
+  float b = 100;
+  float c = 1;
+  float t0, t1, e0, e1;
+  ASSERT_TRUE(Quadratic<float>(a, b, c, 0, 0, 0, t0, t1, e0, e1));
+  std::cout << t0 << " " << t1 << " " << e0 << " " << e1 << std::endl;
+  EXPECT_NEAR(t0, -99.99f, 1.e-4);
+  EXPECT_NEAR(t1, -0.010001f, 1.e-7);
+  EXPECT_NEAR(e0, 3.57604003511369e-5f, 1.e-10);
+  EXPECT_NEAR(e1, 3.57675622453257e-9f, 1.e-15);
+  ASSERT_TRUE(Quadratic<float>(a, b, c, 0.1, 0, 0, t0, t1, e0, e1));
+  std::cout << e0 << " " << e1 << std::endl;
+  EXPECT_NEAR(e0, 10.0000362396240, 1.e-4);
+  EXPECT_NEAR(e1, 1.03616784485894e-7, 1.e-10);
+  ASSERT_TRUE(Quadratic<float>(a, b, c, 0, 1, 0, t0, t1, e0, e1));
+  std::cout << e0 << " " << e1 << std::endl;
+  EXPECT_NEAR(e0, 1.00013589859009, 1.e-7);
+  EXPECT_NEAR(e1, 0.000100033619673923, 1.e-10);
+  ASSERT_TRUE(Quadratic<float>(a, b, c, 0, 0, 0.1, t0, t1, e0, e1));
+  std::cout << e0 << " " << e1 << std::endl;
+  EXPECT_NEAR(e0, 0.00103596039116383, 1.e-9);
+  EXPECT_NEAR(e1, 0.00100020365789533, 1.e-9);
+}
 
 
 TEST(Spectral, RGBConversion)

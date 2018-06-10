@@ -186,21 +186,23 @@ void EmbreeAccelerator::SphereIntersectFunc(const RTCIntersectFunctionNArguments
   Eigen::Map<const Eigen::Vector3f> ray_org{&rtray.org_x};
   Float3 sphere_p; float sphere_r; std::tie(sphere_p, sphere_r) = spheres->Get(args->primID);  
   Float3 v = ray_org - sphere_p;
-  const float A = Dot(ray_dir,ray_dir);
+  ASSERT_NORMALIZED(ray_dir);
+  const float A = 1.f; //Dot(ray_dir,ray_dir);
   const float B = 2.0f*Dot(v,ray_dir);
+  const float Berr = DotAbs(v, ray_dir)*Gamma<float>(3);
   const float C = Dot(v,v) - Sqr(sphere_r);
-  float t0, t1;
-  std::tie(t0, t1) = Quadratic(A, B, C);
-  if (std::isnan(t0))
+  const float Cerr = (2.f*Dot(v,v) + Sqr(sphere_r))*Gamma<float>(3);
+  float t0, t1, err0, err1;
+  const bool has_solution = Quadratic(A, B, C, 0.f, Berr, Cerr, t0, t1, err0, err1);
+  if (!has_solution)
     return;
-  
   RTCHit potentialHit;
   potentialHit.u = 0.0f;
   potentialHit.v = 0.0f;
   potentialHit.instID[0] = args->context->instID[0];
   potentialHit.geomID = spheres->identifier;
   potentialHit.primID = primID;
-  if ((rtray.tnear < t0) & (t0 < rtray.tfar))
+  if ((rtray.tnear < t0-err0) & (t0+err0 < rtray.tfar))
   {
     int imask;
     bool mask = 1;
@@ -232,7 +234,7 @@ void EmbreeAccelerator::SphereIntersectFunc(const RTCIntersectFunctionNArguments
       rtray.tfar = old_t;
   }
 
-  if ((rtray.tnear < t1) & (t1 < rtray.tfar))
+  if ((rtray.tnear < t1-err1) & (t1+err1 < rtray.tfar))
   {
     int imask;
     bool mask = 1;

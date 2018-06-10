@@ -155,6 +155,12 @@ auto Dot(const Eigen::MatrixBase<Derived1> &u, const Eigen::MatrixBase<Derived2>
   return u.dot(v);
 }
 
+template<class Derived1, class Derived2>
+auto DotAbs(const Eigen::MatrixBase<Derived1> &u, const Eigen::MatrixBase<Derived2> &v )
+{
+  return (u.array()*v.array()).abs().sum();
+}
+
 template<class Derived>
 auto Length(const Eigen::MatrixBase<Derived> &a)
 {
