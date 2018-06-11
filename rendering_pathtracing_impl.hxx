@@ -204,7 +204,7 @@ class BackupAndReplace
     // On the other hand,
     // If the other side has zero vertices, then this is the path that did the random walk to hit the light.
     // It's forward pdf should be set to 1, and the reverse pdf to the angular emission density.
-    assert ((one_or_angular_emission_pdf==1.) ^ (one_or_start_position_pdf==1.));
+    //assert ((one_or_angular_emission_pdf==1.) ^ (one_or_start_position_pdf==1.));
     pdf = h.pdfs[node_index+1];
     pdf_rev = h.pdfs[node_index+1];
     fwd_conversion_factor = h.fwd_conversion_factors[node_index+1];
