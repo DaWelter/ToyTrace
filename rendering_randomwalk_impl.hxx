@@ -179,9 +179,11 @@ public:
     const double nl = scene.GetNumLights();
     const double ne = scene.GetNumEnvLights();
     const double na = arealight_refs.size();
-    const double prob_pick_env_light = ne/(nl+ne+na);
-    const double prob_pick_area_light = na/(nl+ne+na);
-    emitter_type_selection_probabilities = { prob_pick_env_light, prob_pick_area_light, 1.-prob_pick_area_light-prob_pick_env_light };
+    // Why do I need to initialize like this to not get a negative number in IDX_PROB_POINT?
+    // I mean when nl is zero and I assign an initializer list, the last entry is going to be like -something.e-42. Why???
+    emitter_type_selection_probabilities[IDX_PROB_ENV] = ne/(nl+ne+na);
+    emitter_type_selection_probabilities[IDX_PROB_AREA] = na/(nl+ne+na);
+    emitter_type_selection_probabilities[IDX_PROB_POINT] = nl/(nl+ne+na);
   }
   
 public:
@@ -977,6 +979,7 @@ public:
     static constexpr int MAX_ITERATIONS = 100; // For safety, in case somethign goes wrong with the intersections ...
     Spectral3 result{1.};
     RaySurfaceIntersection intersection;
+    seg.length *= 0.99999; // Dammit!
     IterateIntersectionsBetween iter{seg, scene};
     for (int n = 0; n < MAX_ITERATIONS; ++n)
     {
@@ -1047,6 +1050,8 @@ public:
       }
       else
       {
+        if (!hit)
+          intersection = RaySurfaceIntersection{};
         collision.smpl.weight = total_weight;
         collision.segment.length = iter.GetT();
         collision.smpl.t = prev_t + medium_smpl.t;

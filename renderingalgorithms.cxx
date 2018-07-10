@@ -37,12 +37,21 @@ bool IterateIntersectionsBetween::Next(RaySegment &seg, RaySurfaceIntersection &
   seg.ray.org = this->current_org;
   seg.ray.dir = this->original_seg.ray.dir;
   seg.length = this->original_seg.length-current_dist;
-  bool hit = scene.FirstIntersectionEmbree(seg.ray, 0., seg.length, intersection);
-  auto offset = AntiSelfIntersectionOffset(intersection, this->original_seg.ray.dir);
-  this->current_org = intersection.pos + offset;
-  // The distance taken so far is computed by projection of intersection point.
-  this->current_dist = Dot(this->current_org-this->original_seg.ray.org, this->original_seg.ray.dir);
-  return hit;
+  if (seg.length > 0)
+  {
+    bool hit = scene.FirstIntersectionEmbree(seg.ray, 0, seg.length, intersection);
+    if (hit)
+    {
+      auto offset = AntiSelfIntersectionOffset(intersection, this->original_seg.ray.dir);
+      this->current_org = intersection.pos + offset;
+      // The distance taken so far is computed by projection of intersection point.
+      this->current_dist = Dot(this->current_org-this->original_seg.ray.org, this->original_seg.ray.dir);
+      return hit;
+    }
+    else
+      this->current_dist = this->original_seg.length; // Done!
+  }
+  return false;
 #endif
 }
 

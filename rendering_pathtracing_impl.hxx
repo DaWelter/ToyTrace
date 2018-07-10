@@ -69,6 +69,7 @@ public:
     segments.push_back(RaySegment{}); // For convenience
     fwd_conversion_factors.push_back(1.);
     bwd_conversion_factors.push_back(1.);
+    assert(_start_pdf > 0 && std::isfinite(_start_pdf)); // Because it is the sample. So the probability to generate it must be positive!
   }
   
   void AddSegment(const RW::PathNode &end_node, const Spectral3 &_weight, Pdf pdf_prev_scatter, Pdf pdf_prev_rev_scatter, const VolumePdfCoefficients &volume_pdf_coeff, const RaySegment &segment)
@@ -87,6 +88,9 @@ public:
     vol_coeff = BackwardPdfCoefficient(nodes[idx-1], volume_pdf_coeff);
     geom_coeff = randomwalk_functions.PdfConversionFactorForTarget(nodes[idx], nodes[idx-1], segments[idx], false);
     bwd_conversion_factors.push_back(vol_coeff * geom_coeff);      
+    assert(pdf_prev_scatter > 0 && std::isfinite(pdf_prev_scatter)); // Because it is the sample. So the probability to generate it must be positive!
+    assert(geom_coeff > 0);
+    assert(vol_coeff > 0);
   }
   
   void Finish()
