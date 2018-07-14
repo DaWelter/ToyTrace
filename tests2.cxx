@@ -17,6 +17,7 @@
 #include "vec3f.hxx"
 #include "util.hxx"
 #include "very_strong_typedef.hxx"
+#include "span.hxx"
 
 
 TEST(BasicAssumptions, InheritCtor)
@@ -744,6 +745,10 @@ TEST(Boost, VariantPolymorphic)
   ASSERT_ANY_THROW(boost::polymorphic_get<JustDataDerived>(data_storage).b); // Boom. Query inactive type.
 }
 
+//////////////////////////////////////////////
+// Formating 
+//////////////////////////////////////////////
+
 
 TEST(StrFormat, Test)
 {
@@ -751,6 +756,27 @@ TEST(StrFormat, Test)
   EXPECT_EQ(strformat("%%%", 1), "%1");
   EXPECT_EQ(strformat("nothing"), "nothing");
   EXPECT_EQ(strformat("%bar%", "foo", "baz"), "foobarbaz");
+}
+
+//////////////////////////////////////////////
+// Span test
+//////////////////////////////////////////////
+
+TEST(Span, Test)
+{
+  std::vector<int> things { 1, 2, 3, 4 };
+  Span<int> span = AsSpan(things);
+  span[0] = 42;
+  EXPECT_EQ(span[3], 4);
+  
+  // Force use of const T version.
+  auto f = [](const std::vector<int> &v) -> Span<const int>
+  {
+    return AsSpan(v);
+  };
+  auto span2 = f(things);
+  EXPECT_EQ(span2[0], 42);
+  //span2[0] = 42; Expectedly, does not compile.
 }
 
 //////////////////////////////////////////////
