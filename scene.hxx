@@ -94,6 +94,7 @@ class Scene
   std::vector<std::unique_ptr<Medium>> media;
   std::vector<std::unique_ptr<EnvironmentalRadianceField>> envlights;
   std::vector<std::unique_ptr<Light>> lights; // point lights
+  std::vector<std::unique_ptr<Texture>> textures;
   Box boundingBox;
   
 public:

@@ -71,4 +71,42 @@ double TotalEnvironmentalRadianceField::EvaluatePdf(const Double3& dir_out, cons
     return pdf_sum * selection_probability;
 }
 
+
+
+EnvMapLight::EnvMapLight(const Texture* _texture, const Double3 &_up_dir)
+  : texture{_texture}
+{
+  frame = OrthogonalSystemZAligned(_up_dir);
+  int num_pixels = texture->Height()*texture->Width();
+  cmf.resize(num_pixels);
+}
+
+DirectionalSample EnvMapLight::TakeDirectionSample(Sampler &sampler, const PathContext &context) const
+{
+    auto dir_out = frame * SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
+    auto pdf = EvaluatePdf(dir_out, context);
+    auto col = Evaluate(dir_out, context);
+    DirectionalSample s {
+      dir_out,
+      col,
+      pdf };
+    return s;
+}
+
+Spectral3 EnvMapLight::Evaluate(const Double3 &dir_out, const PathContext &context) const
+{
+  auto uv = ToSphericalCoordinates(frame.transpose()*dir_out);
+  RGB col = texture->GetTexel(uv.cast<float>());
+  return Color::RGBToSpectralSelection(col, context.lambda_idx);
+}
+
+double EnvMapLight::EvaluatePdf(const Double3 &dir_out, const PathContext &context) const
+{
+  return 1./UnitSphereSurfaceArea;
+}
+
+
+
+
+
 } // namespace 

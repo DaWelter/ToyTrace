@@ -2,6 +2,7 @@
 
 #include "vec3f.hxx"
 #include "util.hxx"
+#include "span.hxx"
 
 #include <cmath>
 #include <random>
@@ -113,6 +114,13 @@ inline int TowerSampling(const T *probs, T r)
   }
   return n;
 }
+
+
+// template<class T>
+// inline int TowerSamplingBisect(Span<const T> cmf)
+// {
+//   
+// };
 
 
 namespace OnlineVariance

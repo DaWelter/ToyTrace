@@ -18,6 +18,7 @@ class Medium;
 class Camera;
 class Sampler;
 class Geometry;
+class Texture;
 
 namespace RadianceOrImportance {
 class AreaEmitter;

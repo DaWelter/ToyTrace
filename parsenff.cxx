@@ -687,6 +687,24 @@ void NFFParser::Parse(Scope &scope)
     }
   
   
+  if (!strcmp(token, "lenv"))
+  {
+    Double3 dir_up;
+    char name[LINESIZE];
+    int num = std::sscanf(line.c_str(), "lenv  %lg %lg %lg %s", &dir_up[0], &dir_up[1], &dir_up[2], name);
+    if (num == 4)
+    {
+      auto path = MakeFullPath(name);
+      auto tex = std::make_unique<Texture>(path);
+      scene->envlights.push_back(std::make_unique<EnvMapLight>(tex.get(), dir_up));
+      scene->textures.push_back(std::move(tex));
+    }
+    else
+      throw MakeException("Error");
+    continue;
+  }
+  
+  
   if (!strcmp(token, "larea"))
   {
     char name[LINESIZE];

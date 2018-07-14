@@ -293,7 +293,7 @@ inline auto ToSphericalCoordinates(const Eigen::MatrixBase<Derived> &xyz)
   // To UV
   theta /= Pi;
   phi   /= 2.*Pi;
-  theta = 1.-theta;  
+  theta = (1.-theta)*0.5;
   return Eigen::Matrix<Scalar,2,1>{theta, phi};
 }
 

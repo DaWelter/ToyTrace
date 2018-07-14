@@ -231,6 +231,19 @@ public:
 };
 
 
+class EnvMapLight : public EnvironmentalRadianceField
+{
+  Eigen::Matrix3d frame;
+  const Texture* texture;
+  ToyVector<float> cmf; // Cumulative (probability) mass function. 1 value per pixel. Row major order.
+public:
+  EnvMapLight(const Texture* _texture, const Double3 &_up_dir);
+  DirectionalSample TakeDirectionSample(Sampler &sampler, const PathContext &context) const override;
+  Spectral3 Evaluate(const Double3 &dir_out, const PathContext &context) const override;
+  double EvaluatePdf(const Double3 &dir_out, const PathContext &context) const override;
+};
+
+
 // It is super large and super far away so it is best modeled as angular distribution of radiance.
 class Sun : public EnvironmentalRadianceField
 {
