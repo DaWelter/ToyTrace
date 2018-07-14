@@ -38,6 +38,8 @@ struct very_strong_typedef : public \
     T* operator &() { return &value_; }
     const T* operator& () const { return &value_; }
      
+    explicit operator T() const { return value_; }
+     
     strong_type& operator+=(const strong_type& rhs)
     {
         value_+=rhs.value_; 
