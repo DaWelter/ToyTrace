@@ -280,3 +280,20 @@ inline T ASSERT_NOT_NULL(T x, typename std::enable_if<std::is_pointer<T>::value>
   assert(x != nullptr);
   return x;
 }
+
+
+// Adapted from http://the-witness.net/news/2012/11/scopeexit-in-c11/
+template <typename F>
+struct ScopeExit {
+    ScopeExit(F f) : f(f) {}
+    ~ScopeExit() { f(); }
+    F f;
+};
+
+template <typename F>
+ScopeExit<F> MakeScopeExit(F f) {
+    return ScopeExit<F>(f);
+};
+
+#define SCOPE_EXIT(code) \
+    auto scope_exit_ ## __LINE__ = MakeScopeExit([=](){ code })
