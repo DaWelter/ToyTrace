@@ -712,6 +712,52 @@ m testing/scenes/cornelbox.dae
 }
 
 
+class TextureLoadTest : public testing::Test
+{
+protected:
+  void CompareTexture(const Texture &tex, int w, int h, const ToyVector<RGB> &expected)
+  {
+    ASSERT_EQ(tex.Width() , w);
+    ASSERT_EQ(tex.Height() , h);
+    for (int y=0; y<tex.Height(); ++y) 
+    {
+    for (int x=0; x<tex.Width(); ++x)
+    {
+      RGB tex_col = tex.GetPixel(x, y);
+      RGB expected_col = expected[y*tex.Width()+x];
+      std::cerr << strformat("<%, %, %>", tex_col[0], tex_col[1], tex_col[2])  << ", ";
+      EXPECT_TRUE(((tex_col-expected_col).abs() < 1.e-3_rgb).all());
+    }
+    std::cerr << "\n";
+    }
+  }
+};
+
+
+TEST_F(TextureLoadTest, UCharSingleChn)
+{
+  ToyVector<RGB> expected {
+    { 1._rgb, 1._rgb, 1._rgb }, { 0._rgb, 0._rgb, 0._rgb },
+    { 0._rgb, 0._rgb, 0._rgb }, { 1._rgb, 1._rgb, 1._rgb },
+    { 0._rgb, 0._rgb, 0._rgb }, { 0._rgb, 0._rgb, 0._rgb },
+    { 0._rgb, 0._rgb, 0._rgb }, { 0._rgb, 0._rgb, 0._rgb },
+    { 0._rgb, 0._rgb, 0._rgb }, { 0._rgb, 0._rgb, 0._rgb }
+  };
+  CompareTexture(Texture("testing/scenes/texloadtest1.png"), 2, 5, expected);
+}
+
+
+TEST_F(TextureLoadTest, Float3Chn)
+{
+  ToyVector<RGB> expected {
+    { 10._rgb, 9._rgb, 8._rgb }  , { 0._rgb, 0._rgb, 0._rgb },
+    { 0._rgb, 0._rgb, 0._rgb }   , { 1._rgb, 1._rgb, 1._rgb },
+    { 0._rgb, 0._rgb, 0._rgb }   , { 0._rgb, 0._rgb, 0._rgb },
+    { 0._rgb, 0._rgb, 0._rgb }   , { 0._rgb, 0._rgb, 0._rgb },
+    { 0._rgb, 0._rgb, 0._rgb }   , { 0._rgb, 0._rgb, 0._rgb }
+  };
+  CompareTexture(Texture("testing/scenes/texloadtest2.exr"), 2, 5, expected);
+}
 
 
 namespace Atmosphere

@@ -4,6 +4,7 @@
 #include"image.hxx"
 #include"vec3f.hxx"
 #include"spectral.hxx"
+#include"util.hxx"
 
 namespace boost { namespace filesystem { 
   class path;
@@ -12,11 +13,27 @@ namespace boost { namespace filesystem {
 
 class Texture
 {
-	Image bm;
+  ToyVector<std::uint8_t> data;
+  int w, h;
+  // Always 3 channels
+  enum Type {
+    BYTE, // 1 byte per channel
+    FLOAT // 4 byte per channel, data really contains floats
+  } type;
+ 
+  //void MakeDefaultImage();
+  void ReadFile(const std::string &filename);
+ 
 public:
   Texture(const boost::filesystem::path &filename);
+  
+  int Width() const { return w; }
+  
+  int Height() const { return h; }
 
-  RGB GetTexel(Float2 uv) const
+  inline RGB GetPixel(int x, int y) const;
+  
+  inline RGB GetTexel(Float2 uv) const
   {
     float u = uv[0];
     float v = uv[1];
@@ -27,18 +44,36 @@ public:
     if (v < 0.f) v = 1. + v;
     if (u > 1.f - Epsilon) u -= Epsilon;
     if (v > 1.f - Epsilon) v -= Epsilon;
-    int x = u * bm.width();
-    int y = v * bm.height();
-    y = bm.height() - y - 1.f;
-    //x = bm.width() - x - 1; // Nope. I don't think this is it.
-    auto rgb = bm.get_pixel_uc3(x, y);
-    RGB c;
-    c[0] = Color::SRGBToLinear(Color::RGBScalar(std::get<0>(rgb) / 255.0));
-    c[1] = Color::SRGBToLinear(Color::RGBScalar(std::get<1>(rgb) / 255.0));
-    c[2] = Color::SRGBToLinear(Color::RGBScalar(std::get<2>(rgb) / 255.0));
-    //c = (Color::SRGBToRGBMatrix()*c.matrix()).array();
-    return c;
+    int x = u * w;
+    int y = v * h;
+    y = h - y - 1.f;
+    return GetPixel(x, y);
   }
 };
+
+
+inline RGB Texture::GetPixel(int x, int y) const
+{
+  constexpr int num_channels = 3;
+  const int idx = (y * w + x)*num_channels;
+  if (type == BYTE)
+  {
+    return RGB{
+      Color::SRGBToLinear(Color::RGBScalar(data[idx  ] / 255.0)),
+      Color::SRGBToLinear(Color::RGBScalar(data[idx+1] / 255.0)),
+      Color::SRGBToLinear(Color::RGBScalar(data[idx+2] / 255.0))
+    };
+  }
+  else
+  {
+    const auto* pix = reinterpret_cast<const float*>(&data[idx*sizeof(float)]);
+    return RGB{
+      Color::RGBScalar{pix[0]},
+      Color::RGBScalar{pix[1]},
+      Color::RGBScalar{pix[2]}
+    };
+  }
+}
+
 
 #endif

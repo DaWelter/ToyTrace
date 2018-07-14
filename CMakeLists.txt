@@ -36,6 +36,8 @@ find_path(Embree_INCLUDE_DIR
     /usr/local/include)
 find_library(Embree_LIBRARY NAMES libembree3)
 message(STATUS "Embree: ${Embree_INCLUDE_DIR}, ${Embree_LIBRARY}")
+find_library(OPENIMAGEIO_LIBRARY NAMES openimageio OpenImageIO)
+message(STATUS "OpenImageIO: ${OPENIMAGEIO_LIBRARY}")
 
 set(Cubature_DIR "external/cubature")
 
@@ -51,7 +53,7 @@ find_path(Rapidjson_INCLUDE_DIR
 message(STATUS "Rapidjson: ${Rapidjson_INCLUDE_DIR}")
 
 include_directories(${PNG_INCLUDE_DIR} ${JPEG_INCLUDE_DIR} ${CImg_INCLUDE_DIR} ${Rapidjson_INCLUDE_DIR} ${Embree_INCLUDE_DIR})
-link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSIMP_LIBRARY} ${X11_LIBRARIES} ${Embree_LIBRARY})
+link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSIMP_LIBRARY} ${X11_LIBRARIES} ${Embree_LIBRARY} ${OPENIMAGEIO_LIBRARY})
 
 set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx
             phasefunctions.cxx atmosphere.cxx spectral.cxx primitive.cxx renderingalgorithms.cxx 
