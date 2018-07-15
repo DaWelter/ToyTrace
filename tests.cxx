@@ -865,6 +865,89 @@ TEST(Misc, Sample)
 }
 
 
+//////////////////////////////////////////////
+/// Bisection test
+//////////////////////////////////////////////
+
+
+TEST(Bisection, Search)
+{
+  std::vector<float> vals{
+    1., 3., 9., 10.
+  };
+  EXPECT_EQ(BisectionSearch<float>(AsSpan(vals), 0.5), 0);
+  EXPECT_EQ(BisectionSearch<float>(AsSpan(vals), 1.5), 1);
+  EXPECT_EQ(BisectionSearch<float>(AsSpan(vals), 9.5), 3);
+  EXPECT_EQ(BisectionSearch<float>(AsSpan(vals), 11), 4);
+}
+
+
+TEST(TowerSampling, ComputeCumSum)
+{
+  std::vector<float> vals{
+    1,3,3,2,1
+  };
+  TowerSamplingComputeNormalizedCumSum(AsSpan(vals));
+  EXPECT_NEAR(vals[0], 1./10., 1.e-4);
+  EXPECT_NEAR(vals[1], 4./10., 1.e-3);
+  EXPECT_NEAR(vals[2], 7./10., 1.e-3);
+  EXPECT_NEAR(vals[3], 9./10., 1.e-3);
+  EXPECT_NEAR(vals[4], 1., 1.e-3);
+}
+
+
+//////////////////////////////////////////////
+/// UV projection
+//////////////////////////////////////////////
+
+TEST(Projections, UvToSpherical)
+{
+  Float2 uv{0.1f, 0.2f};
+  Float2 angles = Projections::UvToSpherical(uv);
+  Float2 uv_back = Projections::SphericalToUv(angles);
+  EXPECT_NEAR(uv[0], uv_back[0], 1.e-4);
+  EXPECT_NEAR(uv[1], uv_back[1], 1.e-4);
+}
+
+TEST(Projections, KartesianToSpherical2)
+{
+  const float phi = Pi*0.4;
+  const float theta = Pi*0.2;
+  Float2 angles{phi, theta};
+  Float3 dir = Projections::SphericalToUnitKartesian(angles);
+  Float2 angles_back = Projections::KartesianToSpherical(dir);
+  EXPECT_NEAR(phi, angles_back[0], 1.e-4);
+  EXPECT_NEAR(theta, angles_back[1], 1.e-4);
+}
+
+TEST(Projections, KartesianToSpherical1)
+{
+  Float3 dir;
+  dir = Projections::SphericalToUnitKartesian(Float2{0.,0.});
+  EXPECT_NEAR(dir[0], 0., 1.e-4);
+  EXPECT_NEAR(dir[1], 0., 1.e-4);
+  EXPECT_NEAR(dir[2], 1., 1.e-4);
+  dir = Projections::SphericalToUnitKartesian(Float2{0.,Pi*0.5});
+  EXPECT_NEAR(dir[0], 1., 1.e-4);
+  EXPECT_NEAR(dir[1], 0., 1.e-4);
+  EXPECT_NEAR(dir[2], 0., 1.e-4);
+}
+
+//////////////////////////////////////////////
+/// Grid Indices
+//////////////////////////////////////////////
+
+TEST(GridIndices, RowMajor2d)
+{
+  int x = 3, y = 4, w = 5, h = 9;
+  int offset = RowMajorOffset(x, y, w, h);
+  std::tie(x, y) = RowMajorPixel(offset, w, h);
+  EXPECT_EQ(x, 3);
+  EXPECT_EQ(y, 4);
+}
+
+
+//////////////////////////////////////////////
 int main(int argc, char **argv) {
     testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

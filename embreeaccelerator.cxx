@@ -148,7 +148,7 @@ void EmbreeAccelerator::FirstIntersectionSphere(const RTCHit &rthit, const Ray &
   hit.barry = delta.cast<double>();
   intersection.geometry_normal = hit.barry;
   intersection.smooth_normal = intersection.geometry_normal;
-  intersection.tex_coord = ToSphericalCoordinates(delta);
+  intersection.tex_coord = Projections::SphericalToUv(Projections::KartesianToSpherical(delta));
   FillPosBoundsSphere(intersection);
 }
 

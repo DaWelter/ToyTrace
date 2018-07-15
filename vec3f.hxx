@@ -237,18 +237,19 @@ template<class Derived>
 Eigen::Matrix<typename Eigen::internal::traits<Derived>::Scalar, 3,3> 
 inline OrthogonalSystemZAligned(const Eigen::MatrixBase<Derived> &_Z)
 {
-  Eigen::Matrix<typename Eigen::internal::traits<Derived>::Scalar, 3 ,3> m;
+  using Scalar = typename Eigen::internal::traits<Derived>::Scalar;
+  Eigen::Matrix<Scalar, 3 ,3> m;
   auto Z = m.col(2);
   auto X = m.col(0);
   auto Y = m.col(1);
   Z = _Z;
   ASSERT_NORMALIZED(Z);
   // Listing 3 in Duff et al. (2017) "Building an Orthonormal Basis, Revisited".
-  float sign = std::copysignf(1.0f, Z[2]);
-  const float a = -1.0f / (sign + Z[2]);
-  const float b = Z[0] * Z[1] * a;
-  X = Double3(1.0f + sign * Z[0] * Z[0] * a, sign * b, -sign * Z[0]);
-  Y = Double3(b, sign + Z[1] * Z[1] * a, -Z[1]);
+  Scalar sign = std::copysignf(Scalar(1.0f), Z[2]);
+  const Scalar a = Scalar(-1.0) / (sign + Z[2]);
+  const Scalar b = Z[0] * Z[1] * a;
+  X = Eigen::Matrix<Scalar,3,1>(Scalar(1.0f) + sign * Z[0] * Z[0] * a, sign * b, -sign * Z[0]);
+  Y = Eigen::Matrix<Scalar,3,1>(b, sign + Z[1] * Z[1] * a, -Z[1]);
   return m;
 }
 
@@ -265,16 +266,39 @@ inline Eigen::Array<T,M,1> Take(const Eigen::Array<T,N,1>& u, const Eigen::Array
   return ret;
 }
 
+namespace Projections
+{
 
-// From Cartesian to spherical coordinates. Y is up.
+template<class T>
+inline auto UvToSpherical(const Eigen::Matrix<T,2,1> &uv)
+{
+  using Scalar = T;
+  const Scalar theta = uv[1]*Scalar(Pi);
+  const Scalar phi   = uv[0]*Scalar(2.*Pi);
+  return Eigen::Matrix<T,2,1>{phi, theta};
+}
+
+template<class T>
+inline auto SphericalToUv(const Eigen::Matrix<T,2,1> &angles)
+{
+  using Scalar = T;
+  const Scalar theta = angles[1];
+  const Scalar phi = angles[0];
+  assert(theta >= 0 && theta <= Pi);  
+  const Scalar u = phi/Scalar(2.*Pi);
+  const Scalar v = theta/Scalar(Pi);
+  return Eigen::Matrix<Scalar,2,1>{u, v};
+}
+
+
+// From Cartesian to spherical coordinates. Z is up.
 template<class Derived>
-inline auto ToSphericalCoordinates(const Eigen::MatrixBase<Derived> &xyz)
+inline auto KartesianToSpherical(const Eigen::MatrixBase<Derived> &xyz)
 {
   using Scalar = typename Eigen::internal::traits<Derived>::Scalar;
-  
   const Scalar x = xyz[0];
-  const Scalar y = xyz[1];
-  const Scalar z = xyz[2];
+  const Scalar z = xyz[1];
+  const Scalar y = xyz[2];  // Because I'm dump, here, y is up.
   const Scalar ax = std::abs(x);
   const Scalar az = std::abs(z);
   const Scalar r = xyz.norm();
@@ -290,11 +314,25 @@ inline auto ToSphericalCoordinates(const Eigen::MatrixBase<Derived> &xyz)
     phi = std::atan2(x,az);
     phi = (z > 0.) ? Pi/2.-phi : 3./2.*Pi + phi;
   }
-  // To UV
-  theta /= Pi;
-  phi   /= 2.*Pi;
-  theta = (1.-theta)*0.5;
-  return Eigen::Matrix<Scalar,2,1>{theta, phi};
+  return Eigen::Matrix<Scalar,2,1>{phi, theta};
+}
+
+
+template<class Derived>
+inline auto SphericalToUnitKartesian(const Eigen::MatrixBase<Derived> &angles)
+{
+  using Scalar = typename Eigen::internal::traits<Derived>::Scalar;
+  const Scalar theta = angles[1];
+  const Scalar phi   = angles[0];
+  const Scalar z = std::cos(theta);
+  Scalar r = std::sqrt(Scalar(1)-z*z);
+  r = std::isnan(r) ? 0. : r;
+  const Scalar x = r*std::cos(phi);
+  const Scalar y = r*std::sin(phi);
+  return Eigen::Matrix<Scalar,3,1>{x,y,z};
+}
+
+
 }
 
 

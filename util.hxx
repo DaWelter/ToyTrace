@@ -297,3 +297,16 @@ ScopeExit<F> MakeScopeExit(F f) {
 
 #define SCOPE_EXIT(code) \
     auto scope_exit_ ## __LINE__ = MakeScopeExit([=](){ code })
+
+    
+inline int RowMajorOffset(int x, int y, int size_x, int size_y)
+{
+  return x + y*size_x;
+}
+
+inline std::pair<int, int> RowMajorPixel(int offset, int size_x, int size_y)
+{
+  int y = offset / size_x;
+  int x = offset - y*size_x;
+  return std::make_pair(x,y);
+}

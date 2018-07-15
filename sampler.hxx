@@ -14,6 +14,7 @@ Double3 ToUniformDisc(Double2 r);
 Double3 ToUniformSphere(Double2 r);
 Double3 ToUniformHemisphere(Double2 r);
 Double3 ToUniformSphereSection(double cos_opening_angle, Double2 r);
+Double3 ToUniformSphereSection(Double2 r, double phi0, double z0, double phi1, double z1);
 Double3 ToCosHemisphere(Double2 r);
 Double3 ToPhongHemisphere(Double2 r, double alpha);
 Double3 ToBeckmanHemisphere(Double2 r, double alpha);
@@ -116,11 +117,62 @@ inline int TowerSampling(const T *probs, T r)
 }
 
 
-// template<class T>
-// inline int TowerSamplingBisect(Span<const T> cmf)
-// {
-//   
-// };
+template<class T>
+inline int BisectionSearch(Span<const T> vals, T r)
+{
+  //         p0       (p0+p1)       (p0+p1+p2) ...                   (p0+...+pn-1==1)
+  // |  i=0   |    i=1   |      i=2      |     ...   |        i=n-1          |
+  //          0          1               2                                  n-1
+  assert (vals.size() > 0);
+  if (r < vals[0])
+    return 0;
+  if (r >= vals[vals.size()-1])
+    return vals.size();
+  int first = 0;
+  int last = vals.size()-1;
+  while (last > first+1)
+  {
+    int center = (first+last)/2;
+    if  (r<vals[center])
+      last = center;
+    else
+      first = center;
+  }
+  // r is now known to be between the values for first and last.
+  return last;
+};
+
+
+template<class T>
+inline int TowerSamplingBisection(Span<const T> cmf, T r)
+{
+  int upper = BisectionSearch(cmf, r);
+  // E.g. if upper is zero, then r<p0, and we have to return upper to 
+  // indicate that the random sample has fallen into the zero-th bin.
+  upper = upper>=cmf.size() ? cmf.size()-1 : upper;
+  // But because of roundoff errors, it may be that r>cmf[cmf.size()-1] which should ideally be one. 
+  return upper;
+}
+
+template<class T>
+inline void TowerSamplingComputeNormalizedCumSum(Span<T> weights)
+{
+  for (int i=1; i<weights.size(); ++i)
+  {
+    weights[i] += weights[i-1];
+  }
+  T inv_sum = T(1)/weights[weights.size()-1];
+  for (int i=0; i<weights.size(); ++i)
+  {
+    weights[i] *= inv_sum;
+  }
+}
+
+template<class T>
+inline T TowerSamplingProbabilityFromCmf(Span<T> cmf, int idx)
+{
+  return cmf[idx] - (idx>0 ? cmf[idx-1] : T(0));
+}
 
 
 namespace OnlineVariance

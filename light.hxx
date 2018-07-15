@@ -233,9 +233,10 @@ public:
 
 class EnvMapLight : public EnvironmentalRadianceField
 {
-  Eigen::Matrix3d frame;
+  Eigen::Matrix3f frame;
   const Texture* texture;
-  ToyVector<float> cmf; // Cumulative (probability) mass function. 1 value per pixel. Row major order.
+  ToyVector<double> cmf; // Cumulative (probability) mass function. 1 value per pixel. Row major order.
+  std::pair<int,int> MapToImage(const Double3 &dir_out) const;
 public:
   EnvMapLight(const Texture* _texture, const Double3 &_up_dir);
   DirectionalSample TakeDirectionSample(Sampler &sampler, const PathContext &context) const override;

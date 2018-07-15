@@ -25,6 +25,24 @@ Double3 ToUniformSphere(Double2 r)
   return Double3{x,y,z};
 }
 
+
+// Modification of the above
+Double3 ToUniformSphereSection(Double2 r, double phi0, double z0, double phi1, double z1)
+{
+//   const double z0 = std::cos(theta0);
+//   const double z1 = std::cos(theta1);
+  const double z = z0 + r[1]*(z1 - z0);
+  double s = std::sqrt(1. - z*z);
+  s = std::isnan(s) ? 0. : s;
+  double omega = phi0 + (phi1-phi0)*r[0];
+  double sn = std::sin(omega);
+  double cs = std::cos(omega);
+  double x = cs*s;
+  double y = sn*s;
+  return Double3{x,y,z};
+}
+
+
 // That one is obvious isn't it.
 Double3 ToUniformHemisphere(Double2 r)
 {
