@@ -87,24 +87,6 @@ Double3 ToPhongHemisphere(Double2 r, double alpha)
 }
 
 
-/* Samples the Beckman microfacet distribution D(m) times |m . n|. 
- * The the surface normal n is assumed aligned with the z-axis.
- * Returns the half-angle vector m. 
- * Ref: Walter et al. (2007) "Microfacet Models for Refraction through Rough Surfaces" Eq. 28, 29.
- */
-Double3 ToBeckmanHemisphere(Double2 r, double alpha)
-{
-  double t1 = -alpha*alpha*std::log(r[0]);
-  double t = 1./(t1+1.);
-  double z = std::sqrt(t);
-  double rho = std::sqrt(1.-t);
-  double omega = 2.*Pi*r[1];
-  double sn = std::sin(omega);
-  double cs = std::cos(omega);
-  return Double3{cs*rho, sn*rho, z};
-}
-
-
 /* Ref: Total Compendium pg. 12 */
 Double3 ToTriangleBarycentricCoords(Double2 r)
 {

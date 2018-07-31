@@ -3,9 +3,50 @@
 #include "scene.hxx"
 #include "shader_util.hxx"
 
-namespace
+namespace ShadingInternal
 {
-inline Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Texture *tex, const RaySurfaceIntersection &surface_hit, const Index3 &lambda_idx)
+
+using Real = double;
+using Real2 = Vec<Real,2>;
+using Real3 = Vec<Real,3>;
+constexpr Real operator"" _r(long double d) { return Real(d); }
+constexpr Real operator"" _r(unsigned long long int d) { return Real(d); }
+static constexpr Real Pi_r = Real(::Pi);
+
+struct BackmanDistribution
+{
+  Real alpha; // aka. roughness
+  
+  // This formula is using the normalized distribution D(cs) 
+  // such that Int_omega D(cs) cs dw = 1, using the differential solid angle dw, 
+  // integrated over the hemisphere.
+  Real EvalByHalfVector(Real ns_dot_wh)
+  {
+    const Real cs = ns_dot_wh;
+    const Real t1 = (cs*cs-1._r)/(cs*cs*alpha*alpha);
+    const Real t2 = alpha*alpha*cs*cs*cs*cs*Pi_r;
+    return std::exp(t1)/t2;
+  }
+  
+  /* Samples the Beckman microfacet distribution D(m) times |m . n|. 
+  * The surface normal n is assumed to be aligned with the z-axis.
+  * Returns the half-angle vector m. 
+  * Ref: Walter et al. (2007) "Microfacet Models for Refraction through Rough Surfaces" Eq. 28, 29. */
+  Real3 SampleHalfVector(Real2 r)
+  {
+    const Real t1 = -alpha*alpha*std::log(r[0]);
+    const Real t = 1_r/(t1+1_r);
+    const Real z = std::sqrt(t);
+    const Real rho = std::sqrt(1_r-t);
+    const Real omega = 2_r*Pi_r*r[1];
+    const Real sn = std::sin(omega);
+    const Real cs = std::cos(omega);
+    return Real3{cs*rho, sn*rho, z};
+  }
+};
+
+
+Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Texture *tex, const RaySurfaceIntersection &surface_hit, const Index3 &lambda_idx)
 {
   Spectral3 ret{color};
   if (tex)
@@ -17,23 +58,23 @@ inline Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Textur
 }
 
 
-inline double MaybeMultiplyTextureLookup(double _value, const Texture *tex, const RaySurfaceIntersection &surface_hit)
+double MaybeMultiplyTextureLookup(double _value, const Texture *tex, const RaySurfaceIntersection &surface_hit)
 {
   if (tex)
   {
     RGB col = tex->GetPixel(UvToPixel(*tex, surface_hit.tex_coord));
-    _value *= (value(col[0])+value(col[1])+value(col[2]))/3.;
+    _value *= (value(col[0])+value(col[1])+value(col[2]))/3_r;
   }
   return _value;
 }
 
 
 template<class T>
-inline T SchlicksApproximation(const T &kspecular, double n_dot_dir)
+inline T SchlicksApproximation(const T &kspecular, Real n_dot_dir)
 {
   // Ref: Siggraph 2012 Course. "Background: Physics and Math of Shading (Naty Hoffman)"
   //      http://blog.selfshadow.com/publications/s2012-shading-course/hoffman/s2012_pbs_physics_math_notes.pdf
-  return kspecular + (1.-kspecular)*std::pow(1-n_dot_dir, 5.);
+  return kspecular + (1_r-kspecular)*std::pow(1_r-n_dot_dir, 5_r);
 }
 
 
@@ -42,14 +83,39 @@ inline T AverageOfProjectedSchlicksApproximationOverHemisphere(const T &kspecula
 {
   // Computes I= 1/Pi * Int_HalfSphere F_schlick(w)*cos(theta) dw
   // The average albedo of ideal specular reflection.
-  return kspecular + (1.-kspecular)*2./42.;
+  return kspecular + (1_r-kspecular)*2_r/42_r;
   // The 42 here is no joke. It comes out of Wolfram Alpha when ordered to compute:
   // integrate (1-cos(x))^5*cos(x)*sin(x) from 0 to pi/2
   // The factor two comes from the integration over the azimuthal angle.
 }
 
 
+Real HalfVectorPdfToExitantPdf(Real pdf_wh, Real wh_dot_in)
+{
+    Real out_direction_pdf = pdf_wh*0.25/(wh_dot_in+Epsilon); // From density of h_r to density of out direction.
+    return out_direction_pdf;
 }
+
+
+Real3 HalfVectorToExitant(const Real3 &h_r, const Real3 &reverse_incident_dir)
+{
+  double hr_dot_in = Dot(reverse_incident_dir, h_r);
+  // See walter 2007, eq. 38. // Should I use the "reflection" formula with the abs in it instead?
+  // However, for that case I haven't found the correct pdf transform for the outgoing direction yet ...
+//   if (hr_dot_in < 0.)
+//   {
+//     hr_dot_in = -hr_dot_in;
+//     h_r = -h_r;
+//   }
+  Double3 out_direction = 2.*hr_dot_in*h_r - reverse_incident_dir;
+//   if (hr_dot_in < 0.) // Only needed when using the "reflection" variant with std::abs in it.
+//     out_direction = Normalized(out_direction);
+  return out_direction;
+}
+
+}
+
+using namespace ShadingInternal;
 
 
 double Shader::Pdf(const Double3& incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext& context) const
@@ -333,6 +399,7 @@ MicrofacetShader::MicrofacetShader(
 }
 
 
+
 Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
   double n_dot_out = Dot(surface_hit.normal, out_direction);
@@ -347,21 +414,13 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
   //assert(wh_dot_out >= 0.);
   //assert(wh_dot_in >= 0.);
   
-  double microfacet_distribution_val;
-  { // Beckman Distrib. This formula is using the normalized distribution D(cs) 
-    // such that Int_omega D(cs) cs dw = 1, using the differential solid angle dw, 
-    // integrated over the hemisphere.
-    double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
-    double cs = ns_dot_wh;
-    double t1 = (cs*cs-1.)/(cs*cs*alpha*alpha);
-    double t2 = alpha*alpha*cs*cs*cs*cs*Pi;
-    microfacet_distribution_val = std::exp(t1)/t2;
-  }
+  double microfacet_alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
+  double microfacet_distribution_val = BackmanDistribution{microfacet_alpha}.EvalByHalfVector(ns_dot_wh);
   
   if (pdf)
   {    
     double half_angle_distribution_val = microfacet_distribution_val*std::abs(ns_dot_wh);
-    double out_distribution_val = half_angle_distribution_val*0.25/(wh_dot_in+Epsilon); // From density of h_r to density of out direction.
+    double out_distribution_val = HalfVectorPdfToExitantPdf(half_angle_distribution_val, wh_dot_in);
     *pdf = out_distribution_val;
   }
  
@@ -372,7 +431,7 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
 
   // Half vector is on positive side of shading surface, else zero contribution.
   // This is essential when shading normals are involved, since then, indeed the
-  // have vector can point below the surface. It can also happen by the random
+  // half vector can point below the surface. It can also happen by the random
   // sampling process of the outgoing direction.
   microfacet_distribution_val *= Heaviside(ns_dot_wh);
   
@@ -401,23 +460,14 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
 }
 
 
+
 ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
 {
   auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
   double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
-  Double3 h_r_local = SampleTrafo::ToBeckmanHemisphere(sampler.UniformUnitSquare(), alpha);
+  Double3 h_r_local = BackmanDistribution{alpha}.SampleHalfVector(sampler.UniformUnitSquare());
   Double3 h_r = m*h_r_local;
-  double hr_dot_in = Dot(reverse_incident_dir, h_r);
-  // See walter 2007, eq. 38. // Should I use the "reflection" formula with the abs in it instead?
-  // However, for that case I haven't found the correct pdf transform for the outgoing direction yet ...
-//   if (hr_dot_in < 0.)
-//   {
-//     hr_dot_in = -hr_dot_in;
-//     h_r = -h_r;
-//   }
-  Double3 out_direction = 2.*hr_dot_in*h_r - reverse_incident_dir;
-//   if (hr_dot_in < 0.) // Only neede dwhen using the "reflection" variant with std::abs in it.
-//     out_direction = Normalized(out_direction);
+  Double3 out_direction = HalfVectorToExitant(h_r, reverse_incident_dir);
   ScatterSample smpl; 
   smpl.coordinates = out_direction;
   ASSERT_NORMALIZED(out_direction);
