@@ -45,7 +45,7 @@ public:
     auto up = Normalized(_up);
     auto dir = Normalized(_dir);
     double r = Dot(dir,up); 
-    if(abs(r)>1.0-Epsilon) {
+    if(std::abs(r)>1.0-Epsilon) {
       std::cerr<<"PerspectiveCamera::PerspectiveCamera: up dir ambiguous"<<std::endl;
     }
     else 

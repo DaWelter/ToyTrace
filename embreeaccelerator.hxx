@@ -10,7 +10,7 @@ class Geometry;
 class Mesh;
 struct Ray;
 struct RaySurfaceIntersection;
-struct Box;
+class Box;
 
 struct RTCHit;
 

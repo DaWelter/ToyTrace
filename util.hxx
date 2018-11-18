@@ -160,6 +160,7 @@ namespace strformat_internal
 namespace
 {
 
+#pragma GCC diagnostic push
 // The compiler complains that this function is not used. But it really is or else my 
 // strformat would not compile at all because the compile time(!) recursion could not be terminated.
 #pragma GCC diagnostic ignored "-Wunused-function"  // GCC does not even care ...

@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <boost/functional/hash.hpp>
 
+#pragma GCC diagnostic push
 #pragma GCC diagnostic warning "-Wunused-parameter" 
 #pragma GCC diagnostic warning "-Wunused-variable"
 

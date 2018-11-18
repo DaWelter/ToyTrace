@@ -11,6 +11,7 @@ namespace PhaseFunctions
 class PhaseFunction
 {
   public:
+    virtual ~PhaseFunction() = default;
     virtual ScatterSample SampleDirection(const Double3 &reverse_incident_dir, Sampler &sampler) const = 0;
     virtual Spectral3 Evaluate(const Double3 &reverse_indcident_dir, const Double3 &out_direction, double *pdf) const = 0;
 };

@@ -71,7 +71,7 @@ public:
 class Scene
 {
   friend class NFFParser;
-  friend class Scope;
+  friend struct Scope;
   friend class EmbreeAccelerator;
   friend class PrimitiveIterator;
   using Light = RadianceOrImportance::PointEmitter;

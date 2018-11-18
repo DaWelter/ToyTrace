@@ -155,7 +155,7 @@ public:
   std::unique_ptr<PhaseFunctions::PhaseFunction> phasefunction; // filled by parser
 public:
   HomogeneousMedium(const SpectralN &_sigma_s, const SpectralN &_sigma_a, int _priority); 
-  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const;
+  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
   virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
   virtual VolumePdfCoefficients ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;

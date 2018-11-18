@@ -700,6 +700,7 @@ namespace VariantTestDetail
 struct PolyBase
 {
   virtual int anumber() const = 0;
+  virtual ~PolyBase() = default;
 };
 
 struct PolyDerived1 : public PolyBase

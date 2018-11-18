@@ -224,6 +224,7 @@ void AssignSamplesPerPixel(WorkerSet &workers, int spp)
 class MaybeDisplay
 {
 public:
+  virtual ~MaybeDisplay() = default;
   virtual void Show(const Image &im) = 0;
   virtual bool IsOkToKeepGoing() const = 0;
 };

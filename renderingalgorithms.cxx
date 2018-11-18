@@ -135,7 +135,7 @@ class NormalVisualizer : public IRenderingAlgo
   const Scene &scene;
   Sampler sampler;
 public:
-  NormalVisualizer(const Scene &_scene, const AlgorithmParameters &_params)
+  NormalVisualizer(const Scene &_scene, const AlgorithmParameters &)
     : scene{_scene}
   {
   }

@@ -12,6 +12,7 @@
 #include "shader_util.hxx"
 #include "renderbuffer.hxx"
 
+#pragma GCC diagnostic push
 #pragma GCC diagnostic warning "-Wunused-parameter" 
 #pragma GCC diagnostic warning "-Wunused-variable"
 
