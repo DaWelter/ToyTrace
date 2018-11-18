@@ -52,8 +52,20 @@ find_path(Rapidjson_INCLUDE_DIR
 )
 message(STATUS "Rapidjson: ${Rapidjson_INCLUDE_DIR}")
 
-include_directories(${PNG_INCLUDE_DIR} ${JPEG_INCLUDE_DIR} ${CImg_INCLUDE_DIR} ${Rapidjson_INCLUDE_DIR} ${Embree_INCLUDE_DIR})
-link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSIMP_LIBRARY} ${X11_LIBRARIES} ${Embree_LIBRARY} ${OPENIMAGEIO_LIBRARY})
+find_path(YAML_CPP_INCLUDE_DIR 
+  NAMES yaml-cpp/yaml.h
+  PATHS
+    ${CMAKE_INSTALL_PREFIX}/include
+    /usr/include
+    /usr/local/include
+)
+find_library(YAML_CPP_LIBRARY NAMES yaml-cpp PATHS /usr/local/lib)
+
+message(STATUS "Yaml-cpp Inlcude Path: ${YAML_CPP_INCLUDE_DIR}")
+message(STATUS "Yaml-cpp LIBRARY: ${YAML_CPP_LIBRARY}")
+
+include_directories(${PNG_INCLUDE_DIR} ${JPEG_INCLUDE_DIR} ${CImg_INCLUDE_DIR} ${Rapidjson_INCLUDE_DIR} ${Embree_INCLUDE_DIR} ${YAML_CPP_INCLUDE_DIR})
+link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSIMP_LIBRARY} ${X11_LIBRARIES} ${Embree_LIBRARY} ${OPENIMAGEIO_LIBRARY} ${YAML_CPP_LIBRARY})
 
 set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx
             phasefunctions.cxx atmosphere.cxx spectral.cxx primitive.cxx renderingalgorithms.cxx 
