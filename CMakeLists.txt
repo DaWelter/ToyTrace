@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
 project(toytrace)
 
-add_compile_options (-std=c++14)
+set (CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} -std=c++17) # Set this only for c++ files.
 add_compile_options (-Wextra -Wall)
 add_compile_options (-Wno-sign-compare -Wno-unused-parameter -Wno-unused-variable -Wno-char-subscripts -Winit-self -Wno-unused-function)
 add_compile_options ("$<$<CONFIG:RELEASE>:-march=native>")
