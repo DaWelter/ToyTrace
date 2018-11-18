@@ -4,7 +4,7 @@ Born out of an ancient computer graphics exercise, this is my hobby renderer.
 
 [Picz](https://www.dropbox.com/sh/vevib9qe5r87a24/AACuqKUPGzxHyl6E2E7iepSha?dl=0)
 
-This is experimental software. It works on my computer. It might not on yours.
+This is experimental software. I do not claim that it is fit for any particular purpose. Rather it is an expression of my interest in graphics.
 
 Dependencies:
 
@@ -12,61 +12,63 @@ Dependencies:
 * Eigen 3
 * boost
 * assimp
+* OpenImageIO
+* yaml-cpp
 
-Builds on Ubuntu 16 with default gcc. Maybe it compiles with VC, but you'd need to have the dependencies as well ofc.
+On Ubuntu 16 there is an issue with yaml-cpp and OpenImageIO. I prefer the latest yaml-cpp (0.6) but OpenImageIO links to an older version (0.3). Therefore I suggest to build and install OpenImageIO from sources.
+
+Maybe Toytrace compiles with VC, but you'd need to have the dependencies as well ofc.
 
 Features
 --------
-* Forward path tracing with next event estimation
-* Bidirectional path tracing
+* Forward path tracing with next event estimation.
+* Bidirectional path tracing.
 * Participating media:
-    * Homogeneous chromatic collision coefficients
-    * Atmosphere model with tabulated altitude profiles
-    * Uniform-, Henley-Greenstein- and Rayleigh phase functions
-    * Spectral delta tracking
+    * Homogeneous chromatic collision coefficients.
+    * Atmosphere model with tabulated altitude profiles.
+    * Uniform-, Henley-Greenstein- and Rayleigh phase functions.
+    * Spectral delta tracking.
 * Materials:
-    * Glossy microfacet metallic BRDF
-    * Dense dielectric with specular interface
-    * Specular mirror
-    * Specular transmissive dielectric, aka. glass.
-    * Lambertian diffuse
-* Textures & UV mapping
+    * Glossy microfacet metallic BRDF.
+    * Dense dielectric with specular interface.
+    * Specular mirror.
+    * Specular transmissive dielectric, aka. glass shader.
+    * Lambertian diffuse.
+* Textures & UV mapping.
 * Lights:
-    * Isotropic homogeneous area
-    * Parallel area
-    * Infinitely distant, including a sun model with realistic spectrum
-    * Isotropic sky dome
-    * Point
+    * Isotropic homogeneous area.
+    * Parallel area.
+    * Infinitely distant, including a sun model with realistic spectrum.
+    * Isotropic sky dome.
+    * Point.
+    * Image based lighting / HRD environment map.
 * Camera:
-    * Pinhole
-    * Fisheye
+    * Pinhole.
+    * Fisheye.
 * Statistical test for BSDF & Phasefunction sampling routines.
-* Naive Kd-tree
-* Binned spectral representation
-* Multithreading
+* Embree for fast ray triangle intersections. 
+* Binned spectral representation.
+* Multithreading.
 * Automated rendering of test scenes.
 
 Not Implemented
 ---------------
-Eventually, maybe ...
+Eventually, maybe, and in no particular order.
 
 * Advanced techniques. Beam radiance estimators or MLT.
-* SAH based Kd-tree or BVH construction
-* Designed for data locality and cache performance
-* Ray packet traversal and coherence improving ray-reordering
-* Robust intersection computations in the style of BPRT.
-* Or just using Intel's Embree
-* Glossy dielectric
-* Inhomogeneous media apart from atmospheric models
-* Faster MIS weight computation from the VCM paper
-* Better image reconstruction filter
-* Firefly suppression
-* Stratified/quasi-random sampling
-* Image based lighting
-* Bloom filter
-* Physical camera
-* Texture filtering
-* Bump/normal mapping
+* Custom triangle intersection routines with double precision. Embree only for BVH.
+* Robust intersection computations in the style of BPRT. Probably not entirely feasible since I currently use embree's triangle intersection routines.
+* Inhomogeneous media apart from atmospheric models.
+* Faster MIS weight computation from the VCM paper.
+* Multi-layer materials.
+* A sane scene description format.
+* Better image reconstruction filter.
+* Firefly suppression.
+* Stratified/quasi-random sampling.
+* Bloom filter.
+* Physical camera.
+* Texture filtering.
+* Bump/normal mapping.
 
 Related work
 ------------
