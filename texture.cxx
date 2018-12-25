@@ -29,10 +29,17 @@ void MakeThreeChannels(Span<std::uint8_t> dst, Span<const std::uint8_t> src, int
 
 void Texture::ReadFile(const std::string &filename)
 {
+// See https://github.com/OpenImageIO/oiio/commit/29110dae8de657ddf9938c4e3b056f1112c41b6d
+#if OIIO_PLUGIN_VERSION >= 22
+  auto in = OIIO::ImageInput::open (filename);
+  if (!in)
+    throw std::invalid_argument(strconcat("Failed to open image file: ", filename));
+#else
   auto *in = OIIO::ImageInput::open (filename);
   if (! in)
     throw std::invalid_argument(strconcat("Failed to open image file: ", filename));
   SCOPE_EXIT(OIIO::ImageInput::destroy (in););
+#endif
   
   const OIIO::ImageSpec &spec = in->spec();
   w = spec.width;
