@@ -9,6 +9,7 @@
 #include <vector>
 #include <unordered_map>
 
+#include <boost/functional/hash.hpp>
 #include <boost/align/aligned_allocator.hpp>
 
 template<class T>
@@ -217,14 +218,26 @@ inline std::string strformat(const std::string &format, Args&& ...args)
 }
 
 
-
-
 inline bool startswith(const std::string &a, const std::string &b)
 {
   if (a.size() < b.size())
     return false;
   return a.substr(0, b.size()) == b;
 }
+
+
+
+//  There is no hash support for pairs in the STL.
+template<class A, class B>
+struct pair_hash
+{
+  std::size_t operator()(const std::pair<A,B> &v) const
+  {
+    std::size_t seed = boost::hash_value(v.first);
+    boost::hash_combine(seed, boost::hash_value(v.second));
+    return seed;
+  }
+};
 
 
 // Copy & Paste Fu! https://stackoverflow.com/questions/27140778/range-based-for-with-pairiterator-iterator
