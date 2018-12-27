@@ -165,17 +165,7 @@ struct Connection
 };
 
 
-// Think this is stupid? It is. But what should I do? There no hash support for pairs in the STL.
-struct IntPairHash
-{
-  std::size_t operator()(const std::pair<int,int> &v) const
-  {
-    std::size_t seed = boost::hash_value(v.first);
-    boost::hash_combine(seed, boost::hash_value(v.second));
-    return seed;
-  }
-};
-using DebugBuffers = std::unordered_map<std::pair<int,int>, Spectral3ImageBuffer, IntPairHash>;
+using DebugBuffers = std::unordered_map<std::pair<int,int>, Spectral3ImageBuffer, pair_hash<int,int>>;
 
 
 class BackupAndReplace
