@@ -491,7 +491,7 @@ public:
   {
     VolumePdfCoefficients volume_pdf_coeff{};
     double eye_pdf, light_pdf;
-    WeightedSegment to_light = CalculateConnection(
+    ConnectionSegment to_light = CalculateConnection(
       eye_history.Node(eye_idx), eye_medium_tracker, other.Node(other_idx),
       eye_context, light_context, &eye_pdf, &light_pdf, &volume_pdf_coeff);
     
@@ -753,7 +753,7 @@ public:
         Pdf pdf_light;
         RW::PathNode light_node = SampleEmissiveEnd(context, pdf_light);
         double pdf_scatter = NaN;
-        WeightedSegment to_light = CalculateConnection(step.node, medium_tracker, light_node, context, light_context, &pdf_scatter, nullptr);
+        ConnectionSegment to_light = CalculateConnection(step.node, medium_tracker, light_node, context, light_context, &pdf_scatter, nullptr);
         double pdf_of_light_due_to_scatter = pdf_scatter*PdfConversionFactorForTarget(step.node, light_node, to_light.segment, false);
         double mis_weight = MisWeight(
           pdf_light, // Maybe this needs multiplication with pmf to select the unit_index.
@@ -768,7 +768,7 @@ public:
             rgb_responses.push_back({
               sensor_connection_unit,
               Color::SpectralSelectionToRGB(path_weight, lambda_selection.first)
-            }); // TODO: emplace_back wants a ctor. This part works via the auto-generated curly braces ctor.
+            }); // This part works via the auto-generated initializer list ctor.
           }
         }
         else

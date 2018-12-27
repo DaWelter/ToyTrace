@@ -418,13 +418,6 @@ public:
     Spectral3 beta_factor {0.};
   };
   
-  
-  struct WeightedSegment
-  {
-    RaySegment segment {};
-    Spectral3 weight { 0. };
-  };
-  
 
   StepResult TakeRandomWalkStep(const RW::PathNode &source_node, MediumTracker &medium_tracker, const PathContext &context, VolumePdfCoefficients *volume_pdf_coeff = nullptr)
   {
@@ -476,11 +469,26 @@ public:
     return node_sample;
 
   }
-
-
-  WeightedSegment CalculateConnection(const RW::PathNode &eye_node, const MediumTracker &eye_medium_tracker, const RW::PathNode &light_node, const PathContext &eye_context, const PathContext &light_context, double *pdf_source, double *pdf_target, VolumePdfCoefficients *volume_pdf_coeff = nullptr)
+  
+  
+  struct ConnectionSegment
   {
-    WeightedSegment result{};
+    RaySegment segment {};
+    Spectral3 weight { 0. };
+  };
+  
+
+  ConnectionSegment CalculateConnection(
+    const RW::PathNode &eye_node, 
+    const MediumTracker &eye_medium_tracker, 
+    const RW::PathNode &light_node, 
+    const PathContext &eye_context, 
+    const PathContext &light_context, 
+    double *pdf_source, 
+    double *pdf_target, 
+    VolumePdfCoefficients *volume_pdf_coeff = nullptr)
+  {
+    ConnectionSegment result{};
     if (eye_node.node_type == RW::NodeType::ENV && light_node.node_type == RW::NodeType::ENV)
       return result;
 
@@ -496,7 +504,6 @@ public:
     MaybeHandlePassageThroughSurface(eye_node, segment_to_light.ray.dir, medium_tracker);
     
     auto transmittance = TransmittanceEstimate(segment_to_light, medium_tracker, eye_context, volume_pdf_coeff);
-    //Spectral3 transmittance{1.};
 
     bool is_wrt_solid_angle = eye_node.node_type == RW::NodeType::ENV || light_node.node_type == RW::NodeType::ENV;
     double r2_factor = is_wrt_solid_angle ? 1. : 1./Sqr(segment_to_light.length);
