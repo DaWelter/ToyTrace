@@ -69,6 +69,16 @@ struct VolumePdfCoefficients
   double transmittance{ 1. }; // Corresponding transmittances.
 };
 
+inline std::tuple<double, double> FwdCoeffs(const VolumePdfCoefficients &c)
+{
+  return std::make_tuple(c.pdf_scatter_fwd, c.transmittance);
+}
+
+inline std::tuple<double, double> BwdCoeffs(const VolumePdfCoefficients &c)
+{
+  return std::make_tuple(c.pdf_scatter_bwd, c.transmittance);
+}
+
 
 inline void Accumulate(VolumePdfCoefficients &accumulated, const VolumePdfCoefficients &segment_coeff, bool is_first, bool is_last)
 {

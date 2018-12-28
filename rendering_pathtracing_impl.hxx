@@ -24,21 +24,6 @@ using SpecularFlagContainer = ToyVector<bool>;
 using WeightContainer = ToyVector<Spectral3>;
 
 
-inline double ForwardPdfCoefficient(const RW::PathNode& end_node, const VolumePdfCoefficients &coeff)
-{
-  const bool volume_scattering = end_node.node_type == RW::NodeType::SCATTER && end_node.geom_type != RW::GeometryType::SURFACE;
-  return volume_scattering ? coeff.pdf_scatter_fwd : coeff.transmittance;
-  // Else it hit surface or escaped the scene.
-}
-
-
-inline double BackwardPdfCoefficient(const RW::PathNode& start_node, const VolumePdfCoefficients &coeff)
-{
-  const bool volume_scattering = start_node.node_type == RW::NodeType::SCATTER && start_node.geom_type != RW::GeometryType::SURFACE;
-  return volume_scattering ? coeff.pdf_scatter_bwd : coeff.transmittance;
-}
-
-
 class SubpathHistory
 {
 public:
@@ -83,15 +68,12 @@ public:
     pdfs_rev.push_back(pdf_prev_rev_scatter);
     segments.push_back(segment);
     is_parallel_beam &= pdf_prev_scatter.IsFromDelta();
-    double vol_coeff = ForwardPdfCoefficient(end_node, volume_pdf_coeff);
-    double geom_coeff = randomwalk_functions.PdfConversionFactorForTarget(nodes[idx-1], nodes[idx], segments[idx], is_parallel_beam);
-    fwd_conversion_factors.push_back(vol_coeff * geom_coeff);
-    vol_coeff = BackwardPdfCoefficient(nodes[idx-1], volume_pdf_coeff);
-    geom_coeff = randomwalk_functions.PdfConversionFactorForTarget(nodes[idx], nodes[idx-1], segments[idx], false);
-    bwd_conversion_factors.push_back(vol_coeff * geom_coeff);      
+    double geom_coeff = randomwalk_functions.PdfConversionFactor(nodes[idx-1], nodes[idx], segments[idx], FwdCoeffs(volume_pdf_coeff), is_parallel_beam);
+    fwd_conversion_factors.push_back(geom_coeff);
+    geom_coeff = randomwalk_functions.PdfConversionFactor(nodes[idx], nodes[idx-1], segments[idx].Reversed(), BwdCoeffs(volume_pdf_coeff), false);
+    bwd_conversion_factors.push_back(geom_coeff);      
     assert(pdf_prev_scatter > 0 && std::isfinite(pdf_prev_scatter)); // Because it is the sample. So the probability to generate it must be positive!
     assert(geom_coeff > 0);
-    assert(vol_coeff > 0);
   }
   
   void Finish()
@@ -187,9 +169,8 @@ class BackupAndReplace
     h.pdfs[node_index+1] = pdf_node_scatter; 
     h.pdfs_rev[node_index+1] = pdf_node_scatter_rev;
     // Replace by conversion factor for going from solid angle at this node to position at the opposite node.
-    h.fwd_conversion_factors[node_index+1] = h.randomwalk_functions.PdfConversionFactorForTarget(
-      h.Node(node_index), other_end_node, segment, pdf_node_scatter.IsFromDelta())
-      * ForwardPdfCoefficient(other_end_node, vol_pdf_coeff);
+    h.fwd_conversion_factors[node_index+1] = h.randomwalk_functions.PdfConversionFactor(
+      h.Node(node_index), other_end_node, segment, FwdCoeffs(vol_pdf_coeff), pdf_node_scatter.IsFromDelta());
   }
   
   void InitEitherSideEmpty(double one_or_start_position_pdf, double one_or_angular_emission_pdf)
@@ -732,7 +713,7 @@ public:
     std::tie(context.pixel_x, context.pixel_y) = scene.GetCamera().UnitToPixel(pixel_index);
     PathContext light_context{context}; light_context.transport = IMPORTANCE;
     MediumTracker medium_tracker{scene};
-    
+    VolumePdfCoefficients volume_pdf_coeff;
     Spectral3 path_sample_values{0.};
 
     RW::PathNode prev_node;
@@ -753,8 +734,9 @@ public:
         Pdf pdf_light;
         RW::PathNode light_node = SampleEmissiveEnd(context, pdf_light);
         double pdf_scatter = NaN;
-        ConnectionSegment to_light = CalculateConnection(step.node, medium_tracker, light_node, context, light_context, &pdf_scatter, nullptr);
-        double pdf_of_light_due_to_scatter = pdf_scatter*PdfConversionFactorForTarget(step.node, light_node, to_light.segment, false);
+        volume_pdf_coeff = VolumePdfCoefficients{};
+        ConnectionSegment to_light = CalculateConnection(step.node, medium_tracker, light_node, context, light_context, &pdf_scatter, nullptr, &volume_pdf_coeff);
+        double pdf_of_light_due_to_scatter = pdf_scatter*PdfConversionFactor(step.node, light_node, to_light.segment, FwdCoeffs(volume_pdf_coeff), false);
         double mis_weight = MisWeight(
           pdf_light, // Maybe this needs multiplication with pmf to select the unit_index.
           pdf_of_light_due_to_scatter);
@@ -778,7 +760,8 @@ public:
       }
 
       prev_node = step.node;
-      step = TakeRandomWalkStep(prev_node, medium_tracker, context);
+      volume_pdf_coeff = VolumePdfCoefficients{};
+      step = TakeRandomWalkStep(prev_node, medium_tracker, context, &volume_pdf_coeff);
       
       beta *= step.beta_factor;
       
@@ -799,7 +782,7 @@ public:
       double pdf_end_pos = 0.;
       Spectral3 end_weight = EndPathWithZeroVerticesOnOtherSide(prev_node, step.node, step.segment, context, &pdf_end_pos);
       
-      Pdf step_pdf_of_end = PdfConversionFactorForTarget(prev_node, step.node, step.segment, step.scatter_pdf.IsFromDelta())*step.scatter_pdf;
+      Pdf step_pdf_of_end = PdfConversionFactor(prev_node, step.node, step.segment, FwdCoeffs(volume_pdf_coeff), step.scatter_pdf.IsFromDelta())*step.scatter_pdf;
       
       double mis_weight = MisWeight(step_pdf_of_end, pdf_end_pos);
       

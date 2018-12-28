@@ -530,7 +530,13 @@ public:
   // pdf(path) = pdf_w1(w1)*pdf_a2(x2)*pdf_a3(x3)*... This is cool as long as the product space is
   // consistently used.
   // Ref: Veach's Thesis and PBRT book.
-  double PdfConversionFactorForTarget(const RW::PathNode &source, const RW::PathNode &target, const RaySegment &segment, bool is_parallel_beam) const
+  double PdfConversionFactor(
+    const RW::PathNode &source, 
+    const RW::PathNode &target, 
+    const RaySegment &segment,
+    const std::tuple<double, double> interaction_density_and_transmittance,
+    bool is_parallel_beam
+  ) const
   {
     double factor = DFactorOf(target, segment.ray.dir);
     if (source.node_type != NodeType::ENV && target.node_type != NodeType::ENV && !is_parallel_beam)
@@ -539,6 +545,8 @@ public:
       // If target is env: By definition, solid angle is used to describe the coordinate of the final node.
       factor /= (Sqr(segment.length)+Epsilon);
     }
+    const bool is_volume_node = target.node_type == RW::NodeType::SCATTER && target.geom_type != RW::GeometryType::SURFACE;
+    factor *= is_volume_node ? std::get<0>(interaction_density_and_transmittance) : std::get<1>(interaction_density_and_transmittance);
     return factor;
   }
   
