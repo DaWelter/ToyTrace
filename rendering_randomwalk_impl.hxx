@@ -1048,7 +1048,10 @@ public:
       total_weight *= medium_smpl.weight;
       
       const bool did_not_interact_w_medium = medium_smpl.t >= segment.length;
-      const bool hit_invisible_wall = hit && &GetShaderOf(intersection,scene) == &scene.GetInvisibleShader();
+      const bool hit_invisible_wall =
+        hit && 
+        scene.GetMaterialOf(intersection.hitid).shader==&scene.GetInvisibleShader() &&
+        scene.GetMaterialOf(intersection.hitid).emitter==nullptr;
       bool cont = did_not_interact_w_medium && hit_invisible_wall;
       
       if (volume_pdf_coeff)

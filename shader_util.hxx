@@ -90,6 +90,7 @@ inline void Accumulate(VolumePdfCoefficients &accumulated, const VolumePdfCoeffi
 
 namespace TrackingDetail
 {
+
 template<class WeightMultiplyFunctor>
 inline bool RussianRouletteSurvival(double weight, int iteration, Sampler &sampler, WeightMultiplyFunctor multiply_weight_with)
 {
@@ -135,7 +136,8 @@ inline void ComputeProbabilitiesHistoryScheme(
   for (; it_probs != probs.end(); ++it_probs)
     it_probs->get() *= norm_inv;
 }
-}
+
+} // TrackingDetail
 
 
 inline const Material& GetMaterialOf(const SurfaceInteraction &ia, const Scene &scene)
