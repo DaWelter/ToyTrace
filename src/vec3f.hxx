@@ -20,7 +20,6 @@ constexpr auto NaN = std::numeric_limits<double>::quiet_NaN();
 constexpr auto UnitSphereSurfaceArea = 4.*Pi;
 constexpr auto UnitHalfSphereSurfaceArea = 2.*Pi;
 
-
 template<class T, int d>
 class Vec : public Eigen::Matrix<T, d, 1>
 {

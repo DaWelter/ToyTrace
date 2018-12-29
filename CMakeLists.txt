@@ -67,14 +67,14 @@ message(STATUS "Yaml-cpp LIBRARY: ${YAML_CPP_LIBRARY}")
 include_directories(${PNG_INCLUDE_DIR} ${JPEG_INCLUDE_DIR} ${CImg_INCLUDE_DIR} ${Rapidjson_INCLUDE_DIR} ${Embree_INCLUDE_DIR} ${YAML_CPP_INCLUDE_DIR})
 link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSIMP_LIBRARY} ${X11_LIBRARIES} ${Embree_LIBRARY} ${OPENIMAGEIO_LIBRARY} ${YAML_CPP_LIBRARY})
 
-set(SOURCES image.cxx  parsenff.cxx  shader.cxx ray.cxx sampler.cxx
-            phasefunctions.cxx atmosphere.cxx spectral.cxx primitive.cxx renderingalgorithms.cxx 
-            light.cxx texture.cxx embreeaccelerator.cxx scene.cxx)
-add_executable(toytrace toytrace.cxx ${SOURCES})
+set(SOURCES src/image.cxx  src/parsenff.cxx  src/shader.cxx src/ray.cxx src/sampler.cxx
+            src/phasefunctions.cxx src/atmosphere.cxx src/spectral.cxx src/primitive.cxx src/renderingalgorithms.cxx 
+            src/light.cxx src/texture.cxx src/embreeaccelerator.cxx src/scene.cxx)
+add_executable(toytrace src/toytrace.cxx ${SOURCES})
 target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE} ${Boost_FILESYSTEM_LIBRARY_RELEASE})
 
-add_executable(tests tests.cxx tests3.cxx tests_sampling.cxx ${Cubature_DIR}/hcubature.c ${SOURCES})
-add_executable(tests2 tests2.cxx)
+add_executable(tests src/tests.cxx src/tests3.cxx src/tests_sampling.cxx ${Cubature_DIR}/hcubature.c ${SOURCES})
+add_executable(tests2 src/tests2.cxx)
 
 foreach(EXE tests tests2)
   target_include_directories(${EXE} PUBLIC ${GTEST_INCLUDE_DIRS} ${Cubature_DIR})
@@ -83,7 +83,7 @@ endforeach()
 
 
 # For qtcreator to display all header files. (https://stackoverflow.com/questions/28384935/qtcreator-cmake-project-how-to-show-all-project-files)
-FILE(GLOB THE_HEADERS "*.hxx")
+FILE(GLOB THE_HEADERS "src/*.hxx")
 add_custom_target(headers SOURCES ${THE_HEADERS})
 
 # The same for scenes because I want to open them in the IDE for convenience.
