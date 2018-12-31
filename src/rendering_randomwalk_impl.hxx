@@ -44,7 +44,7 @@ public:
   IterateIntersectionsBetween(const RaySegment &seg, const Scene &scene)
     : original_seg{seg}, current_org{seg.ray.org}, current_dist{0.}, scene{scene}
   {}
-  bool Next(RaySegment &seg, RaySurfaceIntersection &intersection);
+  bool Next(RaySegment &seg, SurfaceInteraction &intersection);
   double GetT() const { return current_dist; }
 };
 
@@ -71,7 +71,7 @@ public:
   explicit MediumTracker(const Scene &_scene);
   MediumTracker(const MediumTracker &_other) = default;
   void initializePosition(const Double3 &pos);
-  void goingThroughSurface(const Double3 &dir_of_travel, const RaySurfaceIntersection &intersection);
+  void goingThroughSurface(const Double3 &dir_of_travel, const SurfaceInteraction &intersection);
   const Medium& getCurrentMedium() const;
 };
 
@@ -83,7 +83,7 @@ inline const Medium& MediumTracker::getCurrentMedium() const
 }
 
 
-inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const RaySurfaceIntersection& intersection)
+inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const SurfaceInteraction& intersection)
 {
   if (Dot(dir_of_travel, intersection.geometry_normal) < 0)
     enterVolume(&GetMediumOf(intersection, scene));
@@ -271,18 +271,13 @@ struct EnvLightPointSamplingBeyondScene
 
 enum class NodeType : char 
 {
-  SCATTER,
+  SURFACE_SCATTER,
+  VOLUME_SCATTER,
+  SURFACE_EMITTER,
   ENV,
-  AREA_LIGHT,
   POINT_LIGHT,
   CAMERA,
   ZERO_CONTRIBUTION_ABORT_WALK
-};
-
-enum class GeometryType : char
-{
-  OTHER,
-  SURFACE
 };
 
 
@@ -326,21 +321,26 @@ struct EnvironmentalRadianceFieldInteraction : public InteractionPoint
 };
 
 
+static_assert(std::is_base_of<InteractionPoint, VolumeInteraction>::value, "Must share fields");
+static_assert(std::is_base_of<InteractionPoint, PointEmitterInteraction>::value, "Must share fields");
+static_assert(std::is_base_of<InteractionPoint, PointEmitterArrayInteraction>::value, "Must share fields");
+static_assert(std::is_base_of<InteractionPoint, EnvironmentalRadianceFieldInteraction>::value, "Must share fields");
+static_assert(std::is_base_of<InteractionPoint, SurfaceInteraction>::value, "Must share fields");
+
+
 // TODO: C++ wants to force default initialization/construction on me. Okay, so I should write constructors for the various node types.
 struct PathNode
 { 
   NodeType node_type {NodeType::ZERO_CONTRIBUTION_ABORT_WALK};
-  GeometryType geom_type { GeometryType::OTHER };
   Double3 incident_dir {0.};
   union Interactions
   {
     InteractionPoint point;
-    RaySurfaceIntersection ray_surface;
+    SurfaceInteraction surface;
     VolumeInteraction volume;
     PointEmitterInteraction emitter_point;
     PointEmitterArrayInteraction emitter_point_array;
     EnvironmentalRadianceFieldInteraction emitter_env;
-    SurfaceInteraction emitter_area;
     Interactions() : point {Double3{0.}} {}
   };
   Interactions interaction;
@@ -362,23 +362,62 @@ struct PathNode
     return *this;
   }
   
+  bool IsSurfaceInteraction() const
+  {
+    return node_type == NodeType::SURFACE_EMITTER || node_type == NodeType::SURFACE_SCATTER;
+  }
+
+  bool IsVolumeInteraction() const
+  {
+    return node_type == NodeType::VOLUME_SCATTER;
+  }
+  
+  bool IsScatterNode() const {
+    return node_type == NodeType::VOLUME_SCATTER || node_type == NodeType::SURFACE_SCATTER;
+  }
+  
+  bool TryEnableOperationsOnEmitter(const Scene &scene)
+  {
+    switch(node_type)
+    {
+      case NodeType::SURFACE_SCATTER:
+        if (scene.GetMaterialOf(interaction.surface.hitid).emitter)
+        {
+          node_type = NodeType::SURFACE_EMITTER;
+          return true;
+        }
+        return false;
+      case NodeType::VOLUME_SCATTER:
+        return false;
+      case NodeType::SURFACE_EMITTER:
+      case NodeType::ENV:
+      case NodeType::POINT_LIGHT:
+      case NodeType::CAMERA:
+        return true;
+      case NodeType::ZERO_CONTRIBUTION_ABORT_WALK:
+        return false;
+    }
+    
+    return true;
+  }
+  
+  
+  void EnableOperationOnScattererIfFeasible()
+  {
+    if (node_type == NodeType::SURFACE_EMITTER)
+      node_type = NodeType::SURFACE_SCATTER;
+  }
+  
+  
   Double3 geometry_normal() const
   {
-    assert(geom_type == GeometryType::SURFACE);
-    assert(node_type == NodeType::AREA_LIGHT ||
-            node_type == NodeType::SCATTER);
-    static_assert(std::is_base_of<SurfaceInteraction, RaySurfaceIntersection>::value, "Must share fields");
-    return interaction.emitter_area.geometry_normal;
+    assert(IsSurfaceInteraction());
+    return interaction.surface.geometry_normal;
   }
   
   Double3 coordinates() const
   {
-    static_assert(std::is_base_of<InteractionPoint, RaySurfaceIntersection>::value, "Must share fields");
-    static_assert(std::is_base_of<InteractionPoint, VolumeInteraction>::value, "Must share fields");
-    static_assert(std::is_base_of<InteractionPoint, PointEmitterInteraction>::value, "Must share fields");
-    static_assert(std::is_base_of<InteractionPoint, PointEmitterArrayInteraction>::value, "Must share fields");
-    static_assert(std::is_base_of<InteractionPoint, EnvironmentalRadianceFieldInteraction>::value, "Must share fields");
-    static_assert(std::is_base_of<InteractionPoint, SurfaceInteraction>::value, "Must share fields");
+
     return interaction.point.pos;
   };
 };
@@ -418,30 +457,33 @@ public:
     Spectral3 beta_factor {0.};
   };
   
-
+  
   StepResult TakeRandomWalkStep(const RW::PathNode &source_node, MediumTracker &medium_tracker, const PathContext &context, VolumePdfCoefficients *volume_pdf_coeff = nullptr)
   {
     struct TagRaySample {};
     using RaySample = Sample<Ray, Spectral3, TagRaySample>;
 
-    auto SampleExitantRayDefault = [&]() -> RaySample
+    auto SampleExitantRay = [&]() -> RaySample
     {
-      auto smpl = SampleScatterCoordinate(source_node, context);
-      Ray ray{source_node.coordinates(), smpl.coordinates};
-      smpl.value *= DFactorOf(source_node, ray.dir);
-      AddAntiSelfIntersectionOffsetAt(ray.org, source_node, ray.dir);
-      return RaySample{ray, smpl.value, smpl.pdf_or_pmf};
-    };
-       
-    auto SampleExitantRayEnv = [&]() -> RaySample
-    {
-      auto smpl = SampleScatterCoordinateOfEmitter(source_node, context);
-      return RaySample{{smpl.coordinates, source_node.coordinates()}, smpl.value, smpl.pdf_or_pmf};
+      if (source_node.node_type == RW::NodeType::ENV)
+      {
+        auto smpl = SampleScatterCoordinateOfEmitter(source_node, context);
+        // Note that source_node.coordinates() is the light direction, in contrast to how all other nodes function.
+        return RaySample{{smpl.coordinates, source_node.coordinates()}, smpl.value, smpl.pdf_or_pmf};
+      }
+      else
+      {
+        auto smpl = source_node.IsScatterNode() ?
+          SampleScatterCoordinateOfScatterer(source_node, context) :
+          SampleScatterCoordinateOfEmitter(source_node, context);
+        Ray ray{source_node.coordinates(), smpl.coordinates};
+        smpl.value *= DFactorOf(source_node, ray.dir);
+        AddAntiSelfIntersectionOffsetAt(ray.org, source_node, ray.dir);
+        return RaySample{ray, smpl.value, smpl.pdf_or_pmf};
+      }
     };
     
-    RaySample ray_sample = (source_node.node_type != RW::NodeType::ENV) ?
-      SampleExitantRayDefault() :
-      SampleExitantRayEnv();
+    RaySample ray_sample = SampleExitantRay();
     const Ray &ray = ray_sample.coordinates;
 
     StepResult node_sample;
@@ -463,13 +505,11 @@ public:
     node_sample.scatter_pdf = ray_sample.pdf_or_pmf;
     node_sample.segment = collision.segment;
     node_sample.segment.length = 
-      (node_sample.node.node_type==RW::NodeType::SCATTER && node_sample.node.geom_type!=RW::GeometryType::SURFACE) ?
-        collision.smpl.t : collision.segment.length;
+      node_sample.node.IsSurfaceInteraction() ? collision.segment.length : collision.smpl.t;
     assert(node_sample.scatter_pdf > 0.); // Since I rolled that sample it should have non-zero probability of being generated.
     return node_sample;
-
   }
-  
+
   
   struct ConnectionSegment
   {
@@ -494,12 +534,15 @@ public:
 
     RaySegment &segment_to_light = result.segment = CalculateSegmentToTarget(eye_node, light_node);
       
-    Spectral3 scatter_factor = Evaluate(eye_node, segment_to_light, eye_context, pdf_source);
-    Spectral3 target_scatter_factor = Evaluate(light_node, segment_to_light.Reversed(), light_context, pdf_target);
-
+    Spectral3 scatter_factor = Evaluate(eye_node, segment_to_light.ray.dir, eye_context, pdf_source);
+    Spectral3 target_scatter_factor = Evaluate(light_node, -segment_to_light.ray.dir, light_context, pdf_target);
+    
     if (scatter_factor.isZero() || target_scatter_factor.isZero())
       return result;
 
+    scatter_factor *= DFactorOf(eye_node, segment_to_light.ray.dir);
+    target_scatter_factor *= DFactorOf(light_node, -segment_to_light.ray.dir);
+    
     MediumTracker medium_tracker = eye_medium_tracker;
     MaybeHandlePassageThroughSurface(eye_node, segment_to_light.ray.dir, medium_tracker);
     
@@ -514,14 +557,69 @@ public:
   }
 
   
-  // Source node sends radiance/importance to target node. How much?
-  inline Spectral3 Evaluate(const RW::PathNode &source_node, const RaySegment &segment_to_target, const PathContext &context, double *source_scatter_pdf)
+  Spectral3 Evaluate(const PathNode &node, const Double3 &out_direction, const PathContext &context, double *pdf)
   {
-    assert(source_node.node_type != RW::NodeType::ENV || (segment_to_target.ray.dir == source_node.coordinates()));
-    Spectral3 scatter_value = EvaluateScatterCoordinate(source_node, segment_to_target.ray.dir, context, source_scatter_pdf);
-    scatter_value *= DFactorOf(source_node, segment_to_target.ray.dir);
-    return scatter_value;
+    return node.IsScatterNode() ?
+      EvaluateScatterCoordinateOfScatterer(node, out_direction, context, pdf) :
+      EvaluateScatterCoordinateOfEmitter(node, out_direction, context, pdf);
   }
+  
+  
+  Spectral3 EvaluateScatterCoordinateOfEmitter(const PathNode &node, const Double3 &out_direction, const PathContext &context, double *pdf)
+  {
+    if (node.node_type == NodeType::CAMERA)
+    {
+      const PointEmitterArrayInteraction& interaction = node.interaction.emitter_point_array;
+      auto response = interaction.emitter->Evaluate(interaction.pos, out_direction, context, pdf);
+      this->sensor_connection_unit = response.unit_index;
+      return response.weight;
+    }
+    else if (node.node_type == NodeType::ENV)
+    {
+      // For env light, the coordinate is a position!
+      const EnvironmentalRadianceFieldInteraction &interaction = node.interaction.emitter_env;
+      assert ((out_direction == interaction.pos));
+      if (pdf)
+      {
+        EnvLightPointSamplingBeyondScene env_sampling{scene};
+        *pdf = env_sampling.Pdf(interaction.pos);
+      }
+      return interaction.radiance;
+    }
+    else if (node.node_type == NodeType::SURFACE_EMITTER)
+    {
+      const SurfaceInteraction &interaction = node.interaction.surface;
+      return ASSERT_NOT_NULL(GetMaterialOf(interaction, scene).emitter)->Evaluate(interaction.hitid, out_direction, context, pdf);
+    }
+    else if (node.node_type == NodeType::POINT_LIGHT)
+    {
+      const PointEmitterInteraction &interaction = node.interaction.emitter_point;
+      return interaction.emitter->Evaluate(interaction.pos, out_direction, context, pdf);
+    }
+    else // TODO: volume lights
+      return Double3{0.};
+  }
+
+
+  Spectral3 EvaluateScatterCoordinateOfScatterer(const PathNode &node, const Double3 &out_direction, const PathContext &context, double *pdf)
+  {
+    
+    const Double3 reverse_incident_dir = -node.incident_dir;
+    if (node.node_type == NodeType::SURFACE_SCATTER)
+    {
+      const SurfaceInteraction &intersection = node.interaction.surface;
+      auto  fs = GetShaderOf(intersection, scene).EvaluateBSDF(reverse_incident_dir, intersection, out_direction, context, pdf);
+      fs *= BsdfCorrectionFactor(reverse_incident_dir, intersection, out_direction, context.transport);
+      return fs;
+    }
+    else // is Volume
+    {
+      assert(node.node_type == RW::NodeType::VOLUME_SCATTER);
+      const VolumeInteraction &interaction = node.interaction.volume;
+      return interaction.medium().EvaluatePhaseFunction(reverse_incident_dir, interaction.pos, out_direction, context, pdf);
+    }
+  }
+
 
   // Convert the native pdf of sampling the scatter coordinate of  the source into the pdf to represent the location of the target node.
   // It is important in MIS weighting to express the pdf of various sampling 
@@ -545,29 +643,28 @@ public:
       // If target is env: By definition, solid angle is used to describe the coordinate of the final node.
       factor /= (Sqr(segment.length)+Epsilon);
     }
-    const bool is_volume_node = target.node_type == RW::NodeType::SCATTER && target.geom_type != RW::GeometryType::SURFACE;
-    factor *= is_volume_node ? std::get<0>(interaction_density_and_transmittance) : std::get<1>(interaction_density_and_transmittance);
+    factor *= target.IsVolumeInteraction() ? 
+      std::get<0>(interaction_density_and_transmittance) : 
+      std::get<1>(interaction_density_and_transmittance);
     return factor;
   }
   
     
   void MaybeHandlePassageThroughSurface(const RW::PathNode &node, const Double3 &dir_of_travel, MediumTracker &medium_tracker) const
   {
-    if (node.geom_type == RW::GeometryType::SURFACE && 
-        node.node_type == RW::NodeType::SCATTER && 
-        Dot(dir_of_travel, node.interaction.ray_surface.normal) < 0.)
+    if (node.IsSurfaceInteraction() && 
+        Dot(dir_of_travel, node.interaction.surface.normal) < 0.)
     {
       // By definition, intersection.normal points to where the intersection ray is coming from.
       // Thus we can determine if the sampled direction goes through the surface by looking
       // if the direction goes in the opposite direction of the normal.
-      medium_tracker.goingThroughSurface(dir_of_travel, node.interaction.ray_surface);
+      medium_tracker.goingThroughSurface(dir_of_travel, node.interaction.surface);
     }
   }
 
   
   void InitializeMediumTracker(const RW::PathNode &source_node, MediumTracker &medium_tracker) 
   {
-    assert (source_node.node_type != RW::NodeType::SCATTER);
     medium_tracker.initializePosition(
       source_node.node_type != RW::NodeType::ENV ? source_node.coordinates() : Double3{Infinity});
   }
@@ -582,7 +679,7 @@ public:
     {}
     Medium::InteractionSample smpl;
     RaySegment segment;
-    RaySurfaceIntersection intersection;
+    SurfaceInteraction intersection;
   };
 
   
@@ -592,47 +689,7 @@ public:
   }
   
   
-  RW::PathNode AllocateNode(const CollisionData &collision, MediumTracker &medium_tracker, const PathContext &context) const
-  {
-    RW::PathNode node;
-    node.incident_dir = collision.segment.ray.dir;
-    if (collision.smpl.t < collision.segment.length)
-    {
-      node.node_type = RW::NodeType::SCATTER;
-      node.geom_type = RW::GeometryType::OTHER;
-      node.interaction.volume = VolumeInteraction{
-        Position(collision.smpl, collision.segment),
-        medium_tracker.getCurrentMedium()
-      };
-    }
-    else if (collision.intersection.hitid)
-    {
-      node.geom_type   = RW::GeometryType::SURFACE;
-      const auto &mat = scene.GetMaterialOf(collision.intersection.hitid);
-      if (mat.emitter)
-      {
-        node.node_type = RW::NodeType::AREA_LIGHT;
-        node.interaction.emitter_area = collision.intersection; // TODO: should this not use the RaySurfaceIntersection struct?
-      }
-      else 
-      {
-        node.node_type = RW::NodeType::SCATTER;
-        node.interaction.ray_surface = collision.intersection;
-      }
-    }
-    else
-    {
-      const auto &emitter = this->GetEnvLight();
-      node.node_type = RW::NodeType::ENV;
-      node.geom_type = RW::GeometryType::OTHER;
-      node.interaction.emitter_env = RW::EnvironmentalRadianceFieldInteraction{
-        -collision.segment.ray.dir,
-        emitter
-      };
-      node.interaction.emitter_env.radiance = emitter.Evaluate(-collision.segment.ray.dir, context);
-    }
-    return node;
-  }
+
   
   
   RW::PathNode SampleEmissiveEnd(const PathContext &context, Pdf &pdf)
@@ -644,7 +701,6 @@ public:
       const auto &emitter = this->GetEnvLight();
       auto smpl = emitter.TakeDirectionSample(sampler, context);
       node.node_type = RW::NodeType::ENV;
-      node.geom_type = RW::GeometryType::OTHER;
       node.interaction.emitter_env = RW::EnvironmentalRadianceFieldInteraction{
         smpl.coordinates,
         emitter
@@ -660,11 +716,9 @@ public:
       const auto &mat = scene.GetMaterialOf(prim_ref);
       assert(mat.emitter);
       auto smpl = mat.emitter->TakeAreaSample(prim_ref, sampler, context);
-      node.node_type   = RW::NodeType::AREA_LIGHT;
-      node.geom_type   = RW::GeometryType::SURFACE;
-      node.interaction.emitter_area = SurfaceInteraction{
-        smpl.coordinates
-      };
+      node.node_type = RW::NodeType::SURFACE_EMITTER;
+      node.interaction.surface = SurfaceInteraction{
+        smpl.coordinates };
       pdf = pmf_of_light * smpl.pdf_or_pmf;
     }
     else
@@ -673,7 +727,6 @@ public:
       double pmf_of_light;
       std::tie(light, pmf_of_light) = light_picker.PickLight();
       node.node_type = RW::NodeType::POINT_LIGHT;
-      node.geom_type = RW::GeometryType::OTHER;
       node.interaction.emitter_point = RW::PointEmitterInteraction{
         light->Position(),
         *light
@@ -691,7 +744,6 @@ public:
     RW::PathNode node;
     const ROI::PointEmitterArray& camera = scene.GetCamera();
     auto smpl = camera.TakePositionSample(unit_index, sampler, context);
-    node.geom_type   = RW::GeometryType::OTHER;
     node.node_type   = RW::NodeType::CAMERA;
     node.interaction.emitter_point_array = RW::PointEmitterArrayInteraction{
       smpl.coordinates,
@@ -703,21 +755,22 @@ public:
   }
   
   
-  ScatterSample SampleScatterCoordinate(const PathNode &node, const PathContext &context)
-  {
-    if (node.node_type == NodeType::SCATTER)
-      return SampleScatterCoordinateOfScatterer(node, context);
-    else
-      return SampleScatterCoordinateOfEmitter(node, context);
-  }
+//   ScatterSample SampleScatterCoordinate(const PathNode &node, const PathContext &context)
+//   {
+//     if (node.IsScatterNode())
+//       return SampleScatterCoordinateOfScatterer(node, context);
+//     else
+//       return SampleScatterCoordinateOfEmitter(node, context);
+//   }
   
-  // TODO: Well, that funnction name sounds a little retarded ...
+  
+  // Generate y_i+1 given y_i and an incident direction, stored in node.
   ScatterSample SampleScatterCoordinateOfScatterer(const PathNode &node, const PathContext &context)
   {
     const Double3 reverse_incident_dir = -node.incident_dir;
-    if (node.geom_type == GeometryType::SURFACE)
+    if (node.IsSurfaceInteraction())
     {
-      const RaySurfaceIntersection &intersection = node.interaction.ray_surface;
+      const SurfaceInteraction &intersection = node.interaction.surface;
       auto smpl = GetShaderOf(intersection,scene).SampleBSDF(reverse_incident_dir, intersection, sampler, context);
       smpl.value *= BsdfCorrectionFactor(reverse_incident_dir, intersection, smpl.coordinates, context.transport);
       return smpl;
@@ -731,6 +784,7 @@ public:
   }
   
   
+  // 
   ScatterSample SampleScatterCoordinateOfEmitter(const PathNode &node, const PathContext &context)
   {
     if (node.node_type == NodeType::CAMERA)
@@ -749,10 +803,11 @@ public:
       Double3 org = gen.Sample(interaction.pos, sampler);
       return { org, interaction.radiance, pdf };
     }
-    else if (node.node_type == NodeType::AREA_LIGHT)
+    else if (node.node_type == NodeType::SURFACE_EMITTER)
     {
-      const SurfaceInteraction &interaction = node.interaction.emitter_area;
-      auto smpl = GetEmitterOf(interaction,scene).TakeDirectionSampleFrom(interaction.hitid, sampler, context);
+      const SurfaceInteraction &interaction = node.interaction.surface;
+      const auto* emitter = ASSERT_NOT_NULL(GetMaterialOf(interaction, scene).emitter);
+      auto smpl = emitter->TakeDirectionSampleFrom(interaction.hitid, sampler, context);
       return smpl.as<ScatterSample>();
     }
     else if (node.node_type == NodeType::POINT_LIGHT)
@@ -764,41 +819,14 @@ public:
     else
       return {};
   }
-
-  
-  Spectral3 EvaluateScatterCoordinate(const PathNode &node, const Double3 &out_direction, const PathContext &context, double *pdf)
-  {
-    if (node.node_type == NodeType::SCATTER)
-      return EvaluateScatterCoordinateOfScatterer(node, out_direction, context, pdf);
-    else
-      return EvaluateScatterCoordinateOfEmitter(node, out_direction, context, pdf);
-  }
   
  
-  Spectral3 EvaluateScatterCoordinateOfScatterer(const PathNode &node, const Double3 &out_direction, const PathContext &context, double *pdf)
-  {
-    const Double3 reverse_incident_dir = -node.incident_dir;
-    if (node.geom_type == GeometryType::SURFACE)
-    {
-      const RaySurfaceIntersection &intersection = node.interaction.ray_surface;
-      auto  fs = GetShaderOf(intersection, scene).EvaluateBSDF(reverse_incident_dir, intersection, out_direction, context, pdf);
-      fs *= BsdfCorrectionFactor(reverse_incident_dir, intersection, out_direction, context.transport);
-      return fs;
-    }
-    else // is Volume
-    {
-      const VolumeInteraction &interaction = node.interaction.volume;
-      return interaction.medium().EvaluatePhaseFunction(reverse_incident_dir, interaction.pos, out_direction, context, pdf);
-    }
-  }
-
-
   /* Straight forwardly following Cpt 5.3 Veach's thesis.
    * Basically when multiplied, it turns fs(wi -> wo, Nshd) into the corrected BSDF fs(wi->wo, Nsh)*Dot(Nshd,wi)/Dot(N,wi),
    * where wi refers to the incident direction of light as per Eq. 5.17.
    * 
    * Except that my conventions are different. In/out directions refer to the random walk. */
-  static double BsdfCorrectionFactor(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &intersection, const Double3 &exitant_dir, TransportType transport)
+  static double BsdfCorrectionFactor(const Double3 &reverse_incident_dir, const SurfaceInteraction &intersection, const Double3 &exitant_dir, TransportType transport)
   {
     const Double3 &light_incident = transport==RADIANCE ? exitant_dir : reverse_incident_dir;
     double correction = std::abs(Dot(intersection.shading_normal, light_incident))/
@@ -806,50 +834,13 @@ public:
     return correction;
   }
    
-  
-  Spectral3 EvaluateScatterCoordinateOfEmitter(const PathNode &node, const Double3 &out_direction, const PathContext &context, double *pdf)
-  {
-    if (node.node_type == NodeType::CAMERA)
-    {
-      const PointEmitterArrayInteraction& interaction = node.interaction.emitter_point_array;
-      auto response = interaction.emitter->Evaluate(interaction.pos, out_direction, context, pdf);
-      this->sensor_connection_unit = response.unit_index;
-      return response.weight;
-    }
-    else if (node.node_type == NodeType::ENV)
-    {
-      // For env light, the coordinate is a position!
-      const EnvironmentalRadianceFieldInteraction &interaction = node.interaction.emitter_env;
-      assert ((out_direction == interaction.pos));
-      if (pdf)
-      {
-        EnvLightPointSamplingBeyondScene env_sampling{scene};
-        *pdf = env_sampling.Pdf(interaction.pos);
-      }
-      return interaction.radiance;
-    }
-    else if (node.node_type == NodeType::AREA_LIGHT)
-    {
-      const SurfaceInteraction &interaction = node.interaction.emitter_area;
-      return GetEmitterOf(interaction, scene).Evaluate(interaction.hitid, out_direction, context, pdf);
-    }
-    else if (node.node_type == NodeType::POINT_LIGHT)
-    {
-      const PointEmitterInteraction &interaction = node.interaction.emitter_point;
-      return interaction.emitter->Evaluate(interaction.pos, out_direction, context, pdf);
-    }
-    else
-      return Double3{0.};
-  }
-
-
   double GetPdfOfGeneratingSampleOnEmitter(const RW::PathNode &node, const PathContext &context) const
   {
-    if (node.node_type == RW::NodeType::AREA_LIGHT)
+    if (node.node_type == RW::NodeType::SURFACE_EMITTER)
     {
-      const SurfaceInteraction &interaction = node.interaction.emitter_area;
-      const auto &emitter = GetEmitterOf(interaction, scene);
-      double pdf = emitter.EvaluatePdf(node.interaction.emitter_area.hitid, context);
+      const SurfaceInteraction &interaction = node.interaction.surface;
+      const auto &emitter = *ASSERT_NOT_NULL(GetMaterialOf(interaction, scene).emitter);
+      double pdf = emitter.EvaluatePdf(node.interaction.surface.hitid, context);
       pdf *= light_picker.PmfOfLight(emitter);
       pdf *= light_picker.emitter_type_selection_probabilities[NewLightPicker::IDX_PROB_AREA];
       return pdf;
@@ -927,6 +918,7 @@ public:
     else 
       return RaySegment{{coord_target-length*direction, direction}, length};
   }
+  
 
   bool RouletteTerminationAllowedAtLength(int n)
   {
@@ -955,11 +947,11 @@ public:
       return false;
   }
   
-  
+
   double DFactorOf(const RW::PathNode &node, const Double3 &exitant_dir) const
   {
     // By definition the factor is 1 for Volumes.
-    if (node.geom_type == RW::GeometryType::SURFACE)
+    if (node.IsSurfaceInteraction())
     {
       // TODO: Refactor code so that this formula goes together with BSDF corrections
       // into a common "kernel" following Veach Fig. 5.8.
@@ -972,15 +964,10 @@ public:
   
   void AddAntiSelfIntersectionOffsetAt(Double3 &position, const RW::PathNode &node, const Double3 &exitant_dir) const
   {
-    if (node.geom_type == RW::GeometryType::SURFACE)
+    if (node.IsSurfaceInteraction())
     {
-      position += AntiSelfIntersectionOffset(node.interaction.emitter_area, exitant_dir);
+      position += AntiSelfIntersectionOffset(node.interaction.surface, exitant_dir);
     }
-  }
-  
-  bool IsHitableEmissiveNode(const PathNode &node)
-  {
-    return node.node_type == NodeType::AREA_LIGHT || node.node_type == NodeType::ENV;
   }
   
   
@@ -994,7 +981,7 @@ public:
   {
     static constexpr int MAX_ITERATIONS = 100; // For safety, in case somethign goes wrong with the intersections ...
     Spectral3 result{1.};
-    RaySurfaceIntersection intersection;
+    SurfaceInteraction intersection;
     seg.length *= 0.99999; // Dammit!
     IterateIntersectionsBetween iter{seg, scene};
     for (int n = 0; n < MAX_ITERATIONS; ++n)
@@ -1024,6 +1011,37 @@ public:
   }
 
 
+  RW::PathNode AllocateNode(const CollisionData &collision, MediumTracker &medium_tracker, const PathContext &context) const
+  {
+    RW::PathNode node;
+    node.incident_dir = collision.segment.ray.dir;
+    if (collision.smpl.t < collision.segment.length)
+    {
+      node.node_type = RW::NodeType::VOLUME_SCATTER;
+      node.interaction.volume = VolumeInteraction{
+        Position(collision.smpl, collision.segment),
+        medium_tracker.getCurrentMedium()
+      };
+    }
+    else if (collision.intersection.hitid)
+    {
+      node.node_type = RW::NodeType::SURFACE_SCATTER;
+      node.interaction.surface = collision.intersection;
+    }
+    else
+    {
+      const auto &emitter = this->GetEnvLight();
+      node.node_type = RW::NodeType::ENV;
+      node.interaction.emitter_env = RW::EnvironmentalRadianceFieldInteraction{
+        -collision.segment.ray.dir,
+        emitter
+      };
+      node.interaction.emitter_env.radiance = emitter.Evaluate(-collision.segment.ray.dir, context);
+    }
+    return node;
+  }
+  
+
   void TrackToNextInteraction(
     CollisionData &collision,
     MediumTracker &medium_tracker,
@@ -1034,7 +1052,7 @@ public:
     
     Spectral3 total_weight{1.};
     
-    RaySurfaceIntersection &intersection = collision.intersection;
+    SurfaceInteraction &intersection = collision.intersection;
     IterateIntersectionsBetween iter{collision.segment, scene};
     
     for (int interfaces_crossed=0; interfaces_crossed < MAX_ITERATIONS; ++interfaces_crossed)
@@ -1070,7 +1088,7 @@ public:
       else
       {
         if (!hit)
-          intersection = RaySurfaceIntersection{};
+          intersection = SurfaceInteraction{};
         collision.smpl.weight = total_weight;
         collision.segment.length = iter.GetT();
         collision.smpl.t = prev_t + medium_smpl.t;

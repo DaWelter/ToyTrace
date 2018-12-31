@@ -14,7 +14,7 @@ double UpperBoundToBoundingBoxDiameter(const Scene &scene)
 }
 
 
-bool IterateIntersectionsBetween::Next(RaySegment &seg, RaySurfaceIntersection &intersection)
+bool IterateIntersectionsBetween::Next(RaySegment &seg, SurfaceInteraction &intersection)
 {
 #if 0
   tfar = this->seg.length;
@@ -79,7 +79,7 @@ void MediumTracker::initializePosition(const Double3& pos)
       IterateIntersectionsBetween iter{
         {{start, {-1., 0., 0.}}, distance_to_go}, scene};
       RaySegment seg;
-      RaySurfaceIntersection intersection;
+      SurfaceInteraction intersection;
       while (iter.Next(seg, intersection))
       {
         goingThroughSurface(seg.ray.dir, intersection);
@@ -150,7 +150,7 @@ public:
     smpl_dir.value *= smpl_pos.value;
     
     RaySegment seg{{smpl_pos.coordinates, smpl_dir.coordinates}, LargeNumber};
-    RaySurfaceIntersection intersection;
+    SurfaceInteraction intersection;
     bool is_hit = scene.FirstIntersectionEmbree(seg.ray, 0., seg.length, intersection);
     if (is_hit)
     {

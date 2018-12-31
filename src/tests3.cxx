@@ -25,7 +25,7 @@ void RenderingMediaTransmission1Helper(
   RaySegment seg{ray, LargeNumber};
   std::printf("Media Trace:\n");
   IterateIntersectionsBetween iter{seg, scene};
-  RaySurfaceIntersection intersection;
+  SurfaceInteraction intersection;
   int i = 0;
   for (; iter.Next(seg, intersection); ++i)
   {

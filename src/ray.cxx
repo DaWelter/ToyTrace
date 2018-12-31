@@ -28,10 +28,12 @@ SurfaceInteraction::SurfaceInteraction(const HitId& _hitid)
 {
   assert((bool)hitid);
   hitid.geom->GetLocalGeometry(*this);
+  normal = geometry_normal;
+  shading_normal = smooth_normal;
 }
 
 
-void RaySurfaceIntersection::SetOrientedNormals(const Double3 &incident)
+void SurfaceInteraction::SetOrientedNormals(const Double3 &incident)
 {
   double sign = -Sign(Dot(incident, geometry_normal));
   normal = sign*geometry_normal;
@@ -39,7 +41,7 @@ void RaySurfaceIntersection::SetOrientedNormals(const Double3 &incident)
 }
 
 
-RaySurfaceIntersection::RaySurfaceIntersection(const HitId& _hitid, const RaySegment &_incident_segment)
+SurfaceInteraction::SurfaceInteraction(const HitId& _hitid, const RaySegment &_incident_segment)
   : SurfaceInteraction(_hitid)
 {
   SetOrientedNormals(_incident_segment.ray.dir);

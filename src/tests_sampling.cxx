@@ -1149,12 +1149,12 @@ class ShaderScatterer : public Scatterer
   std::unique_ptr<Shader> shader;
   PathContext context;
   Mesh mesh;
-  mutable RaySurfaceIntersection last_intersection;
+  mutable SurfaceInteraction last_intersection;
   mutable Double3 last_incident_dir;
   double ior_below_over_above; // Ratio
   EmbreeAccelerator embree;
   
-  RaySurfaceIntersection& MakeIntersection(const Double3 &reverse_incident_dir) const
+  SurfaceInteraction& MakeIntersection(const Double3 &reverse_incident_dir) const
   {
     if (last_incident_dir != reverse_incident_dir)
     {
@@ -1165,7 +1165,7 @@ class ShaderScatterer : public Scatterer
     return last_intersection;
   }
   
-  Spectral3 UndoneIorScaling(Spectral3 value, const Double3 &wi, const RaySurfaceIntersection &intersection, const Double3 &wo) const
+  Spectral3 UndoneIorScaling(Spectral3 value, const Double3 &wi, const SurfaceInteraction &intersection, const Double3 &wo) const
   {
     if (Dot(wo, intersection.normal) < 0. && context.transport == TransportType::RADIANCE) // We have transmission
     {
@@ -1180,7 +1180,7 @@ class ShaderScatterer : public Scatterer
     return value;
   }
   
-  Spectral3 CosThetaTerm(Spectral3 value, const Double3 &wi, const RaySurfaceIntersection &intersection, const Double3 &wo) const
+  Spectral3 CosThetaTerm(Spectral3 value, const Double3 &wi, const SurfaceInteraction &intersection, const Double3 &wo) const
   {
     // Here, the normal correction is applied. See Veach, p.g. 153.
     if (context.transport==RADIANCE) // light comes from wo

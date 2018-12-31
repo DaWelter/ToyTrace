@@ -108,6 +108,11 @@ public:
   {
     return nodes[i];
   }
+
+  RW::PathNode& Node(int i)
+  {
+    return nodes[i];
+  }
   
   const RW::PathNode& NodeFromBack(int i) const
   {
@@ -411,19 +416,18 @@ public:
         light_context);
       light_history.Finish();
     }
+   
     
     assert (light_history.NumNodes() <= max_path_node_count);
     assert (eye_history.NumNodes() <= max_path_node_count);
-    
-    if (light_history.NumNodes()>1 && light_history.NodeFromBack(0).node_type != RW::NodeType::SCATTER)
-    {
-      light_history.Pop();
-    }
 
     for (int eye_idx=0; eye_idx<eye_history.NumNodes(); ++eye_idx)
     {
-      if (!IsHitableEmissiveNode(eye_history.Node(eye_idx)))
+      if (eye_idx==0 || eye_history.Node(eye_idx).IsScatterNode())
       {
+        // Only camera and scatter nodes are allowed to connect to the light path. Sensor nodes only if they are the first node.
+        // In particular we must not connect light sources on the eye path to the light path. 
+        // Surface or volume nodes default to being scatter nodes, so I don't have to consider these explicitly in the above conditional.
         if (eye_idx+1 < max_path_node_count)
           DirectLighting(eye_idx, eye_medium_tracker_before_node[eye_idx]);
         for (int light_idx=1; light_idx<std::min(light_history.NumNodes(), max_path_node_count-eye_idx-1); ++light_idx)
@@ -431,11 +435,8 @@ public:
           ConnectWithLightPath(eye_idx, light_idx,  eye_medium_tracker_before_node[eye_idx]);
         }
       }
-      else
-      {
-        assert (eye_idx == eye_history.NumNodes()-1); // Hitting a light should terminate the walk.
-        HandleLightHit();
-      }
+      if (eye_idx>0) // Would cause error on starting node
+        HandleLightHit(eye_idx);
     }
  
     for (const auto &splat : splats)
@@ -500,15 +501,17 @@ public:
   }
   
   
-  // Last eye node lies on a light source. Compute path contribution.
-  void HandleLightHit()
+  // Eye node lies on a light source. Compute path contribution.
+  void HandleLightHit(int eye_idx)
   {
     assert(eye_history.NumNodes()>=2);
-    int eye_idx = eye_history.NumNodes()-1;
-    const auto &end_node = eye_history.NodeFromBack(0);
+    auto &end_node = eye_history.Node(eye_idx);
+    
+    if (!end_node.TryEnableOperationsOnEmitter(scene))
+      return;
     
     double reverse_scatter_pdf = 0.;
-    Spectral3 end_weight = EvaluateScatterCoordinateOfEmitter(
+    Spectral3 end_weight = Evaluate(
       end_node, -end_node.incident_dir, light_context, &reverse_scatter_pdf);
     
     VolumePdfCoefficients volume_pdf_coeff{}; // Already covered by the random walk. The SubpathHistory has the coefficients for the last segment.
@@ -528,6 +531,8 @@ public:
     
     Spectral3 path_weight = end_weight*eye_history.Beta(eye_idx);
     AddPathContribution(eye_idx, -1, mis_weight, path_weight);
+    
+    end_node.EnableOperationOnScattererIfFeasible();
   }
   
   
@@ -589,6 +594,10 @@ public:
       if (step.node.node_type == RW::NodeType::ZERO_CONTRIBUTION_ABORT_WALK) // Hit a light or particle escaped the scene or aborting.
         break;
 
+      // If this is a light path we must not generate paths with light sources in between the ends.
+      if (context.transport==IMPORTANCE && !step.node.IsScatterNode())
+        break;
+      
       Pdf reverse_pdf = ReverseScatterPdf(current_node, step.scatter_pdf, step.segment.ray.dir, context);
       
       // Determine survival of russian roulette early because it modifies beta_factor!
@@ -605,7 +614,8 @@ public:
       if (!survive)
         break;
       
-      if (step.node.node_type != RW::NodeType::SCATTER)
+      if (step.node.node_type == RW::NodeType::ZERO_CONTRIBUTION_ABORT_WALK ||
+          step.node.node_type == RW::NodeType::ENV)
         break;
       
       ++path_node_count;
@@ -617,7 +627,7 @@ public:
   {
     // Only surface (BSDF) sampling pdf's are allowed to be unsymmetric. There is no need for phase functions to be asymmetric.
     // And emission directions of light sources and sensors don't have a reverse path at all.
-    if (node.node_type != NodeType::SCATTER || node.geom_type != GeometryType::SURFACE)
+    if (node.node_type != NodeType::SURFACE_SCATTER)
       return forward_pdf;
     // Components proportional to Dirac-Delta should be symmetrical because it importance samples the symmetrical bsdf!
     // And then there is really no other place to put the peak other than the symmetrical directions.
@@ -625,9 +635,7 @@ public:
     if (forward_pdf.IsFromDelta()) 
       return forward_pdf;
 
-    assert (node.geom_type == GeometryType::SURFACE);
-
-    const RaySurfaceIntersection &intersection = node.interaction.ray_surface;
+    const SurfaceInteraction &intersection = node.interaction.surface;
     return GetShaderOf(intersection, scene).Pdf(reverse_incident_dir, intersection, -node.incident_dir, context);
   }
 
@@ -767,8 +775,19 @@ public:
       
       ++path_node_count;
       
-      if (step.node.node_type != RW::NodeType::SCATTER) // Hit a light or particle escaped the scene or aborting.
-        break;   
+      if (this->do_sample_brdf && step.node.TryEnableOperationsOnEmitter(scene))
+      {
+        Spectral3 end_weight = Evaluate(step.node, -step.segment.ray.dir, context, nullptr);
+        double pdf_direct_sample = GetPdfOfGeneratingSampleOnEmitter(step.node, context);
+        Pdf pdf_due_to_scatter = PdfConversionFactor(prev_node, step.node, step.segment, FwdCoeffs(volume_pdf_coeff), step.scatter_pdf.IsFromDelta())*step.scatter_pdf;
+        double mis_weight = MisWeight(pdf_due_to_scatter, pdf_direct_sample);
+        path_sample_values += mis_weight*end_weight*beta;
+        step.node.EnableOperationOnScattererIfFeasible();
+      }
+      
+      if (step.node.node_type == RW::NodeType::ZERO_CONTRIBUTION_ABORT_WALK ||
+          step.node.node_type == RW::NodeType::ENV)
+        break;
       
       bool survive = SurvivalAtNthScatterNode(beta, path_node_count); 
       if (!survive)
@@ -777,32 +796,8 @@ public:
       assert(beta.allFinite());
     }
 
-    if (this->do_sample_brdf && IsHitableEmissiveNode(step.node))
-    {
-      double pdf_end_pos = 0.;
-      Spectral3 end_weight = EndPathWithZeroVerticesOnOtherSide(prev_node, step.node, step.segment, context, &pdf_end_pos);
-      
-      Pdf step_pdf_of_end = PdfConversionFactor(prev_node, step.node, step.segment, FwdCoeffs(volume_pdf_coeff), step.scatter_pdf.IsFromDelta())*step.scatter_pdf;
-      
-      double mis_weight = MisWeight(step_pdf_of_end, pdf_end_pos);
-      
-      path_sample_values += mis_weight*end_weight*beta;
-    }
  
     return Color::SpectralSelectionToRGB(path_sample_values, lambda_selection.first);
-  }
-
-  
-  // TODO: remove parameter for start node?!
-  Spectral3 EndPathWithZeroVerticesOnOtherSide(const RW::PathNode &, const RW::PathNode &end_node, const RaySegment &segment_to_end,  const PathContext &context, double *pdf_reverse_target)
-  {
-    assert(IsHitableEmissiveNode(end_node));
-    Spectral3 scatter_value = EvaluateScatterCoordinate(end_node, -segment_to_end.ray.dir, context, nullptr);
-    if (pdf_reverse_target)
-    {
-      *pdf_reverse_target = GetPdfOfGeneratingSampleOnEmitter(end_node, context);
-    }
-    return scatter_value;
   }
   
   

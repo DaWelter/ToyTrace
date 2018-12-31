@@ -9,7 +9,7 @@ class Spheres;
 class Geometry;
 class Mesh;
 struct Ray;
-struct RaySurfaceIntersection;
+struct SurfaceInteraction;
 class Box;
 
 struct RTCHit;
@@ -19,8 +19,8 @@ class EmbreeAccelerator
 private:
   RTCDevice rtdevice = nullptr;
   RTCScene rtscene = nullptr;
-  void FirstIntersectionTriangle(const RTCHit &rthit, const Ray &, RaySurfaceIntersection &intersection) const;
-  void FirstIntersectionSphere(const RTCHit &rthit, const Ray &, RaySurfaceIntersection &intersection) const;
+  void FirstIntersectionTriangle(const RTCHit &rthit, const Ray &, SurfaceInteraction &intersection) const;
+  void FirstIntersectionSphere(const RTCHit &rthit, const Ray &, SurfaceInteraction &intersection) const;
   static void SphereBoundsFunc(const RTCBoundsFunctionArguments*);
   static void SphereIntersectFunc(const RTCIntersectFunctionNArguments*);
 public:
@@ -29,6 +29,6 @@ public:
   void Add(Mesh &mesh);
   void Add(Spheres &spheres);
   void Build();
-  bool FirstIntersection(const Ray &ray, double tnear, double &ray_length, RaySurfaceIntersection &intersection) const;
+  bool FirstIntersection(const Ray &ray, double tnear, double &ray_length, SurfaceInteraction &intersection) const;
   Box GetSceneBounds() const;
 };

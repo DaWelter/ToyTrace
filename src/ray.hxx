@@ -67,20 +67,14 @@ struct SurfaceInteraction : public InteractionPoint
   HitId hitid;
   Double3 geometry_normal;
   Double3 smooth_normal;
-  Float2 tex_coord;
-  Float3 pos_bounds { 0. }; // Bounds within which the true hitpoint (computed without roundoff errors) lies. See PBRT chapt 3.
-  
-  SurfaceInteraction(const HitId &hitid);
-  SurfaceInteraction() = default;
-};
-
-struct RaySurfaceIntersection : public SurfaceInteraction
-{
   Double3 normal;    // Geometry normal, oriented toward the incomming ray, if result of ray-surface intersection.
   Double3 shading_normal; // Same for smooth normal.
-  
-  RaySurfaceIntersection(const HitId &hitid, const RaySegment &_incident_segment);
-  RaySurfaceIntersection() = default;
+  Float2 tex_coord;
+  Float3 pos_bounds { 0. }; // Bounds within which the true hitpoint (computed without roundoff errors) lies. See PBRT chapt 3.
+
+  SurfaceInteraction(const HitId &hitid, const RaySegment &_incident_segment);
+  SurfaceInteraction(const HitId &hitid);
+  SurfaceInteraction() = default;
   void SetOrientedNormals(const Double3 &incident);
 };
 

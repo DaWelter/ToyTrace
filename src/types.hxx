@@ -27,4 +27,3 @@ class EnvironmentalRadianceField;
 }
 
 struct SurfaceInteraction;
-struct RaySurfaceIntersection;

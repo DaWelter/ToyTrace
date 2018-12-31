@@ -75,12 +75,6 @@ class UniformAreaLightDirectionalPart : public AreaEmitter
 {
   SpectralN spectrum;
   
-  double Visibility(const PosSampleCoordinates &area, const Double3 &dir) const
-  {
-    SurfaceInteraction interaction{area};
-    return Dot(interaction.geometry_normal, dir) > 0. ? 1. : 0.;
-  }
-  
 public:
   UniformAreaLightDirectionalPart(const SpectralN &_spectrum) : spectrum(_spectrum) 
   {
@@ -103,7 +97,8 @@ public:
   
   inline Spectral3 Evaluate(const PosSampleCoordinates &area, const Double3 &dir_out, const PathContext &context, double *pdf_dir) const override
   {
-    double visibility = Visibility(area, dir_out);
+    const SurfaceInteraction interaction{area};
+    double visibility = Dot(interaction.geometry_normal, dir_out) > 0. ? 1. : 0.;
     if (pdf_dir)
       *pdf_dir = visibility/UnitHalfSphereSurfaceArea;
     // Cos of angle between exitant dir and normal is dealt with elsewhere.
@@ -119,12 +114,7 @@ using UniformAreaLight = AreaUniformMixin<UniformAreaLightDirectionalPart>;
 class ParallelAreaLightDirectionalPart : public AreaEmitter
 {
   SpectralN irradiance;  // (?) The power density w.r.t. area.
-  
-  double Visibility(const PosSampleCoordinates &area, const Double3 &dir) const
-  {
-    SurfaceInteraction interaction{area};
-    return Dot(interaction.geometry_normal, dir) > 0. ? 1. : 0.;
-  }
+ 
   
 public:
   ParallelAreaLightDirectionalPart(const SpectralN &_irradiance) : irradiance{_irradiance}

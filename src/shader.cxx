@@ -5,7 +5,7 @@
 
 namespace
 {
-inline Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Texture *tex, const RaySurfaceIntersection &surface_hit, const Index3 &lambda_idx)
+inline Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Texture *tex, const SurfaceInteraction &surface_hit, const Index3 &lambda_idx)
 {
   Spectral3 ret{color};
   if (tex)
@@ -17,7 +17,7 @@ inline Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Textur
 }
 
 
-inline double MaybeMultiplyTextureLookup(double _value, const Texture *tex, const RaySurfaceIntersection &surface_hit)
+inline double MaybeMultiplyTextureLookup(double _value, const Texture *tex, const SurfaceInteraction &surface_hit)
 {
   if (tex)
   {
@@ -52,9 +52,9 @@ inline T AverageOfProjectedSchlicksApproximationOverHemisphere(const T &kspecula
 }
 
 
-double Shader::Pdf(const Double3& incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext& context) const
+double Shader::Pdf(const Double3& incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext& context) const
 {
-  RaySurfaceIntersection intersect{surface_hit};
+  SurfaceInteraction intersect{surface_hit};
   // Puke ... TODO: Abolish requirement of normal alignment with incident dir.
   if (Dot(incident_dir, intersect.normal) < 0.)
   {
@@ -82,7 +82,7 @@ DiffuseShader::DiffuseShader(const SpectralN &_reflectance, std::unique_ptr<Text
 }
 
 
-Spectral3 DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
+Spectral3 DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
   Spectral3 ret{0.};
   assert (Dot(surface_hit.normal, incident_dir)>=0); // Because normal is aligned such that this conditions should be true.
@@ -100,7 +100,7 @@ Spectral3 DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurf
 }
 
 
-ScatterSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
+ScatterSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
 {
   auto m = OrthogonalSystemZAligned(surface_hit.normal);
   Double3 v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
@@ -120,7 +120,7 @@ SpecularReflectiveShader::SpecularReflectiveShader(const SpectralN& reflectance)
 }
 
 
-Spectral3 SpecularReflectiveShader::EvaluateBSDF(const Double3& incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double* pdf) const
+Spectral3 SpecularReflectiveShader::EvaluateBSDF(const Double3& incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double* pdf) const
 {
   if (pdf)
     *pdf = 0.;
@@ -128,7 +128,7 @@ Spectral3 SpecularReflectiveShader::EvaluateBSDF(const Double3& incident_dir, co
 }
 
 
-ScatterSample SpecularReflectiveShader::SampleBSDF(const Double3& incident_dir, const RaySurfaceIntersection& surface_hit, Sampler& sampler, const PathContext &context) const
+ScatterSample SpecularReflectiveShader::SampleBSDF(const Double3& incident_dir, const SurfaceInteraction& surface_hit, Sampler& sampler, const PathContext &context) const
 {
   Double3 r = Reflected(incident_dir, surface_hit.shading_normal);
   double cos_rn = Dot(surface_hit.normal, r);
@@ -148,7 +148,7 @@ ScatterSample SpecularReflectiveShader::SampleBSDF(const Double3& incident_dir, 
 }
 
 
-inline bool OnSameSide(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &other_dir)
+inline bool OnSameSide(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const Double3 &other_dir)
 {
   assert(Dot(reverse_incident_dir, surface_hit.normal) >= 0.);
   return Dot(other_dir, surface_hit.normal) >= 0.;
@@ -181,7 +181,7 @@ SpecularTransmissiveDielectricShader::SpecularTransmissiveDielectricShader(doubl
 }
 
 
-ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
+ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
 {
   double shn_dot_i = std::abs(Dot(surface_hit.shading_normal, reverse_incident_dir));
   bool entering = Dot(surface_hit.geometry_normal, reverse_incident_dir) > 0.;
@@ -250,7 +250,7 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
 }
 
 
-Spectral3 SpecularTransmissiveDielectricShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
+Spectral3 SpecularTransmissiveDielectricShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
   if (pdf)
     *pdf = 0.;
@@ -265,7 +265,7 @@ SpecularPureRefractiveShader::SpecularPureRefractiveShader(double _ior_ratio) : 
 }
 
 
-ScatterSample SpecularPureRefractiveShader::SampleBSDF(const Double3& reverse_incident_dir, const RaySurfaceIntersection& surface_hit, Sampler& sampler, const PathContext& context) const
+ScatterSample SpecularPureRefractiveShader::SampleBSDF(const Double3& reverse_incident_dir, const SurfaceInteraction& surface_hit, Sampler& sampler, const PathContext& context) const
 {
   ScatterSample smpl;
   double shn_dot_i = std::abs(Dot(surface_hit.shading_normal, reverse_incident_dir));
@@ -295,7 +295,7 @@ ScatterSample SpecularPureRefractiveShader::SampleBSDF(const Double3& reverse_in
 }
 
 
-Spectral3 SpecularPureRefractiveShader::EvaluateBSDF(const Double3& reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext& context, double* pdf) const
+Spectral3 SpecularPureRefractiveShader::EvaluateBSDF(const Double3& reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext& context, double* pdf) const
 {
   if (pdf)
     *pdf = 0.;
@@ -333,7 +333,7 @@ MicrofacetShader::MicrofacetShader(
 }
 
 
-Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
+Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
   double n_dot_out = Dot(surface_hit.normal, out_direction);
   double ns_dot_out = std::abs(Dot(surface_hit.shading_normal, out_direction));
@@ -401,7 +401,7 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
 }
 
 
-ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
+ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
 {
   auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
   double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
@@ -430,7 +430,7 @@ ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, 
 
 
 
-Spectral3 InvisibleShader::EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
+Spectral3 InvisibleShader::EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
   constexpr double tol = Epsilon;
   double u = LengthSqr(incident_dir + out_direction);
@@ -441,7 +441,7 @@ Spectral3 InvisibleShader::EvaluateBSDF(const Double3 &incident_dir, const RaySu
 }
 
 
-ScatterSample InvisibleShader::SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const
+ScatterSample InvisibleShader::SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
 {
   return ScatterSample{-incident_dir, Spectral3{1.}, 1.};
 }
@@ -476,7 +476,7 @@ double DiffuseAttenuationFactor(double albedo1, double albedo2, double average_a
 }
 
 
-Spectral3 SpecularDenseDielectricShader::EvaluateBSDF(const Double3& reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext& context, double* pdf) const
+Spectral3 SpecularDenseDielectricShader::EvaluateBSDF(const Double3& reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext& context, double* pdf) const
 { 
   double cos_out_n = Dot(surface_hit.normal, out_direction);
   if (cos_out_n > 0.)
@@ -506,7 +506,7 @@ Spectral3 SpecularDenseDielectricShader::EvaluateBSDF(const Double3& reverse_inc
 
 
 
-ScatterSample SpecularDenseDielectricShader::SampleBSDF(const Double3& reverse_incident_dir, const RaySurfaceIntersection& surface_hit, Sampler& sampler, const PathContext& context) const
+ScatterSample SpecularDenseDielectricShader::SampleBSDF(const Double3& reverse_incident_dir, const SurfaceInteraction& surface_hit, Sampler& sampler, const PathContext& context) const
 {
   double cos_shn_incident = std::max(0., Dot(surface_hit.shading_normal, reverse_incident_dir));
   double reflected_fraction = SchlicksApproximation(specular_reflectivity, cos_shn_incident);

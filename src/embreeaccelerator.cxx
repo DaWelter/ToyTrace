@@ -62,7 +62,7 @@ void EmbreeAccelerator::Add(Spheres& spheres)
 }
 
 
-bool EmbreeAccelerator::FirstIntersection(const Ray &ray, double tnear, double &ray_length, RaySurfaceIntersection &intersection) const
+bool EmbreeAccelerator::FirstIntersection(const Ray &ray, double tnear, double &ray_length, SurfaceInteraction &intersection) const
 {
   RTCIntersectContext context;
   rtcInitIntersectContext(&context);
@@ -106,7 +106,7 @@ bool EmbreeAccelerator::FirstIntersection(const Ray &ray, double tnear, double &
 }
 
 
-void EmbreeAccelerator::FirstIntersectionTriangle(const RTCHit &rthit, const Ray &ray, RaySurfaceIntersection &intersection) const
+void EmbreeAccelerator::FirstIntersectionTriangle(const RTCHit &rthit, const Ray &ray, SurfaceInteraction &intersection) const
 {
   auto geom = rtcGetGeometry(rtscene, rthit.geomID);
   Float3 pos, n_sh;
@@ -137,7 +137,7 @@ void EmbreeAccelerator::FirstIntersectionTriangle(const RTCHit &rthit, const Ray
 }
 
 
-void EmbreeAccelerator::FirstIntersectionSphere(const RTCHit &rthit, const Ray &ray, RaySurfaceIntersection &intersection) const
+void EmbreeAccelerator::FirstIntersectionSphere(const RTCHit &rthit, const Ray &ray, SurfaceInteraction &intersection) const
 {
   const auto* spheres = static_cast<const Spheres*>(intersection.hitid.geom);
   HitId &hit = intersection.hitid;

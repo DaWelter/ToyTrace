@@ -34,7 +34,7 @@ Scene::~Scene()
 {}
 
 
-bool Scene::FirstIntersectionEmbree(const Ray &ray, double tnear, double &ray_length, RaySurfaceIntersection &ia) const
+bool Scene::FirstIntersectionEmbree(const Ray &ray, double tnear, double &ray_length, SurfaceInteraction &ia) const
 {
   return embreeaccelerator.FirstIntersection(ray, tnear, ray_length, ia);
 }

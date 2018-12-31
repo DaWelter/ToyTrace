@@ -179,7 +179,7 @@ public:
     return *new_primitives[i];
   }
   
-  bool FirstIntersectionEmbree(const Ray &ray, double tnear, double &ray_length, RaySurfaceIntersection &intersection) const;
+  bool FirstIntersectionEmbree(const Ray &ray, double tnear, double &ray_length, SurfaceInteraction &intersection) const;
   
   void BuildAccelStructure();
   

@@ -187,7 +187,7 @@ class EmbreePrimitives : public testing::Test
 {
   Scene scene;
 protected:
-  RaySurfaceIntersection intersection;
+  SurfaceInteraction intersection;
   double distance;
   
   void Initialize(std::function<void(Scene &)> scene_filler)
@@ -218,7 +218,7 @@ protected:
 };
 
 
-inline RaySegment MakeSegmentAt(const RaySurfaceIntersection &intersection, const Double3 &ray_dir)
+inline RaySegment MakeSegmentAt(const SurfaceInteraction &intersection, const Double3 &ray_dir)
 {
   return RaySegment{
     {intersection.pos + AntiSelfIntersectionOffset(intersection, ray_dir), ray_dir},
@@ -301,7 +301,7 @@ p 4
   scene.BuildAccelStructure();
   Ray r{{0, 0, 1.e5 + 1.}, {0, 0, -1}};
   double tfar = Infinity;
-  RaySurfaceIntersection intersection;
+  SurfaceInteraction intersection;
   bool is_hit = scene.FirstIntersectionEmbree(r, 0, tfar, intersection);
   EXPECT_TRUE(is_hit);
   r.org = intersection.pos;
@@ -342,7 +342,7 @@ TEST(Embree, SphereIntersectionMadness)
     // Shoot ray to the inside. Expect intersection at the
     // front side of the sphere.
     RaySegment rs{{org, dir}, LargeNumber};
-    RaySurfaceIntersection intersect1;
+    SurfaceInteraction intersect1;
     bool bhit = world.FirstIntersection(rs.ray, 0, rs.length, intersect1);
     ASSERT_TRUE(bhit);
     ASSERT_LE(Length(org - intersect1.pos), Length(org - sphere_org));
@@ -377,7 +377,7 @@ TEST(Embree, SphereIntersectionMadness2)
   const int N = 100;
   for (int num = 0; num < N; ++num)
   {
-    RaySurfaceIntersection intersect;
+    SurfaceInteraction intersect;
     bool bhit = world.FirstIntersection(rs.ray, 0, rs.length, intersect);
     ASSERT_TRUE(bhit);
     double rho = Length(intersect.pos-sphere_org);
@@ -411,7 +411,7 @@ TEST(Embree, SphereIntersectionMadness3)
   const int N = 100;
   for (int num = 0; num < N; ++num)
   {
-    RaySurfaceIntersection intersect;
+    SurfaceInteraction intersect;
     bool bhit = world.FirstIntersection(rs.ray, 0., rs.length, intersect);
     ASSERT_TRUE(bhit);
     double rho = Length(intersect.pos);
@@ -491,6 +491,7 @@ class PerspectiveCameraTesting : public testing::Test
   Sampler sampler;
   InfinitePlane imageplane;
   std::unique_ptr<PerspectiveCamera> cam;
+  Scene scene;
 public:
   PerspectiveCameraTesting() :
     imageplane({0, 0, 1}, {0, 0, 1})

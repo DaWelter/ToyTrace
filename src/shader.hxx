@@ -20,9 +20,9 @@ class Shader
 public:
   Shader(int _flags = 0) : flags(_flags) {}
   virtual ~Shader() {}
-  virtual ScatterSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const = 0;
-  virtual Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
-  virtual double Pdf(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, const Double3 &out_direction, const PathContext &context) const;
+  virtual ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const = 0;
+  virtual Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
+  virtual double Pdf(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3 &out_direction, const PathContext &context) const;
 };
 
 
@@ -32,8 +32,8 @@ class DiffuseShader : public Shader
   std::unique_ptr<Texture> diffuse_texture; // TODO: Share textures among shaders?
 public:
   DiffuseShader(const SpectralN &reflectance, std::unique_ptr<Texture> _diffuse_texture);
-  ScatterSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+  ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
 
 
@@ -43,8 +43,8 @@ class SpecularReflectiveShader : public Shader
   SpectralN kr_s;
 public:
   SpecularReflectiveShader(const SpectralN &reflectance);
-  ScatterSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+  ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
 
 
@@ -59,8 +59,8 @@ public:
     double _glossy_exponent,
     std::unique_ptr<Texture> _glossy_exponent_texture
   );
-  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
 
 
@@ -69,8 +69,8 @@ class SpecularTransmissiveDielectricShader : public Shader
   double ior_ratio; // Inside ior / Outside ior
 public:
   SpecularTransmissiveDielectricShader(double _ior_ratio);
-  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
 
 
@@ -80,8 +80,8 @@ class SpecularPureRefractiveShader : public Shader
   double ior_ratio;
 public:
   SpecularPureRefractiveShader(double _ior_ratio);
-  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;    
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;    
 };
 
 
@@ -95,8 +95,8 @@ public:
     const double _specular_reflectivity,
     const SpectralN &_diffuse_reflectivity,
     std::unique_ptr<Texture> _diffuse_texture);
-  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;    
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;    
 };
 
 
@@ -104,8 +104,8 @@ class InvisibleShader : public Shader
 {
 public:
   InvisibleShader() {}
-  ScatterSample SampleBSDF(const Double3 &incident_dir, const RaySurfaceIntersection &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const RaySurfaceIntersection& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+  ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
 
 
