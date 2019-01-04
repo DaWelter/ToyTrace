@@ -33,8 +33,7 @@ s 0 0 0 0.5
 
 {
 larea arealight2 uniform 1 0 0 20
-diffuse black  0 0 0 0
+shader black
 transform 0 -1.5 0.6 0 0 0 0.5 0.5 0.5
 m unitcube.dae
 }
-

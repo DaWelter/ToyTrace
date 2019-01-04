@@ -39,11 +39,9 @@ class SymbolTable
   std::unordered_map<std::string, Thing> things;
   std::string name_of_this_table;
 public:
-  SymbolTable(const std::string &_name, const std::string &default_name, Thing default_thing) :
-    currentThing(default_thing), name_of_this_table(_name)
-  {
-    things[default_name] = default_thing;
-  }
+  SymbolTable(const std::string &_name) :
+    currentThing(nullptr), name_of_this_table(_name)
+  {}
   
   int size() const
   {
@@ -86,10 +84,10 @@ struct Scope
   SymbolTable<AreaEmitter*> areaemitters;
   Eigen::Transform<double,3,Eigen::Affine> currentTransform;
   
-  Scope(const Scene &scene) :
-    shaders("Shader", "invisible", scene.invisible_shader),
-    mediums("Medium", "default", scene.empty_space_medium),
-    areaemitters("AreaEmitter", "none", nullptr),
+  Scope() :
+    shaders("Shader"),
+    mediums("Medium"),
+    areaemitters("AreaEmitter"),
     currentTransform(decltype(currentTransform)::Identity())
   {
   }
@@ -103,6 +101,7 @@ class NFFParser
 {
   Scene* scene;
   std::unordered_map<Material, MaterialIndex, Material::Hash> to_material_index;
+  Shader *black_shader;
   
   RenderingParameters *render_params;
   std::vector<fs::path> search_paths;
@@ -126,6 +125,10 @@ public:
     input{_is},
     lineno{0}
   {
+    scene->shaders.push_back(
+      std::make_unique<DiffuseShader>(SpectralN::Zero(), nullptr));
+    black_shader = scene->shaders.back().get();
+    
     for (int i = 0; i<scene->materials.size(); ++i)
       to_material_index[scene->materials[i]] = MaterialIndex(i);
     
@@ -148,6 +151,7 @@ public:
   }
 
   void Parse(Scope &scope);
+  Scope CreateScope();
 private:
   void ParseMesh(const char *filename, Scope &scope);
   MaterialIndex GetMaterialIndexOfCurrentParams(const Scope &scope);
@@ -159,6 +163,17 @@ private:
   fs::path MakeFullPath(const fs::path &filename) const;
 };
 
+
+Scope NFFParser::CreateScope()
+{
+  Scope s;
+  s.mediums.set_and_activate("default", scene->empty_space_medium);
+  s.shaders.set_and_activate("black", black_shader);
+  s.shaders.set_and_activate("invisible", scene->invisible_shader);
+  s.shaders.set_and_activate("default", scene->default_shader);
+  s.areaemitters.set_and_activate("none", nullptr);
+  return s;
+}
 
 
 void NFFParser::Parse(Scope &scope)
@@ -1045,8 +1060,9 @@ void Scene::ParseNFF(const fs::path &filename, RenderingParameters *render_param
   {
     throw std::runtime_error(strconcat("Could not open input file", filename));
   }
-  Scope scope{*this};
-  NFFParser(this, render_params, is, filename).Parse(scope);
+  NFFParser parser(this, render_params, is, filename);
+  auto scope = parser.CreateScope();
+  parser.Parse(scope);
 }
 
 
@@ -1059,8 +1075,9 @@ void Scene::ParseNFFString(const std::string &scenestr, RenderingParameters *ren
 
 void Scene::ParseNFF(std::istream &is, RenderingParameters *render_params)
 {
-  Scope scope{*this};
-  NFFParser(this, render_params, is, std::string()).Parse(scope);
+  NFFParser parser(this, render_params, is, std::string());
+  auto scope = parser.CreateScope();
+  parser.Parse(scope);
 }
 
 

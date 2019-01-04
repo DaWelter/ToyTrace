@@ -7,7 +7,7 @@ angle 55
 
 {
 larea arealight1 uniform 1. 1. 1. 20.
-diffuse black  1 1 1 0.
+shader black
 
 transform -2 1.9 2 0 1.57 0 2. 1 2.
 include unitrectangle.nff

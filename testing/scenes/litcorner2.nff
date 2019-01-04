@@ -20,7 +20,7 @@ angle 10
 
 
 larea arealight1 parallel 1. 1. 1. 3
-diffuse black  1 1 1 0.
+shader black
 p 4
 10 0 0
 10 0 1

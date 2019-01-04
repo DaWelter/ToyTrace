@@ -15,7 +15,7 @@ angle 60
 
 {
 larea arealight1 parallel 1. 1. 1. 100
-diffuse black  1 1 1 1.
+shader black
 transform 0 12 5.5 0 0.4 3.16 10 10 0.5
 m unitrectangle.obj
 }

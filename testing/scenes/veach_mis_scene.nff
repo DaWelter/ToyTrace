@@ -14,8 +14,7 @@ glossy roughness3 1. 1. 1. 0.5 0.5
 m veach_mis_scene.obj
 
 {
-diffuse black  1 1 1 0.
-
+shader black
 larea lightsize3 uniform 1 0 0 20.
 s -1.5 0 4 0.5
 larea lightsize2 uniform 0 1 0 250.

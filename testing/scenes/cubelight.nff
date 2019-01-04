@@ -7,6 +7,6 @@ angle 80
 
 {
 larea arealight2 uniform 1 1 1 5
-diffuse black  1 1 1 0.
+shader black
 m unitcube.dae
 }
