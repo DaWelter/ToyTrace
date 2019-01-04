@@ -284,11 +284,20 @@ Box EmbreeAccelerator::GetSceneBounds() const
   RTCBounds rtb;
   rtcGetSceneBounds(rtscene, &rtb);
   Box b;
-  b.min[0] = rtb.lower_x;
-  b.max[0] = rtb.upper_x;
-  b.min[1] = rtb.lower_y;
-  b.max[1] = rtb.upper_y;
-  b.min[2] = rtb.lower_z;
-  b.max[2] = rtb.upper_z;
+  if (std::isfinite(rtb.lower_x))
+  {
+    // If there is geometry, all of these should be finite.
+    b.min[0] = rtb.lower_x;
+    b.max[0] = rtb.upper_x;
+    b.min[1] = rtb.lower_y;
+    b.max[1] = rtb.upper_y;
+    b.min[2] = rtb.lower_z;
+    b.max[2] = rtb.upper_z;
+  }
+  else
+  {
+    // If the scene is empty
+    b.min = b.max = decltype(b.max)::Zero();
+  }
   return b;
 }
