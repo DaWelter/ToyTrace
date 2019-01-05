@@ -19,6 +19,7 @@ Double3 ToCosHemisphere(Double2 r);
 Double3 ToPhongHemisphere(Double2 r, double alpha);
 Double3 ToBeckmanHemisphere(Double2 r, double alpha);
 Double3 ToTriangleBarycentricCoords(Double2 r);
+Double3 ToUniformSphere3d(const Double3 &r);
 }
 
 

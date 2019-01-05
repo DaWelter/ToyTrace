@@ -18,6 +18,7 @@ constexpr auto Infinity= std::numeric_limits<double>::infinity();
 constexpr auto LargeNumber = std::numeric_limits<double>::max()/16;
 constexpr auto NaN = std::numeric_limits<double>::quiet_NaN();
 constexpr auto UnitSphereSurfaceArea = 4.*Pi;
+constexpr auto UnitSphereVolume = 4./3.*Pi;
 constexpr auto UnitHalfSphereSurfaceArea = 2.*Pi;
 
 template<class T, int d>

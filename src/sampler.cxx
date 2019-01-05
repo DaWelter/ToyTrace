@@ -116,6 +116,17 @@ Double3 ToTriangleBarycentricCoords(Double2 r)
 }
 
 
+Double3 ToUniformSphere3d(const Double3 &rvs)
+{
+// https://math.stackexchange.com/questions/87230/picking-random-points-in-the-volume-of-sphere-with-uniform-probability
+// Apply inversion method to probability of finding a point at distance D in a smaller sphere of radius 'rho'.
+// That is, CDF(rho) = P(D < rho) = (rho/sphere_radius)^3.
+// Thus, rho = CDF^{-1}(rvs[0]) = ....
+  double rho = std::pow(rvs[0], 1./3.);
+  Double3 p = ToUniformSphere({rvs[1], rvs[2]});
+  return rho*p;
+}
+
 }
 
 

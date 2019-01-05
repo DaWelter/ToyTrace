@@ -464,6 +464,58 @@ TEST_F(RandomSamplingFixture, TriangleSampling)
 }
 
 
+TEST_F(RandomSamplingFixture, Sphere3dSampling)
+{
+  static constexpr int N = 100;
+  static constexpr int NUM_REGIONS=10;
+  int n_samples[NUM_REGIONS] = {};
+  const double center_sphere_radius = 0.5;
+  const double center_area = UnitSphereVolume*std::pow(center_sphere_radius, 3.);
+  const double outer_octant_area = (Pi - center_area) / 8.;
+  const double region_area[NUM_REGIONS] = 
+  {
+    center_area,
+    outer_octant_area, outer_octant_area,
+    outer_octant_area, outer_octant_area,
+    outer_octant_area, outer_octant_area,
+    outer_octant_area, outer_octant_area,
+    0 // This bin collects points which fall outside the sphere.
+  };
+  for (int i=0; i<N; ++i)
+  {
+    Double3 rvs = { sampler.Uniform01(), sampler.Uniform01(), sampler.Uniform01() };
+    Double3 v = SampleTrafo::ToUniformSphere3d(rvs);
+    int region = 9;
+    const auto r = Length(v);
+    if (r<center_sphere_radius)
+      region = 0;
+    else if (r<=1.)
+    {
+      if (v[0] > 0)
+      {
+        if (v[1] > 0)
+          region = v[2] > 0 ? 1 : 2;
+        else
+          region = v[2] > 0 ? 3 : 4;
+      }
+      else
+      {
+        if (v[1] > 0)
+          region = v[2] > 0 ? 5 : 6;
+        else
+          region = v[2] > 0 ? 7 : 8;
+      }
+    }
+    ++n_samples[region];
+  }
+  for (int bin=0; bin<NUM_REGIONS; ++bin)
+  {
+    CheckNumberOfSamplesInBin("sphere_bin", n_samples[bin], N, region_area[bin]/Pi);
+  }
+}
+
+
+
 class CubeMap
 {
   // Use a cube mapping of 6 uniform grids to the 6 side faces of a cube projected to the unit sphere.
