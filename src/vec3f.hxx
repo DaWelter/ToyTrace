@@ -283,7 +283,7 @@ inline auto SphericalToUv(const Eigen::Matrix<T,2,1> &angles)
   using Scalar = T;
   const Scalar theta = angles[1];
   const Scalar phi = angles[0];
-  assert(theta >= 0 && theta <= Pi);  
+  assert(theta >= 0 && theta <= Pi*1.00001);  
   const Scalar u = phi/Scalar(2.*Pi);
   const Scalar v = theta/Scalar(Pi);
   return Eigen::Matrix<Scalar,2,1>{u, v};
