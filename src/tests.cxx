@@ -107,6 +107,56 @@ TEST(TestMath, Quadratic)
 }
 
 
+
+
+
+TEST(TestMath, Reflected)
+{
+  Double3 n{0., 1., 0.};
+  auto in = Normalized(Double3{0., 1., 2.});
+  Double3 out = Reflected(in, n);
+  auto out_expected = Normalized(Double3{0., 1., -2.});
+  ASSERT_GE(Dot(out, out_expected), 0.99);
+}
+
+
+TEST(TestMath, Refracted)
+{
+  Double3 n{0., 1., 0.};
+  auto w1 = Normalized(Double3{0., 1., 2.});
+  double eta1 = 1.;
+  double eta2 = 1.1;
+  auto w2 = Refracted(w1, n, eta1/eta2);
+  ASSERT_TRUE((bool)w2);
+  auto w3 = Refracted(*w2, n, eta2/eta1);
+  ASSERT_TRUE((bool)w3);
+  EXPECT_NEAR((*w3)[0], w1[0], 1.e-3);
+  EXPECT_NEAR((*w3)[1], w1[1], 1.e-3);
+  EXPECT_NEAR((*w3)[2], w1[2], 1.e-3);
+  // Test total reflection.
+  w1 = Normalized(Double3{0., 1., 100.});
+  eta1 = 1.2;
+  eta2 = 1.;
+  w2 = Refracted(w1, n, eta1/eta2);
+  ASSERT_FALSE((bool)w2);
+}
+
+
+TEST(TestMath, RaySphereClip)
+{
+  Double3 org{1,0,-1};
+  Double3 dir{0,0,1};
+  Double3 p{1,0,2};
+  double  r{2};
+  auto [ok, tnear, tfar] = ClipRayToSphereInterior(org, dir, 0, LargeNumber, p, r);
+  EXPECT_TRUE(ok);
+  EXPECT_NEAR(tnear, 1., 1.e-6);
+  EXPECT_NEAR(tfar, 5., 1.e-6);
+}
+
+
+
+
 TEST(Spectral, RGBConversion)
 {
   using namespace Color;
@@ -426,40 +476,6 @@ TEST(Embree, SphereIntersectionMadness3)
   EXPECT_GE(max_dist_from_start, rad1*1.e-3);
 }
 
-
-
-
-
-TEST(TestMath, Reflected)
-{
-  Double3 n{0., 1., 0.};
-  auto in = Normalized(Double3{0., 1., 2.});
-  Double3 out = Reflected(in, n);
-  auto out_expected = Normalized(Double3{0., 1., -2.});
-  ASSERT_GE(Dot(out, out_expected), 0.99);
-}
-
-
-TEST(TestMath, Refracted)
-{
-  Double3 n{0., 1., 0.};
-  auto w1 = Normalized(Double3{0., 1., 2.});
-  double eta1 = 1.;
-  double eta2 = 1.1;
-  auto w2 = Refracted(w1, n, eta1/eta2);
-  ASSERT_TRUE((bool)w2);
-  auto w3 = Refracted(*w2, n, eta2/eta1);
-  ASSERT_TRUE((bool)w3);
-  EXPECT_NEAR((*w3)[0], w1[0], 1.e-3);
-  EXPECT_NEAR((*w3)[1], w1[1], 1.e-3);
-  EXPECT_NEAR((*w3)[2], w1[2], 1.e-3);
-  // Test total reflection.
-  w1 = Normalized(Double3{0., 1., 100.});
-  eta1 = 1.2;
-  eta2 = 1.;
-  w2 = Refracted(w1, n, eta1/eta2);
-  ASSERT_FALSE((bool)w2);
-}
 
 
 TEST(Display, Open)

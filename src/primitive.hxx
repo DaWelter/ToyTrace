@@ -108,5 +108,7 @@ inline std::pair<Float3, float> Spheres::Get(int i) const
 
 void FillPosBoundsTriangle(SurfaceInteraction &interaction, const Float3 &p0, const Float3 &p1, const Float3 &p2);
 void FillPosBoundsSphere(SurfaceInteraction &interaction);
+// Return if there is something left of the segment, and the clipped near/far coordinate along the ray.
+std::tuple<bool, double, double> ClipRayToSphereInterior(const Double3 &ray_org, const Double3 &ray_dir, double tnear, double tfar, const Double3 &sphere_p, double sphere_r);
 
 #endif
