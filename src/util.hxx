@@ -53,7 +53,7 @@ inline constexpr T Gamma(int n) {
 
 
 template<class T>
-inline bool Quadratic(T a, T b, T c, float &t0, float &t1)
+inline bool Quadratic(T a, T b, T c, T &t0, T &t1)
 {
   //from PBRT pg. 1080
   const T d = b*b - T(4)*a*c;
