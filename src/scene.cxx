@@ -88,3 +88,20 @@ Box Scene::GetBoundingBox() const
 {
   return this->boundingBox;
 }
+
+bool Scene::HasLights() const
+{
+  if (envlights.size())
+    return true;
+  if (lights.size())
+    return true;
+  // This does not check if the medium or the emissive surface are actually used though.
+  for (int i=0; i<materials.size(); ++i)
+  {
+    if (materials[i].emitter)
+      return true;
+    if (materials[i].medium && materials[i].medium->is_emissive)
+      return true;
+  }
+  return false;
+}

@@ -242,11 +242,11 @@ m testing/scenes/unitcube.dae
     
     if (RadianceEstimatorBase::IsNotEscaped(collision))
     {
-      weight_sum_interacted += collision.smpl.weight;
+      weight_sum_interacted += collision.smpl.weight*collision.smpl.sigma_s;
     }
     else
     {
-      weight_sum_escaped += collision.smpl.weight;
+      weight_sum_escaped += collision.smpl.weight*collision.smpl.sigma_s;
       num_escaped++;
     }
   }

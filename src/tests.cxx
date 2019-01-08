@@ -144,14 +144,26 @@ TEST(TestMath, Refracted)
 
 TEST(TestMath, RaySphereClip)
 {
-  Double3 org{1,0,-1};
-  Double3 dir{0,0,1};
-  Double3 p{1,0,2};
-  double  r{2};
-  auto [ok, tnear, tfar] = ClipRayToSphereInterior(org, dir, 0, LargeNumber, p, r);
-  EXPECT_TRUE(ok);
-  EXPECT_NEAR(tnear, 1., 1.e-6);
-  EXPECT_NEAR(tfar, 5., 1.e-6);
+  { // Start ray outside of the sphere
+    Double3 org{1,0,-1};
+    Double3 dir{0,0,1};
+    Double3 p{1,0,2};
+    double  r{2};
+    auto [ok, tnear, tfar] = ClipRayToSphereInterior(org, dir, 0, LargeNumber, p, r);
+    EXPECT_TRUE(ok);
+    EXPECT_NEAR(tnear, 1., 1.e-6);
+    EXPECT_NEAR(tfar, 5., 1.e-6);
+  }
+  { // Start ray inside
+    Double3 org{1,0,-1};
+    Double3 dir{0,0,1};
+    Double3 p{1,0,1};
+    double  r{3};
+    auto [ok, tnear, tfar] = ClipRayToSphereInterior(org, dir, 0, LargeNumber, p, r);
+    EXPECT_TRUE(ok);
+    EXPECT_NEAR(tnear, 0., 1.e-6);
+    EXPECT_NEAR(tfar, 5., 1.e-6);
+  }
 }
 
 

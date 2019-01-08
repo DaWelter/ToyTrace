@@ -114,17 +114,7 @@ public:
     return *lights[i];
   }
   
-  bool HasLights() const
-  {
-    if (envlights.size())
-      return true;
-    if (lights.size())
-      return true;
-    for (int i=0; i<materials.size(); ++i)
-      if (materials[i].emitter)
-        return true;
-    return false;
-  }
+  bool HasLights() const;
   
   int GetNumEnvLights() const
   {
@@ -177,6 +167,16 @@ public:
   inline const Geometry& GetGeometry(int i) const
   {
     return *new_primitives[i];
+  }
+  
+  inline int GetNumMaterials() const
+  {
+    return materials.size();
+  }
+  
+  inline const Material& GetMaterial(int i) const
+  {
+    return materials[i];
   }
   
   bool FirstIntersectionEmbree(const Ray &ray, double tnear, double &ray_length, SurfaceInteraction &intersection) const;

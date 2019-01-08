@@ -579,6 +579,24 @@ void NFFParser::Parse(Scope &scope)
       else throw MakeException("Error");
       continue;
     }
+    
+    
+    if (!strcmp(token, "emissivedemomedium"))
+    {
+      double sigma_s, sigma_a, temperature;
+      Double3 pos;
+      double radius;
+      double extra_emission_multiplier;
+      char name[LINESIZE];
+      int num = std::sscanf(line.c_str(), "emissivedemomedium %s %lg %lg %lg %lg %lg %lg %lg %lg\n", name, &sigma_s, &sigma_a, &extra_emission_multiplier, &temperature, &pos[0], &pos[1], &pos[2], &radius);
+      if (num == 9)
+      {
+        auto m = std::make_unique<EmissiveDemoMedium>(sigma_s, sigma_a, extra_emission_multiplier, temperature, pos, radius, scope.mediums.size());
+        InsertAndActivate(name, scope, std::move(m));
+      }
+      else throw MakeException("Error");
+      continue;
+    }
 
 
     if (!strcmp(token, "simpleatmosphere"))

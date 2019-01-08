@@ -6,7 +6,7 @@
 #include "types.hxx"
 #include "vec3f.hxx"
 #include "scene.hxx"
-
+#include "spectral.hxx"
 
 struct Ray
 {
@@ -82,11 +82,12 @@ struct SurfaceInteraction : public InteractionPoint
 struct VolumeInteraction : public InteractionPoint
 {
   const Medium *_medium = nullptr;
+  Spectral3 radiance;
+  Spectral3 sigma_s; // Scattering coefficient. Use in evaluate functions and scatter sampling. Kernel defined as phase function times sigma_s. 
   VolumeInteraction() = default;
-  VolumeInteraction(const Double3 &_position, const Medium &_medium)
-    : InteractionPoint{_position}, _medium{&_medium}
+  VolumeInteraction(const Double3 &_position, const Medium &_medium, const Spectral3 &radiance_, const Spectral3 &sigma_s_)
+    : InteractionPoint{_position}, _medium{&_medium}, radiance{radiance_}, sigma_s{sigma_s_}
     {}
-    
   const Medium& medium() const { return *_medium; }
 };
 

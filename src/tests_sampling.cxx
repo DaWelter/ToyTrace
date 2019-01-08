@@ -1960,7 +1960,7 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
       // Divide out sigma_s which is baked into the weight.
       // Multiply by sigma_e.
       SpectralN integrand = (sigma_a + sigma_s) / sigma_s;
-      integral += s.weight * Take(integrand, lambda_idx);
+      integral += s.weight * s.sigma_s * Take(integrand, lambda_idx);
     }
     int imgx = std::min<int>(img.width()-1, s.t * img_dx);
     img.DrawLine(imgx, 0, imgx, img.height()-1);

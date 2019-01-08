@@ -269,6 +269,73 @@ class CornelBoxLightTypes(object):
       yield ('test_bdpt', self.test_bdpt)
 
 
+class EmissiveDemoMediumScenes(object):
+    def __init__(self):
+      self.template = """
+        v
+        from 0 0.5 1.4
+        at 0 0.5 0
+        up 0 1 0
+        resolution 480 480
+        angle 40
+
+
+        {{
+        transform 0 1.00 -0.55 0 0 0 0.3 0.02 0.3
+        diffuse verywhite 1 1 1 0.9
+        larea arealight2 uniform 1 1 1 {}
+        m unitcube.dae
+        }}
+
+        diffuse white  1 1 1 0.5
+        diffuse red    1 0 0 0.5
+        diffuse green  0 1 0 0.5
+        diffuse blue   1 1 1 0.5
+
+        m cornelbox.dae
+
+        glossy spheremat 1 1 1 0.8 0.1
+        s 0.3 0.2 -0.8 0.2
+
+        shader white
+        transform 0 0 0 0 0 0 1 1 1
+        m box_in_cornelbox.dae
+
+        shader invisible
+        emissivedemomedium m1 {} {} 1 {} 0 0.5 -0.5 0.2
+        transform 0 0.5 -0.5 0 0 0 0.4 0.4 0.4
+        m unitcube.dae
+      """
+      self.cross_sections = [0.1, 1., 10.]
+      self.temperatures = [ 100., 3000., 6000.]
+      self.main_light_powers = [ 100., 100., 1. ]
+
+    def _makeScene(self, params):
+        cross_section, temperature, main_light_power = params
+        return textwrap.dedent(self.template.format(main_light_power, cross_section, cross_section, temperature))
+
+    def makeScenes(self):
+        for cross_section in self.cross_sections:
+            for main_light_power, temperature in zip(self.main_light_powers, self.temperatures):
+                name = "emissivedemomedium_{}K_e{}".format(int(temperature), int(cross_section*10))
+                yield name, functools.partial(self._makeScene, (cross_section, temperature, main_light_power))
+
+    def _run(self, scene, name, render_mode):
+        #opt = {'-w': 512, '-h': 512, '--max-spp': 512,
+        opt = {'-w': 256, '-h': 256, '--max-spp': 32,
+               '--algo' : render_mode }
+        toytrace(
+            scene, name+'.png', opt, name=name)
+
+    def makeTests(self):
+        for prefix, scene_builder in self.makeScenes():
+            scene = scene_builder()
+            for render_mode in ['pt', 'bdpt']:
+                name = '{}_{}'.format(prefix, render_mode)
+                yield (name, functools.partial(self._run, scene, name, render_mode))
+
+
+
 class Atmosphere(object):
     def __init__(self):
         self.scene_template = """
@@ -523,7 +590,8 @@ if __name__ == '__main__':
         ParticipatingMediaSimple,
         Various,
         Atmosphere,
-        CornelBoxLightTypes
+        CornelBoxLightTypes,
+        EmissiveDemoMediumScenes
     ]
 
     the_exe = args.exe

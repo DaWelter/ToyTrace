@@ -325,7 +325,7 @@ MicrofacetShader::MicrofacetShader(
   const SpectralN &_glossy_reflectance,
   double _glossy_exponent,
   std::unique_ptr<Texture> _glossy_exponent_texture)
-  : Shader(0),
+  : Shader(),
     kr_s(_glossy_reflectance), 
     alpha_max(_glossy_exponent),
     glossy_exponent_texture(std::move(_glossy_exponent_texture))
@@ -546,7 +546,112 @@ ScatterSample SpecularDenseDielectricShader::SampleBSDF(const Double3& reverse_i
  * Media
  ***********************************/
 
+// Just to make the compiler happy. We don't really want an implementation for this.
+// TODO: Use interface class. Multi inherit from regular medium and, say, IEmissiveMedium, if a medium is emissive.
+// Then dynamic_cast to determine if we have to consider emission. I'm not sure. Usually this is considered bad design.
+// But so is a default implementation with arbitrary return values.
+// I could decompose the medium class into an emissive component and a scattering/absorbing part, but it would make the implementation more messy.
+Medium::VolumeSample Medium::SampleEmissionPosition(Sampler &sampler, const PathContext &context) const
+{
+  return VolumeSample{ /* pos = */ Double3::Zero() };
+}
 
+Spectral3 Medium::EvaluateEmission(const Double3 &pos, const PathContext &context, double *pos_pdf) const
+{
+  if (pos_pdf) *pos_pdf = 0;
+  return Spectral3::Zero();
+}
+
+/*****************************************
+* Derived media classes 
+****************************************/
+
+EmissiveDemoMedium::EmissiveDemoMedium(double _sigma_s, double _sigma_a, double extra_emission_multiplier_, double temperature, const Double3 &pos_, double radius_, int priority)
+  : Medium(priority, true), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{_sigma_s + _sigma_a}, spectrum{Color::MaxwellBoltzmanDistribution(temperature)}, pos{pos_}, radius{radius_}
+{
+  one_over_its_volume = 1./(UnitSphereVolume*std::pow(radius, 3));
+  spectrum *= extra_emission_multiplier_;
+}
+
+
+Spectral3 EmissiveDemoMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, const PathContext &context, double* pdf) const
+{
+  return phasefunction.Evaluate(indcident_dir, out_direction, pdf);
+}
+
+
+Medium::PhaseSample EmissiveDemoMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
+{
+  return phasefunction.SampleDirection(incident_dir, sampler);
+}
+
+
+Medium::InteractionSample EmissiveDemoMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler, const PathContext &context) const
+{
+  auto [ok, tnear, tfar] = ClipRayToSphereInterior(segment.ray.org, segment.ray.dir, 0, segment.length, this->pos, this->radius);
+  Medium::InteractionSample smpl;
+  if (ok)
+  {
+    smpl.t = - std::log(1-sampler.Uniform01()) / sigma_ext;
+    smpl.t += tnear;
+    if (smpl.t < tfar)
+    {
+      smpl.weight = 1.0 / sigma_ext;
+      smpl.sigma_s = sigma_s;
+      return smpl;
+    } // else there is no interaction within the sphere.
+  } // else didn't hit the sphere.
+  
+  // Must return something larger than the segment length, so the rendering algo knows that there is no interaction with the medium.
+  smpl.t = LargeNumber;
+  smpl.weight = 1.0;
+  smpl.sigma_s = Spectral3::Zero();
+  return smpl;
+}
+
+
+VolumePdfCoefficients EmissiveDemoMedium::ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const
+{
+  auto [ok, tnear, tfar] = ClipRayToSphereInterior(segment.ray.org, segment.ray.dir, 0, segment.length, this->pos, this->radius);
+  const bool end_is_in_emissive_volume = LengthSqr(segment.EndPoint() - this->pos) < radius*radius;
+  const bool start_is_in_emissive_volume = LengthSqr(segment.ray.org - this->pos) < radius*radius;
+  double tr = ok ? std::exp(-sigma_ext*(tfar - tnear)) : 1;
+  double end_sigma_ext = end_is_in_emissive_volume ? sigma_ext : 0;
+  double start_sigma_ext = start_is_in_emissive_volume ? sigma_ext : 0;
+  return VolumePdfCoefficients{
+    end_sigma_ext*tr,
+    start_sigma_ext*tr,
+    tr,
+  };
+}
+
+
+Spectral3 EmissiveDemoMedium::EvaluateTransmission(const RaySegment& segment, Sampler &sampler, const PathContext &context) const
+{
+  auto [ok, tnear, tfar] = ClipRayToSphereInterior(segment.ray.org, segment.ray.dir, 0, segment.length, this->pos, this->radius);
+  double tr = ok ? std::exp(-sigma_ext*(tfar - tnear)) : 1;
+  return Spectral3{tr};
+}
+
+
+Medium::VolumeSample EmissiveDemoMedium::SampleEmissionPosition(Sampler &sampler, const PathContext &context) const
+{
+  Double3 r { sampler.Uniform01(), sampler.Uniform01(), sampler.Uniform01() };
+  Double3 pos = SampleTrafo::ToUniformSphere3d(r)*radius + this->pos;
+  return { pos };
+}
+
+
+Spectral3 EmissiveDemoMedium::EvaluateEmission(const Double3 &pos, const PathContext &context, double *pos_pdf) const
+{
+  const bool in_emissive_volume = LengthSqr(pos - this->pos) < radius*radius;
+  if (pos_pdf)
+    *pos_pdf = in_emissive_volume ? one_over_its_volume : 0.;
+  return in_emissive_volume ? (sigma_a*Take(spectrum, context.lambda_idx)).eval() : Spectral3::Zero();
+}
+
+
+////////////////////////////////////////////////////////////
 Spectral3 VacuumMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, const PathContext &context, double* pdf) const
 {
   if (pdf)
@@ -559,7 +664,8 @@ Medium::InteractionSample VacuumMedium::SampleInteractionPoint(const RaySegment&
 {
   return Medium::InteractionSample{
       LargeNumber,
-      Spectral3{1.}
+      Spectral3{1.},
+      Spectral3::Zero(),
     };
 }
 
@@ -614,7 +720,8 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
 {
   Medium::InteractionSample smpl{
     0.,
-    Spectral3{1.}
+    Spectral3{1.},
+    Spectral3::Zero()
   };
   // Shadow the member var by the new var taking only the current lambdas.
   Spectral3 sigma_ext = Take(this->sigma_ext, context.lambda_idx);
@@ -639,7 +746,8 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
       double r = sampler.Uniform01();
       if (r < prob_t) // Scattering/Absorption
       {
-        smpl.weight *= inv_sigma_t_majorant / prob_t * sigma_s;
+        smpl.weight *= inv_sigma_t_majorant / prob_t;
+        smpl.sigma_s = sigma_s;
         return smpl;
       }
       else // Null collision
@@ -685,7 +793,7 @@ VolumePdfCoefficients HomogeneousMedium::ComputeVolumePdfCoefficients(const RayS
 
 
 MonochromaticHomogeneousMedium::MonochromaticHomogeneousMedium(double _sigma_s, double _sigma_a, int priority)
-  : Medium(priority), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{_sigma_s + _sigma_a},
+  : Medium(priority), sigma_s{_sigma_s}, sigma_ext{_sigma_s + _sigma_a},
     phasefunction{new PhaseFunctions::Uniform()}
 {
 }
@@ -709,9 +817,10 @@ Medium::InteractionSample MonochromaticHomogeneousMedium::SampleInteractionPoint
   smpl.t = - std::log(1-sampler.Uniform01()) / sigma_ext;
   smpl.t = smpl.t < LargeNumber ? smpl.t : LargeNumber;
   smpl.weight = (smpl.t >= segment.length) ? 
-    1.0
+    1.0  // This is transmittance divided by probability to pass through the medium undisturbed which happens to be also the transmittance. Thus this simplifies to one.
     :
-    (sigma_s / sigma_ext);
+    (1.0 / sigma_ext); // Transmittance divided by interaction pdf.
+  smpl.sigma_s = sigma_s;
   return smpl;
 }
 

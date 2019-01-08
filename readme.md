@@ -42,6 +42,7 @@ Features
     * Isotropic sky dome.
     * Point.
     * Image based lighting / HRD environment map.
+    * Emissive Media (work in progress)
 * Camera:
     * Pinhole.
     * Fisheye.
@@ -51,20 +52,23 @@ Features
 * Multithreading.
 * Automated rendering of test scenes.
 
-Not Implemented
----------------
+Todo
+----
 Eventually, maybe, and in no particular order.
 
-* Advanced techniques. Beam radiance estimators or MLT.
+* Advanced techniques. VCM and beam radiance estimators as extension of VCM would be nice.
 * Custom triangle intersection routines with double precision. Embree only for BVH.
-* Robust intersection computations in the style of BPRT. Probably not entirely feasible since I currently use embree's triangle intersection routines.
-* Inhomogeneous media apart from atmospheric models.
+* Robust intersection computations in the style of BPRT.
+* Overlapping media volumes in the sense that a mixture medium comprising multiple components is rendered.
+* Rendering of OpenVDB data set.
+* Other geometries for the atmosphere medium: Flat (Earth) and (O'Neill) Cylinder.
 * Faster MIS weight computation from the VCM paper.
-* Multi-layer materials.
+* A multi-layer material.
 * A sane scene description format.
 * Better image reconstruction filter.
+* Wavelength dependent index of refraction.
 * Firefly suppression.
-* Stratified/quasi-random sampling.
+* Quasi-random sampling.
 * Bloom filter.
 * Physical camera.
 * Texture filtering.

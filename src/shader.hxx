@@ -16,9 +16,8 @@ using ScatterSample = Sample<Double3, Spectral3, TagScatterSample>;
 
 class Shader
 {
-  int flags;
 public:
-  Shader(int _flags = 0) : flags(_flags) {}
+  Shader() {}
   virtual ~Shader() {}
   virtual ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const = 0;
   virtual Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
@@ -109,30 +108,65 @@ public:
 };
 
 
-
+/* Good reference for path tracing with emissive volumes:
+    Raab et. al (2008) "Unbiased global illumination with participating media" */
 class Medium
 {
 public:
+  // Represents both, scattering and emission/absorption events.
   struct InteractionSample
   {
     double t;
     // Following PBRT pg 893, the returned weight is either
-    // beta_surf = T(t_intersect)/p_surf if the sampled t lies beyond the end of the ray, i.e. t > t_intersect, or
-    // beta_med = sigma_s(t) T(t) / p(t) 
+    // weight_surf = T(t_intersect)/p_surf if t > t_intersect, or
+    // weight_med =  T(t) / p(t)
+    // where t_intersect refers to the end of the supplied segment.
     Spectral3 weight;
+    Spectral3 sigma_s;
   };
   using PhaseSample = ScatterSample;
   
+  struct VolumeSample
+  {
+    Double3 pos;
+  };
+
+  const bool is_emissive;
   const int priority;
-  Medium(int _priority) : priority(_priority) {}
+  Medium(int _priority, bool is_emissive_ = false) : is_emissive{is_emissive_}, priority(_priority) {}
   virtual ~Medium() {}
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const = 0;
   virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const = 0;
   virtual VolumePdfCoefficients ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const = 0; // Can be approximate. Deterministic.
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const = 0;
-  virtual Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
+  virtual Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;  
+  virtual VolumeSample SampleEmissionPosition(Sampler &sampler, const PathContext &context) const;
+  virtual Spectral3 EvaluateEmission(const Double3 &pos, const PathContext &context, double *pos_pdf) const;
 };
 
+
+/* An emissive ball. The geometry of the ball is specified here because I don't have a general
+ * boundary representation which would support generating photons within it's volume. So this medium
+ * class needs all the details. Using this info, it does the geometric calculations to sample the photon positions.
+ */
+class EmissiveDemoMedium : public Medium
+{
+  double sigma_s, sigma_a, sigma_ext;
+  SpectralN spectrum;
+  PhaseFunctions::Uniform phasefunction;
+  Double3 pos;
+  double radius;
+  double one_over_its_volume;
+public:
+  EmissiveDemoMedium(double sigma_s_, double sigma_a, double extra_emission_multiplier_, double temperature, const Double3 &pos_, double radius_, int priority);
+  virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
+  virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
+  virtual VolumePdfCoefficients ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const override;
+  virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;
+  virtual Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
+  virtual VolumeSample SampleEmissionPosition(Sampler &sampler, const PathContext &context) const override;
+  virtual Spectral3 EvaluateEmission(const Double3 &pos, const PathContext &context, double *pos_pdf) const override;
+};
 
 
 class VacuumMedium : public Medium
@@ -165,7 +199,7 @@ public:
 
 class MonochromaticHomogeneousMedium : public Medium
 {
-  double sigma_s, sigma_a, sigma_ext;
+  double sigma_s, sigma_ext;
 public:
   std::unique_ptr<PhaseFunctions::PhaseFunction> phasefunction;
 public:

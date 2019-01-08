@@ -38,7 +38,8 @@ Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_
 {
   Medium::InteractionSample smpl{
     0.,
-    Spectral3{1.}
+    Spectral3{1.},
+    Spectral3::Zero()
   };
   Spectral3 sigma_s, sigma_a;
   double prob_t, prob_n;
@@ -90,7 +91,8 @@ Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_
       double r = sampler.Uniform01();
       if (r < prob_t) // Scattering/Absorption
       {
-        smpl.weight *= inv_sigma_t_majorant / prob_t * sigma_s;
+        smpl.weight *= inv_sigma_t_majorant / prob_t;
+        smpl.sigma_s = sigma_s;
         return smpl;
       }
       else // Null collision
