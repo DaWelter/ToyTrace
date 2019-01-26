@@ -75,6 +75,9 @@ target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE} ${Boost_
 
 add_executable(tests src/tests.cxx src/tests3.cxx src/tests_sampling.cxx ${Cubature_DIR}/hcubature.c ${SOURCES})
 add_executable(tests2 src/tests2.cxx)
+add_executable(tests_tbb src/tests_tbb.cxx)
+
+target_link_libraries(tests_tbb tbb)
 
 foreach(EXE tests tests2)
   target_include_directories(${EXE} PUBLIC ${GTEST_INCLUDE_DIRS} ${Cubature_DIR})

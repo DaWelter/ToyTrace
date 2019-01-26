@@ -14,6 +14,7 @@ Dependencies:
 * assimp
 * OpenImageIO
 * yaml-cpp
+* tbb
 
 On Ubuntu 16 there is an issue with yaml-cpp and OpenImageIO. I prefer the latest yaml-cpp (0.6) but OpenImageIO links to an older version (0.3). Therefore I suggest to build and install OpenImageIO from sources.
 
