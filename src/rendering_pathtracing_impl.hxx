@@ -10,7 +10,8 @@
 
 namespace RandomWalk
 {
-
+using namespace SimplePixelByPixelRenderingDetails;
+  
 // Ref: Veach's Thesis. Chpt. 10.
 namespace BdptDetail
 {
@@ -332,10 +333,10 @@ private:
 
 } // namespace BdptDetail
 
-class Bdpt : public RadianceEstimatorBase, public IRenderingAlgo
+class BdptWorker : public RadianceEstimatorBase, public Worker
 {
   LambdaSelectionFactory lambda_selection_factory;
-  ToyVector<IRenderingAlgo::SensorResponse> rgb_responses;
+  ToyVector<SensorResponse> rgb_responses;
 
   struct Splat : public ROI::PointEmitterArray::Response
   {
@@ -361,7 +362,7 @@ class Bdpt : public RadianceEstimatorBase, public IRenderingAlgo
   BdptDetail::DebugBuffers debug_buffers_mis;
   
 public:
-  Bdpt(const Scene &_scene, const AlgorithmParameters &algo_params) 
+  BdptWorker(const Scene &_scene, const AlgorithmParameters &algo_params) 
   : RadianceEstimatorBase{_scene, algo_params},
     lambda_selection_factory{},
     eye_history{*this},
@@ -376,7 +377,7 @@ public:
   }
 
   
-  RGB MakePrettyPixel(int _pixel_index) override
+  RGB RenderPixel(int _pixel_index) override
   {
     eye_history.Reset();
     light_history.Reset();
@@ -442,7 +443,7 @@ public:
     for (const auto &splat : splats)
     {
       assert(splat.path_length>=2);
-      rgb_responses.push_back(IRenderingAlgo::SensorResponse{
+      rgb_responses.push_back(SensorResponse{
         splat.unit_index,
         Color::SpectralSelectionToRGB(splat.weight, lambda_idx)
       });
@@ -640,7 +641,7 @@ public:
   }
 
 
-  ToyVector<IRenderingAlgo::SensorResponse>& GetSensorResponses() override
+  ToyVector<SensorResponse>& GetSensorResponses() override
   {
     return rgb_responses;
   }
@@ -677,22 +678,19 @@ public:
   }
   
   
-  void NotifyPassesFinished(int pass_count) override;
+  //void NotifyPassesFinished(int pass_count) override;
 };
 
 
 
-
-
-
-class PathTracing : public IRenderingAlgo, public RandomWalk::RadianceEstimatorBase
+class PathTracingWorker : public Worker, public RandomWalk::RadianceEstimatorBase
 { 
   LambdaSelectionFactory lambda_selection_factory;
   bool do_sample_brdf;
   bool do_sample_lights;
-  ToyVector<IRenderingAlgo::SensorResponse> rgb_responses;
+  ToyVector<SensorResponse> rgb_responses;
 public:
-  PathTracing(const Scene &_scene, const AlgorithmParameters &algo_params) 
+  PathTracingWorker(const Scene &_scene, const AlgorithmParameters &algo_params) 
   : RadianceEstimatorBase{_scene, algo_params},
     lambda_selection_factory{},
     do_sample_brdf{true},
@@ -712,7 +710,7 @@ public:
   }
 
   
-  RGB MakePrettyPixel(int pixel_index) override
+  RGB RenderPixel(int pixel_index) override
   {
     sensor_connection_unit = -1;
     
@@ -801,7 +799,7 @@ public:
   }
   
   
-  ToyVector<IRenderingAlgo::SensorResponse>& GetSensorResponses() override
+  ToyVector<SensorResponse>& GetSensorResponses() override
   {
     return rgb_responses;
   }
@@ -818,10 +816,11 @@ public:
   }
 };
 
+
+
 } // namespace
 
-using PathTracing = RandomWalk::PathTracing;
-using Bdpt = RandomWalk::Bdpt;
+
 using RadianceEstimatorBase = RandomWalk::RadianceEstimatorBase;
 
 #pragma GCC diagnostic pop // Restore command line options

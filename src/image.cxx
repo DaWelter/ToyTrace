@@ -116,6 +116,13 @@ void Image::SetColor( uchar r, uchar g, uchar b )
   col[0]=r; col[1]=g; col[2]=b;
 }
 
+void Image::set_pixel(int x, int y, Image::uchar r, Image::uchar g, Image::uchar b)
+{
+  Image::uchar col[3] = { r, g, b};
+  TOCIMG(priv)->draw_point( x,y, col );
+}
+
+
 // void Image::SetColor( const uchar* c )
 // {
 //   col[0]=c[0]; col[1]=c[1]; col[2]=c[2];

@@ -49,7 +49,7 @@ public:
   void SetOpacity( double a );
 
   std::array<uchar, 3> get_pixel_uc3( int x, int y) const;
-  void set_pixel( int x, int y, uchar r, uchar g, uchar b )            { SetColor(r, g, b); DrawPixel(x, y); }
+  void set_pixel( int x, int y, uchar r, uchar g, uchar b );
 
 //   bool WritePNM( const std::string &filename ) const;
 //   bool WritePng( const std::string &filename ) const;

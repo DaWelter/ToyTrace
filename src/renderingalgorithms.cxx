@@ -94,53 +94,53 @@ namespace RandomWalk
 {
 
   
-void Bdpt::NotifyPassesFinished(int pass_count)
-{
-  namespace fs = boost::filesystem;
+// void Bdpt::NotifyPassesFinished(int pass_count)
+// {
+//   namespace fs = boost::filesystem;
+//   
+//   for (auto it = debug_buffers.begin(); it != debug_buffers.end(); ++it)
+//   {
+//     int eye_idx = it->first.first;
+//     int light_idx = it->first.second;
+//     Spectral3ImageBuffer &buffer = it->second;
+//     buffer.AddSampleCount(pass_count);
+//     Image bm(buffer.xres, buffer.yres);
+//     buffer.ToImage(bm, 0, buffer.yres);
+//     std::string filename = strformat("bdpt-e%-l%", eye_idx+1, light_idx+1)+".jpg";
+//     auto filepath = fs::temp_directory_path() / fs::unique_path(filename);
+//     bm.write(filepath.string());
+//   }
+//   
+//   for (auto it = debug_buffers_mis.begin(); it != debug_buffers_mis.end(); ++it)
+//   {
+//     int eye_idx = it->first.first;
+//     int light_idx = it->first.second;
+//     Spectral3ImageBuffer &buffer = it->second;
+//     buffer.AddSampleCount(pass_count);
+//     Image bm(buffer.xres, buffer.yres);
+//     buffer.ToImage(bm, 0, buffer.yres);
+//     std::string filename = strformat("bdpt-e%-l%_mis", eye_idx+1, light_idx+1)+".jpg";
+//     auto filepath = fs::temp_directory_path() / fs::unique_path(filename);
+//     bm.write(filepath.string());
+//   }
+// }
   
-  for (auto it = debug_buffers.begin(); it != debug_buffers.end(); ++it)
-  {
-    int eye_idx = it->first.first;
-    int light_idx = it->first.second;
-    Spectral3ImageBuffer &buffer = it->second;
-    buffer.AddSampleCount(pass_count);
-    Image bm(buffer.xres, buffer.yres);
-    buffer.ToImage(bm, 0, buffer.yres);
-    std::string filename = strformat("bdpt-e%-l%", eye_idx+1, light_idx+1)+".jpg";
-    auto filepath = fs::temp_directory_path() / fs::unique_path(filename);
-    bm.write(filepath.string());
-  }
-  
-  for (auto it = debug_buffers_mis.begin(); it != debug_buffers_mis.end(); ++it)
-  {
-    int eye_idx = it->first.first;
-    int light_idx = it->first.second;
-    Spectral3ImageBuffer &buffer = it->second;
-    buffer.AddSampleCount(pass_count);
-    Image bm(buffer.xres, buffer.yres);
-    buffer.ToImage(bm, 0, buffer.yres);
-    std::string filename = strformat("bdpt-e%-l%_mis", eye_idx+1, light_idx+1)+".jpg";
-    auto filepath = fs::temp_directory_path() / fs::unique_path(filename);
-    bm.write(filepath.string());
-  }
 }
-  
-}
 
 
 
-class NormalVisualizer : public IRenderingAlgo
+class NormalVisualizerWorker : public SimplePixelByPixelRenderingDetails::Worker
 {
-  ToyVector<IRenderingAlgo::SensorResponse> rgb_responses;
+  ToyVector<SensorResponse> rgb_responses;
   const Scene &scene;
   Sampler sampler;
 public:
-  NormalVisualizer(const Scene &_scene, const AlgorithmParameters &)
+  NormalVisualizerWorker(const Scene &_scene, const AlgorithmParameters &)
     : scene{_scene}
   {
   }
   
-  RGB MakePrettyPixel(int pixel_index) override
+  RGB RenderPixel(int pixel_index) override
   {
     auto context = PathContext{Color::LambdaIdxClosestToRGBPrimaries()};
     const auto &camera = scene.GetCamera();
@@ -163,7 +163,7 @@ public:
     }
   };
   
-  ToyVector<IRenderingAlgo::SensorResponse>& GetSensorResponses() override
+  ToyVector<SensorResponse>& GetSensorResponses() override
   {
     return rgb_responses;
   }
@@ -171,12 +171,28 @@ public:
 
 
 
-std::unique_ptr<IRenderingAlgo> RenderAlgorithmFactory(const Scene &_scene, const RenderingParameters &_params)
+template<typename WorkerType>
+class SimpleAlgo : public SimplePixelByPixelRenderingDetails::SimplePixelByPixelRenderingAlgo
 {
+public:
+  SimpleAlgo(const Scene &scene_,const RenderingParameters &render_params_)
+    : SimplePixelByPixelRenderingAlgo{render_params_,scene_}
+  {}
+protected:
+  std::unique_ptr<SimplePixelByPixelRenderingDetails::Worker> AllocateWorker(int i) override
+  {
+    return std::make_unique<WorkerType>(scene,render_params);
+  }
+};
+
+
+std::unique_ptr<RenderingAlgo> RenderAlgorithmFactory(const Scene &_scene, const RenderingParameters &_params)
+{
+  using namespace RandomWalk;
   if (_params.algo_name == "bdpt")
-    return std::make_unique<Bdpt>(_scene, _params);
+    return std::make_unique<SimpleAlgo<BdptWorker>>(_scene, _params);
   else if (_params.algo_name == "normalvis")
-    return std::make_unique<NormalVisualizer>(_scene, _params);
+    return std::make_unique<SimpleAlgo<NormalVisualizerWorker>>(_scene, _params);
   else
-    return std::make_unique<PathTracing>(_scene, _params);
+    return std::make_unique<SimpleAlgo<PathTracingWorker>>(_scene, _params);
 }

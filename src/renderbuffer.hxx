@@ -48,22 +48,21 @@ public:
     assert (ystart >= 0 && yend>= ystart && yend <= dest.height());
     Color::RGBScalar splat_weight(splat_count>0 ? double(xres*yres)/(splat_count) : 0.); // Multiply with xres*yres because I divided it out in the path tracer code.
     for (int y=ystart; y<yend; ++y)
-    for (int x=0; x<xres; ++x)
-    {
-      int pixel_index = xres * y + x;
-      RGB average = accumulator[pixel_index]/Color::RGBScalar(count);
-          average += splat_weight*light_accum[pixel_index];
-      Image::uchar rgb[3];
-      bool isfinite = average.isFinite().all();
-      assert (isfinite);
-      //average = (Color::RGBToSRGBMatrix()*average.matrix()).array();
-      average = average.max(0._rgb).min(1._rgb);
-      if (isfinite)
+      for (int x=0; x<xres; ++x)
       {
-        for (int i=0; i<3; ++i)
-          rgb[i] = value(Color::LinearToSRGB(average[i])*255.999_rgb);
-        dest.set_pixel(x, dest.height() - 1 - y, rgb[0], rgb[1], rgb[2]);
+        int pixel_index = xres * y + x;
+        RGB average = accumulator[pixel_index]/Color::RGBScalar(count);
+            average += splat_weight*light_accum[pixel_index];
+        Image::uchar rgb[3];
+        bool isfinite = average.isFinite().all();
+        assert (isfinite);
+        average = average.max(0._rgb).min(1._rgb);
+        if (isfinite)
+        {
+          for (int i=0; i<3; ++i)
+            rgb[i] = value(Color::LinearToSRGB(average[i])*255.999_rgb);
+          dest.set_pixel(x, dest.height() - 1 - y, rgb[0], rgb[1], rgb[2]);
+        }
       }
-    }
   }
 };

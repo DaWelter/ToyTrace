@@ -4,223 +4,19 @@
 #include "renderingalgorithms.hxx"
 
 #include <chrono>
-#include <atomic>
 #include <thread>
 #include <memory>
+#include <tuple>
 #include <boost/program_options.hpp>
 #include <boost/filesystem/path.hpp>
 
+#include <tbb/tbb_thread.h>
+#include <tbb/concurrent_queue.h>
+#include <tbb/task_scheduler_init.h>
+
 namespace fs = boost::filesystem;
 
-
-class Worker
-{
-  const Scene &scene;
-  Spectral3ImageBuffer &buffer;
-  std::unique_ptr<IRenderingAlgo> algo;
-  //NormalVisualizer algo;
-  const int pixel_stride = 64 / sizeof(Spectral3); // Because false sharing.
-  int num_pixels;
-  std::atomic_int &shared_pixel_index;
-  std::atomic_int shared_request, shared_state;
-public:
-  Worker(const Worker &) = delete;
-  Worker(Worker &&) = delete;
-  int samples_per_pixel; // Only set when thread is stopped.
-  
-  enum State : int {
-    THREAD_WAITING = 0,
-    THREAD_RUNNING = 1,
-    THREAD_TERMINATED = 2,
-  };
-
-  enum Request : int {
-    REQUEST_NONE      = -1,
-    REQUEST_TERMINATE = 0,
-    REQUEST_HALT      = 1,
-    REQUEST_GO        = 2,
-  };
-  
-  Worker(std::atomic_int &_shared_pixel_index, Spectral3ImageBuffer &_buffer, const Scene &_scene, RenderingParameters &render_params) :
-    scene(_scene),
-    buffer(_buffer),
-    algo(RenderAlgorithmFactory(_scene, render_params)),
-    shared_pixel_index(_shared_pixel_index),
-    shared_request(REQUEST_NONE),
-    shared_state(THREAD_WAITING),
-    samples_per_pixel(16)
-  {
-    num_pixels = scene.GetCamera().xres * scene.GetCamera().yres;
-    //std::cout << "thread ctor " << this << std::endl;
-  }
-  
-  void IssueRequest(Request cmd)
-  {
-    shared_request.store(cmd);
-  }
-
-  State GetState() const
-  {
-    return (State)shared_state.load();
-  }
-  
-  static void Run(Worker *worker)
-  {
-    //std::cout << "thread running ... " << worker << std::endl;
-    bool run = true;
-    while (run)
-    {
-      worker->ProcessCommandRequest();
-      worker->ExecuteState(run);
-    }
-  }
-  
-  void FillInSplats()
-  {
-    auto &responses = algo->GetSensorResponses();
-    for (const auto &r : responses)
-    {
-      assert (r);
-      buffer.Splat(r.unit_index, r.weight);
-    }
-    responses.clear();
-  }
-  
-  void NotifyPassesFinished(int num_passes)
-  {
-    algo->NotifyPassesFinished(num_passes);
-  }
-  
-private:
-  void SetState(State _state)
-  {
-    shared_state.store(_state);
-  }
-  
-  void ProcessCommandRequest()
-  {
-    Request comms = (Request)shared_request.load();
-    switch(comms)
-    {
-      case REQUEST_NONE:
-        break;
-      case REQUEST_HALT:
-        SetState(THREAD_WAITING); 
-        shared_request.store(REQUEST_NONE);
-        break;
-      case REQUEST_GO:
-        SetState(THREAD_RUNNING); 
-        shared_request.store(REQUEST_NONE);
-        break;
-      case REQUEST_TERMINATE:
-        SetState(THREAD_TERMINATED); 
-        shared_request.store(REQUEST_NONE);
-        break;
-    }
-  }
-  
-  void ExecuteState(bool &run)
-  {
-    int state = GetState();
-    //std::cout << "state within thread " << this << " is " << state << std::endl;
-    switch (state) 
-    {
-      case THREAD_WAITING:
-        StateWaiting();
-        break;
-      case THREAD_RUNNING: 
-        StateRunning();
-        break;
-      case THREAD_TERMINATED:
-        run = false;
-        break;
-    }
-  }
-  
-  void StateWaiting()
-  {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  
-  void StateRunning()
-  {
-    int pixel_index = shared_pixel_index.fetch_add(pixel_stride);
-    if (pixel_index >= num_pixels)
-    {
-      SetState(THREAD_WAITING);
-    }
-    else
-    {
-      Render(pixel_index);
-    }
-  }
-  
-  void Render(int pixel_index)
-  {
-    int current_end_index = std::min(pixel_index + pixel_stride, num_pixels);
-    for (; pixel_index < current_end_index; ++pixel_index)
-    {
-      const int nsmpl = samples_per_pixel;
-      for(int i=0;i<nsmpl;i++)
-      {
-        auto smpl = algo->MakePrettyPixel(pixel_index);
-        buffer.Insert(pixel_index, smpl);
-      }
-    }
-  }
-};
-
-
-using WorkerSet = std::vector<std::unique_ptr<Worker>>;
-
-void IssueRequest(WorkerSet &workers, Worker::Request request)
-{
-  //std::cout << "Request " << request << std::endl;
-  for (auto &worker : workers)
-    worker->IssueRequest(request);
-}
-
-
-void WaitForWorkers(WorkerSet &workers)
-{
-  //std::cout << "Waiting ..." << std::endl;
-  for (auto &worker : workers)
-  {
-    while (worker->GetState() != Worker::THREAD_WAITING)
-    {
-      //std::cout << "worker " << w << " state = " << w->GetState() << std::endl;
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-  }
-  //std::cout << " Threads are waiting now." << std::endl;
-}
-
-
-void DetermineSamplesPerPixelForNextPass(int &spp, int total_spp, const RenderingParameters &render_params)
-{
-  if (spp < 256)
-  {
-    spp *= 2;
-  }
-  const int max_spp = render_params.max_samples_per_pixel;
-  if (max_spp > 0 && 
-      total_spp + spp > max_spp)
-  {
-    spp = max_spp - total_spp;
-  }
-}
-
-
-void AssignSamplesPerPixel(WorkerSet &workers, int spp)
-{
-  for (auto &worker : workers)
-  {
-    worker->samples_per_pixel = spp;
-  }
-}
-
-
-
+// Strategy pattern for display algorithm. (No display, or CIMG based display)
 class MaybeDisplay
 {
 public:
@@ -228,6 +24,7 @@ public:
   virtual void Show(const Image &im) = 0;
   virtual bool IsOkToKeepGoing() const = 0;
 };
+
 
 class CIMGDisplay : public MaybeDisplay
 {
@@ -244,6 +41,7 @@ public:
   }
 };
 
+
 class NoDisplay : public MaybeDisplay
 {
 public:
@@ -257,7 +55,18 @@ public:
   }
 };
 
+
+template<class T>
+inline T pop(tbb::concurrent_bounded_queue<T> &q)
+{
+  T tmp;
+  q.pop(tmp);
+  return tmp;
+}
+
+
 std::unique_ptr<MaybeDisplay> MakeDisplay(bool will_open_a_window);
+
 
 void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs::path &output_file, RenderingParameters &render_params, std::unique_ptr<MaybeDisplay> &display);
 
@@ -271,6 +80,8 @@ int main(int argc, char *argv[])
   
   HandleCommandLineArguments(argc, argv, input_file, output_file, render_params, display);
   
+  tbb::task_scheduler_init init(std::max(1, render_params.num_threads));
+  
   Scene scene;
   
   std::cout << "Parsing input file " << input_file << std::endl;
@@ -281,14 +92,6 @@ int main(int argc, char *argv[])
   }
   else
   {
-//     std::string scene_str;
-//     constexpr std::size_t SZ = 1024;
-//     std::vector<char> data; data.resize(SZ);
-//     while (std::cin)
-//     {
-//       std::cin.read(&data[0], SZ);
-//       scene_str.append(&data[0], std::cin.gcount());
-//     }
     scene.ParseNFF(std::cin, &render_params);
   }
   
@@ -307,128 +110,75 @@ int main(int argc, char *argv[])
   std::cout << "building acceleration structure " << std::endl;
   scene.BuildAccelStructure();
   scene.PrintInfo();
-   
-  int num_pixels = render_params.width*render_params.height;
   
-  Image bm(render_params.width, render_params.height);
-  bm.SetColor(0, 0, 128);
-  bm.DrawRect(0, 0, render_params.width-1, render_params.height-1);
-  display->Show(bm);
-  
-  auto start_time = std::chrono::steady_clock::now();
-  
-  Spectral3ImageBuffer buffer{render_params.width, render_params.height};
-
-  if (render_params.num_threads > 0)
-  { 
-    std::atomic_int shared_pixel_index(std::numeric_limits<int>::max());
-    
-    std::vector<std::unique_ptr<Worker>> workers;
-    std::vector<std::thread> threads;
-    
-    for (int i=0; i<render_params.num_threads; ++i)
-      workers.push_back(std::make_unique<Worker>(shared_pixel_index, buffer, scene, render_params));
-    for (int i=0; i<render_params.num_threads; ++i)
-      threads.push_back(std::thread{Worker::Run, workers[i].get()});
-    
-    int total_samples_per_pixel = 0;
-    int samples_per_pixel_per_iteration = 1;
-    AssignSamplesPerPixel(workers, samples_per_pixel_per_iteration);
-    
-    std::cout << std::endl;
-    std::cout << "Rendering ..." << std::endl;
-        
-    while (display->IsOkToKeepGoing() && samples_per_pixel_per_iteration>0)
-    {
-      buffer.AddSampleCount(samples_per_pixel_per_iteration);
-      shared_pixel_index.store(0);
-      IssueRequest(workers, Worker::REQUEST_GO);
-
-      auto UpdateImageToCurrentLine = [&]() -> void
-      {
-        int pixel_index = shared_pixel_index.load();
-        int y = std::max(0, pixel_index/render_params.width);
-        buffer.ToImage(bm, 0, std::min(render_params.height, y));
-      };
-      
-      while (shared_pixel_index.load() < num_pixels && display->IsOkToKeepGoing())
-      {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        
-        IssueRequest(workers, Worker::REQUEST_HALT);
-        WaitForWorkers(workers);
-        
-        for (auto &worker : workers)
-          worker->FillInSplats();
-
-        UpdateImageToCurrentLine();
-        IssueRequest(workers, Worker::REQUEST_GO);        
-        display->Show(bm);
-      }
-     
-      IssueRequest(workers, Worker::REQUEST_HALT);
-      WaitForWorkers(workers);
-      
-      for (auto &worker : workers)
-        worker->FillInSplats();
-      
-      for (auto &worker : workers)
-        worker->NotifyPassesFinished(samples_per_pixel_per_iteration);
-      
-      UpdateImageToCurrentLine();
-      display->Show(bm);
-      bm.write(output_file.string());
-      
-      total_samples_per_pixel += samples_per_pixel_per_iteration;
-      std::cout << "Iteration finished, spp = " << samples_per_pixel_per_iteration << ", total " << total_samples_per_pixel << std::endl;
-      DetermineSamplesPerPixelForNextPass(samples_per_pixel_per_iteration, total_samples_per_pixel, render_params);
-      AssignSamplesPerPixel(workers, samples_per_pixel_per_iteration);
-    }
-    
-    for (auto &worker : workers)
-      worker->IssueRequest(Worker::REQUEST_TERMINATE);
-    for (auto &thread : threads)
-      thread.join();
-  }
-  else
   {
-    std::unique_ptr<IRenderingAlgo> algo = RenderAlgorithmFactory(scene, render_params);
-
-    int total_samples_per_pixel = 0;
-    int samples_per_pixel_per_iteration = 1;
-
-    while (display->IsOkToKeepGoing() && samples_per_pixel_per_iteration>0)
-    {
-      buffer.AddSampleCount(samples_per_pixel_per_iteration);
-      for (int y = 0; y < render_params.height && display->IsOkToKeepGoing(); ++y)
-      {
-        for (int x = 0; x < render_params.width; ++x)
-        {
-          int pixel_index = scene.GetCamera().PixelToUnit({x, y});
-          for (int s = 0; s < samples_per_pixel_per_iteration; ++s)
-          {
-            auto smpl = algo->MakePrettyPixel(pixel_index);
-            buffer.Insert(pixel_index, smpl);
-          }
-        }
-        for (const auto &r : algo->GetSensorResponses())
-          buffer.Splat(r.unit_index, r.weight);
-        algo->GetSensorResponses().clear();
-        buffer.ToImage(bm, 0, y+1);
-        display->Show(bm);
-      }
-      algo->NotifyPassesFinished(samples_per_pixel_per_iteration);
-      total_samples_per_pixel += samples_per_pixel_per_iteration;
-      std::cout << "Iteration finished, spp = " << samples_per_pixel_per_iteration << ", total " << total_samples_per_pixel << std::endl;
-      DetermineSamplesPerPixelForNextPass(samples_per_pixel_per_iteration, total_samples_per_pixel, render_params);
-    }
-
-    bm.write(output_file.string());
+    Image bm(render_params.width, render_params.height);
+    bm.SetColor(0, 0, 128);
+    bm.DrawRect(0, 0, render_params.width-1, render_params.height-1);
+    display->Show(bm);
   }
+
+  // Use a queue and an extra worker thread to perform image display and io in a non-blocking way.
+  using ImageWorkItem = std::tuple<Image*, bool>; // Would like to use unique_ptr, but queue implementation requires items to be copyable!
+  tbb::concurrent_bounded_queue<ImageWorkItem> image_queue;
+  image_queue.set_capacity(2);
   
+  auto PopAndProcessQueueItem = [&]{
+      auto [im, is_complete_pass] = pop(image_queue); // Blocks
+      if (display->IsOkToKeepGoing())
+        display->Show(*im);
+      if (is_complete_pass) // Partially rendered images are probably useless
+        im->write(output_file.string());
+      delete(im);
+  };
+  
+  tbb::atomic<bool> stop_flag = false;
+  tbb::tbb_thread image_handling_thread([&] {
+    while (stop_flag.load() == false)
+    {
+      PopAndProcessQueueItem();
+    }
+  });
+  
+  auto algo = RenderAlgorithmFactory(scene, render_params);
+  
+  algo->SetInterruptCallback([&](bool is_complete_pass){
+    auto im = algo->GenerateImage();
+    image_queue.push(ImageWorkItem{im.release(), is_complete_pass}); // Would use emplace but my TBB believes that I have no variadic template argument support.
+  });
+
+  tbb::tbb_thread watchdog_and_image_updater([&] {
+    while (display->IsOkToKeepGoing() && stop_flag.load() == false)
+    {    
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+      algo->RequestInterrupt();
+    }
+    algo->RequestFullStop();
+  });
+  
+  //////////////////////////////////
+  // Rendering is done here
+
+  auto start_time = std::chrono::steady_clock::now();
+
+  std::cout << std::endl;
+  std::cout << "Rendering ..." << std::endl;
+  
+  algo->Run();
+  
+  stop_flag.store(true);
+  
+  watchdog_and_image_updater.join();
+  image_handling_thread.join();
+  
+  // Ensure that the last image is saved
+  while (image_queue.size())
+    PopAndProcessQueueItem();
+
   auto end_time = std::chrono::steady_clock::now();
   std::cout << "Rendering time: " << std::chrono::duration<double>(end_time - start_time).count() << " sec." << std::endl;
-
+  //////////////////////////////////
+  
   return 0;
 }
 
@@ -457,7 +207,7 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
       ("w,w", po::value<int>(), "Width")
       ("h,h", po::value<int>(), "Height")
       ("rd", po::value<int>(), "Max ray depth")
-      ("max-spp", po::value<int>(), "Max samples per pixel")
+      ("spp", po::value<int>(), "Max samples per pixel")
       ("algo", po::value<std::string>()->default_value("pt"), "Rendering algorithm: pt or bdpt")
       ("pt-sample-mode", po::value<std::string>(), "Light sampling: 'bsdf' - bsdf importance sampling, 'lights' - sample lights aka. next event estimation, 'both' - both combined by MIS.")
       ("no-display", po::bool_switch()->default_value(false), "Don't open a display window")
@@ -544,9 +294,9 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
       throw po::error("Algorithm must be pt or bdpt or normalvis");
     
     int max_spp = -1;
-    if (vm.count("max-spp"))
+    if (vm.count("spp"))
     {
-      max_spp = vm["max-spp"].as<int>();
+      max_spp = vm["spp"].as<int>();
       if (max_spp <= 0)
         throw po::error("Max samples per pixel must be greater zero");
     }
