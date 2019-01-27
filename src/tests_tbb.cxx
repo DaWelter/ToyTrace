@@ -6,10 +6,13 @@
 #include <tbb/parallel_do.h>
 #include <tbb/task_group.h>
 #include <tbb/task.h>
+
 #include <thread>
 #include <iostream>
+
 #include <boost/optional/optional.hpp>
-#include <boost/none.hpp>
+
+#include "util_thread.hxx"
 
 /*  What's this? Sketch of the logic which could potentially be used in my path tracing algorithm.
  *  
@@ -97,59 +100,7 @@ private:
 };
 
 
-namespace ThreadUtilDetail
-{
 
-template<class Func, class Feeder>
-struct while_parallel_fed_
-{
-  Func f;
-  Feeder feeder;
-  tbb::task_group *tg;
-  int n_tasks;
-  
-  bool run()
-  {
-    for (int worker_num=0; worker_num<n_tasks; ++worker_num)
-    {
-      tg->run([=]{parallel_op();});
-    }
-    return tg->wait() == tbb::task_group_status::complete;
-  }
-  
-  void parallel_op()
-  {
-    auto val = feeder();
-    if (!val)
-      return;
-    f(*val);
-    tg->run([=]{parallel_op();});
-  }
-};
-
-
-template<class Func, class Feeder>
-bool while_parallel_fed(Func &&f, Feeder &&feeder, int n_tasks, tbb::task_group &tg)
-{
-  return while_parallel_fed_<Func,Feeder>{f, feeder, &tg, n_tasks}.run();
-}
-
-
-template<class Func, class Feeder, class IrqHandler>
-void while_parallel_fed_interruptible(Func &&f, Feeder &&feeder, IrqHandler &&irq_handler, int n_tasks, tbb::task_group &tg)
-{
-  while(true)
-  {
-    bool completed = while_parallel_fed(std::move(f), std::move(feeder), n_tasks, tg);
-    if (completed || !irq_handler())
-      break;
-  }
-}
-
-}
-
-using ThreadUtilDetail::while_parallel_fed;
-using ThreadUtilDetail::while_parallel_fed_interruptible;
 
 
 // Same as above but slightly different implementation
@@ -164,7 +115,7 @@ public:
   void Run()
   {
     while_parallel_fed_interruptible(
-      /* func = */[=](int j)
+      /* func = */[=](int j, int worker_num)
       {
         run_primary_task(j);
       }, 
