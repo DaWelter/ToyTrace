@@ -97,20 +97,24 @@ private:
 };
 
 
+namespace ThreadUtilDetail
+{
+
 template<class Func, class Feeder>
 struct while_parallel_fed_
 {
   Func f;
   Feeder feeder;
   tbb::task_group *tg;
+  int n_tasks;
   
-  void run(int n_tasks)
+  bool run()
   {
     for (int worker_num=0; worker_num<n_tasks; ++worker_num)
     {
       tg->run([=]{parallel_op();});
     }
-    tg->wait();
+    return tg->wait() == tbb::task_group_status::complete;
   }
   
   void parallel_op()
@@ -125,10 +129,27 @@ struct while_parallel_fed_
 
 
 template<class Func, class Feeder>
-void while_parallel_fed(Func &&f, Feeder &&feeder, int n_tasks, tbb::task_group &tg)
+bool while_parallel_fed(Func &&f, Feeder &&feeder, int n_tasks, tbb::task_group &tg)
 {
-  while_parallel_fed_<Func,Feeder>{f, feeder, &tg}.run(n_tasks);
+  return while_parallel_fed_<Func,Feeder>{f, feeder, &tg, n_tasks}.run();
 }
+
+
+template<class Func, class Feeder, class IrqHandler>
+void while_parallel_fed_interruptible(Func &&f, Feeder &&feeder, IrqHandler &&irq_handler, int n_tasks, tbb::task_group &tg)
+{
+  while(true)
+  {
+    bool completed = while_parallel_fed(std::move(f), std::move(feeder), n_tasks, tg);
+    if (completed || !irq_handler())
+      break;
+  }
+}
+
+}
+
+using ThreadUtilDetail::while_parallel_fed;
+using ThreadUtilDetail::while_parallel_fed_interruptible;
 
 
 // Same as above but slightly different implementation
@@ -142,30 +163,31 @@ public:
   static constexpr int n_tasks = 4;
   void Run()
   {
-    while (!is_done())
-    {
-      run_primary_tasks();
-      maybe_run_secondary_tasks();
-    }
-  }
-  
-  void run_primary_tasks()
-  {
-    while_parallel_fed(
+    while_parallel_fed_interruptible(
       /* func = */[=](int j)
       {
-        this->printl("Running primary subtask ", j, ", threadid ", std::this_thread::get_id());
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        run_primary_task(j);
       }, 
       /*feeder = */ [=]() -> boost::optional<int> 
       {
         int j = subtask_num.fetch_and_increment();
         return (j>=count) ? boost::optional<int>{} : j;
-      }, 
+      },
+      /* irq handler=*/ [=]() -> bool 
+      {
+        run_secondary_tasks();
+        return !is_done();
+      },
       n_tasks, other_kind_of_tg);
   }
   
-  void maybe_run_secondary_tasks()
+  void run_primary_task(int j)
+  {
+    this->printl("Running primary subtask ", j, ", threadid ", std::this_thread::get_id());
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+  
+  void run_secondary_tasks()
   {
     tbb::parallel_for(0, n_tasks, 1, [this](int worker_num){
       this->printl("Running secondary ", worker_num, ", threadid ", std::this_thread::get_id());
