@@ -23,11 +23,6 @@ namespace ROI = RadianceOrImportance;
 
 
 
-inline static Double3 Position(const Medium::InteractionSample &s, const RaySegment &which_is_a_point_on_this_segment)
-{
-  return which_is_a_point_on_this_segment.ray.PointAt(s.t);
-}
-
 double UpperBoundToBoundingBoxDiameter(const Scene &scene);
 
 
@@ -156,6 +151,8 @@ inline void MediumTracker::leaveVolume(const Medium* medium)
 namespace RandomWalk
 {
 namespace RW = RandomWalk;
+
+
 
 // TODO: At least some of the data could be precomputed.
 // TODO: For improved precision it would make sense to move the scene center to the origin.
@@ -491,16 +488,41 @@ public:
     }
        
     MaybeHandlePassageThroughSurface(source_node, ray.dir, medium_tracker);
+
+    TrackToNextInteraction(ray, context, medium_tracker, volume_pdf_coeff, 
+      /*surface_visitor=*/[&](const SurfaceInteraction &intersection, double distance, const Spectral3 &weight)
+      {
+        node_sample.beta_factor *= weight;
+        node_sample.segment = RaySegment{ray, distance};
+        node_sample.node.node_type = RW::NodeType::SURFACE_SCATTER;
+        node_sample.node.interaction.surface = intersection;
+      },
+      /*volume visitor=*/[&](const VolumeInteraction &interaction, double distance, const Spectral3 &weight)
+      {
+        node_sample.beta_factor *= weight;
+        node_sample.segment = RaySegment{ray, distance};
+        const auto &m = medium_tracker.getCurrentMedium();
+        const Spectral3 radiance = m.is_emissive ? m.EvaluateEmission(interaction.pos, context, nullptr) : Spectral3::Zero();
+        node_sample.node.interaction.volume = interaction;
+        node_sample.node.interaction.volume.radiance = radiance;
+        node_sample.node.node_type = RW::NodeType::VOLUME_SCATTER;
+      },
+      /* escape_visitor=*/[&](const Spectral3 &weight)
+      {
+        node_sample.beta_factor *= weight;
+        node_sample.segment = RaySegment{ray, LargeNumber};
+        const auto &emitter = scene.GetTotalEnvLight();
+        node_sample.node.node_type = RW::NodeType::ENV;
+        node_sample.node.interaction.emitter_env = RW::EnvironmentalRadianceFieldInteraction{
+          -ray.dir,
+          emitter
+        };
+        node_sample.node.interaction.emitter_env.radiance = emitter.Evaluate(-ray.dir, context);
+      }
+    );
     
-    auto collision = CollisionData{ray};
-    TrackToNextInteraction(collision, medium_tracker, context, volume_pdf_coeff);
-    
-    node_sample.node = AllocateNode(collision, medium_tracker, context);
-    node_sample.beta_factor *= collision.smpl.weight; 
-    node_sample.scatter_pdf = ray_sample.pdf_or_pmf;
-    node_sample.segment = collision.segment;
-    node_sample.segment.length = 
-      node_sample.node.IsSurfaceInteraction() ? collision.segment.length : collision.smpl.t;
+    node_sample.node.incident_dir = ray.dir;
+    node_sample.scatter_pdf = ray_sample.pdf_or_pmf;    
     assert(node_sample.scatter_pdf > 0.); // Since I rolled that sample it should have non-zero probability of being generated.
     return node_sample;
   }
@@ -674,25 +696,6 @@ public:
   {
     medium_tracker.initializePosition(
       source_node.node_type != RW::NodeType::ENV ? source_node.coordinates() : Double3{Infinity});
-  }
-  
-
-  struct CollisionData
-  {
-    CollisionData (const Ray &ray) :
-      smpl{},
-      segment{ray, LargeNumber},
-      intersection{}
-    {}
-    Medium::InteractionSample smpl;
-    RaySegment segment;
-    SurfaceInteraction intersection;
-  };
-
-  
-  static inline bool IsNotEscaped(const CollisionData &d)
-  {
-    return (d.smpl.t < d.segment.length || d.intersection.hitid);
   }
   
   
@@ -978,94 +981,79 @@ public:
   }
 
 
-  RW::PathNode AllocateNode(const CollisionData &collision, MediumTracker &medium_tracker, const PathContext &context) const
-  {
-    RW::PathNode node;
-    node.incident_dir = collision.segment.ray.dir;
-    if (collision.smpl.t < collision.segment.length)
-    {
-      const auto &m = medium_tracker.getCurrentMedium();
-      const Double3 pos = Position(collision.smpl, collision.segment);
-      const Spectral3 radiance = m.is_emissive ? m.EvaluateEmission(pos, context, nullptr) : Spectral3::Zero();
-      node.node_type = RW::NodeType::VOLUME_SCATTER;
-      node.interaction.volume = VolumeInteraction{
-        pos, m, radiance, collision.smpl.sigma_s
-      };
-    }
-    else if (collision.intersection.hitid)
-    {
-      node.node_type = RW::NodeType::SURFACE_SCATTER;
-      node.interaction.surface = collision.intersection;
-    }
-    else
-    {
-      const auto &emitter = scene.GetTotalEnvLight();
-      node.node_type = RW::NodeType::ENV;
-      node.interaction.emitter_env = RW::EnvironmentalRadianceFieldInteraction{
-        -collision.segment.ray.dir,
-        emitter
-      };
-      node.interaction.emitter_env.radiance = emitter.Evaluate(-collision.segment.ray.dir, context);
-    }
-    return node;
-  }
-  
-
-  void TrackToNextInteraction(
-    CollisionData &collision,
-    MediumTracker &medium_tracker,
+  /* Ray is the ray to shoot. It must already include the anti-self-intersection offset.
+   */
+  template<class VolumeHitVisitor, class SurfaceHitVisitor, class EscapeVisitor>
+  bool TrackToNextInteraction(
+    const Ray &ray,
     const PathContext &context,
-    VolumePdfCoefficients *volume_pdf_coeff = nullptr)
+    MediumTracker &medium_tracker,
+    VolumePdfCoefficients *volume_pdf_coeff,
+    SurfaceHitVisitor &&surface_visitor,
+    VolumeHitVisitor &&volume_visitor,
+    EscapeVisitor &&escape_visitor)
   {
     static constexpr int MAX_ITERATIONS = 100; // For safety, in case somethign goes wrong with the intersections ...
     
     Spectral3 total_weight{1.};
     
-    SurfaceInteraction &intersection = collision.intersection;
-    IterateIntersectionsBetween iter{collision.segment, scene};
+    RaySegment segment;
+    SurfaceInteraction intersection;
+    IterateIntersectionsBetween iter{RaySegment{ray, LargeNumber}, scene};
     
     for (int interfaces_crossed=0; interfaces_crossed < MAX_ITERATIONS; ++interfaces_crossed)
     {
       double prev_t = iter.GetT();
-      RaySegment segment;
+      
       bool hit = iter.Next(segment, intersection);
 
       const Medium& medium = medium_tracker.getCurrentMedium();
-      const auto &medium_smpl = collision.smpl = medium.SampleInteractionPoint(segment, sampler, context);
+      const auto medium_smpl = medium.SampleInteractionPoint(segment, sampler, context);
       total_weight *= medium_smpl.weight;
       
-      const bool did_not_interact_w_medium = medium_smpl.t >= segment.length;
+      const bool interacted_w_medium = medium_smpl.t < segment.length;
       const bool hit_invisible_wall =
         hit && 
         scene.GetMaterialOf(intersection.hitid).shader==&scene.GetInvisibleShader() &&
         scene.GetMaterialOf(intersection.hitid).emitter==nullptr;
-      bool cont = did_not_interact_w_medium && hit_invisible_wall;
+      const bool cont = !interacted_w_medium && hit_invisible_wall;
       
-      if (volume_pdf_coeff)
+      segment.length = std::min(segment.length, medium_smpl.t);
+      
+      if (volume_pdf_coeff != nullptr)
       {
-        double back_l = segment.length;
-        segment.length = std::min(medium_smpl.t, segment.length);
         VolumePdfCoefficients local_coeff = medium_tracker.getCurrentMedium().ComputeVolumePdfCoefficients(segment, context);
         Accumulate(*volume_pdf_coeff, local_coeff, interfaces_crossed==0, !cont);
-        segment.length = back_l;
       }
-      
+
+      // If there was a medium interaction, it came before the next surface, and we can surely return.
+      // Else it is possible to hit a perfectly transparent wall. I want to pass through it and keep on going.
+      // If we hit something else then we surely want to return to process it further.
+      // Finally there is the possibility of the photon escaping out of the scene to infinity.
       if (cont)
       {
         medium_tracker.goingThroughSurface(segment.ray.dir, intersection);
       }
       else
       {
-        if (!hit)
-          intersection = SurfaceInteraction{};
-        collision.smpl.weight = total_weight;
-        collision.segment.length = iter.GetT();
-        collision.smpl.t = prev_t + medium_smpl.t;
-        return;
+        if (interacted_w_medium)
+        {
+          VolumeInteraction interaction{segment.EndPoint(), medium, Spectral3{0.}, medium_smpl.sigma_s};
+          volume_visitor(interaction, prev_t+medium_smpl.t, total_weight);
+          return true;
+        }
+        else if (hit)
+        {
+          surface_visitor(intersection, iter.GetT(), total_weight);
+          return true;
+        }
+        break; // Escaped the scene.
       }
-      
       assert (interfaces_crossed < MAX_ITERATIONS-1);
     }
+    
+    escape_visitor(total_weight);
+    return false;
   }
 };
 
