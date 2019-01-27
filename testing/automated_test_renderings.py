@@ -231,7 +231,7 @@ class CornelBoxLightTypes(object):
             for mode in 'both bsdf lights'.split():
                 img = toytrace(
                     scene, '',
-                    merge(self.common_opt, { '--pt-sample-mode' : mode, '--max-spp' : 16, }),
+                    merge(self.common_opt, { '--pt-sample-mode' : mode, '--spp' : 16, }),
                     name = name)
                 image_row.append((name, mode, img))
             imagegrid.append(image_row)
@@ -254,7 +254,7 @@ class CornelBoxLightTypes(object):
             scene = scene()
             img = toytrace(
                 scene, '',
-                merge(self.common_opt, {'--algo': 'bdpt', '--max-spp' : 4 }),
+                merge(self.common_opt, {'--algo': 'bdpt', '--spp' : 4 }),
                 name = name)
             images.append((name, img))
         new_im  = Image.new('RGB', (W, H*len(images)))
@@ -321,8 +321,8 @@ class EmissiveDemoMediumScenes(object):
                 yield name, functools.partial(self._makeScene, (cross_section, temperature, main_light_power))
 
     def _run(self, scene, name, render_mode):
-        #opt = {'-w': 512, '-h': 512, '--max-spp': 512,
-        opt = {'-w': 256, '-h': 256, '--max-spp': 32,
+        #opt = {'-w': 512, '-h': 512, '--spp': 512,
+        opt = {'-w': 256, '-h': 256, '--spp': 32,
                '--algo' : render_mode }
         toytrace(
             scene, name+'.png', opt, name=name)
@@ -406,7 +406,7 @@ class Atmosphere(object):
         yield ('atmosphere_backlit', lambda : self.backlit)
 
     def makeTests(self):
-        common_opt = {'--max-spp': 16, '-w': 320, '-h': 320}
+        common_opt = {'--spp': 16, '-w': 320, '-h': 320}
         for name, scene in self.makeScenes():
             func = functools.partial(toytrace, scene(), name+'.png', common_opt, name = name)
             yield (name, func)
@@ -439,10 +439,10 @@ class Various(object):
 
     def runSingle(self, name, scene, mode):       
         if mode == 'bdpt':
-          opts = { '--algo' : 'bdpt', '--max-spp': 8}
+          opts = { '--algo' : 'bdpt', '--spp': 8}
           filename = name+'_bdpt.png'
         else:
-          opts = {'--max-spp': 16}
+          opts = {'--spp': 16}
           filename = name+'.png'
         toytrace(
             self.scenes[name], filename,
@@ -550,7 +550,7 @@ class ParticipatingMediaSimple(object):
         return scene
 
     def run(self, scene, name, render_mode):
-        opt = {'-w': 256, '-h': 256, '--max-spp': 16,
+        opt = {'-w': 256, '-h': 256, '--spp': 16,
                '--algo' : render_mode }
         toytrace(
             scene, name+'.png', opt, name=name)
