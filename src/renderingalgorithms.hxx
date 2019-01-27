@@ -4,6 +4,7 @@
 
 #include <tbb/atomic.h>
 #include <tbb/mutex.h>
+#include <tbb/spin_mutex.h>
 #include <tbb/parallel_for.h>
 
 #include "scene.hxx"
@@ -11,6 +12,7 @@
 #include "shader_util.hxx"
 #include "camera.hxx"
 #include "renderbuffer.hxx"
+#include "util_thread.hxx"
 
 
 using InterruptCallback = std::function<void(bool)>;
@@ -20,7 +22,7 @@ class RenderingAlgo
 {
   InterruptCallback irq_cb;
 public:
-  virtual ~RenderingAlgo() {}
+  virtual ~RenderingAlgo() noexcept(false) {}
   // The callback will be invoked from the same thread where Run was invoked.
   void SetInterruptCallback(InterruptCallback cb) { irq_cb = cb; }
   virtual void Run() = 0;
@@ -94,19 +96,15 @@ protected:
   const RenderingParameters &render_params;
   const Scene &scene;
 private:
+  static constexpr int PIXEL_STRIDE = 64 / sizeof(Spectral3); // Because false sharing.
   Spectral3ImageBuffer buffer;
   int num_threads = 1;
   int num_pixels = 0;
   SamplesPerPixelSchedule spp_schedule;
   tbb::atomic<int> shared_pixel_index = 0;
-  enum ControlFlag : int 
-  {
-    RUN = 0,
-    REQUEST_INTERRUPT = 1,
-    REQUEST_STOP = 2
-  };
-  tbb::atomic<int> control_flag = RUN;
-  tbb::mutex buffer_mutex;
+  tbb::task_group the_task_group;
+  tbb::atomic<bool> stop_flag = false;
+  tbb::spin_mutex buffer_mutex;
   ToyVector<std::unique_ptr<Worker>> workers;
 public:
   SimplePixelByPixelRenderingAlgo(const RenderingParameters &render_params_, const Scene &scene_)
@@ -122,25 +120,29 @@ public:
     for (int i=0; i<std::max(1, this->render_params.num_threads); ++i)
       workers.push_back(AllocateWorker(i));
     num_threads = workers.size();
-    while (!(control_flag.load() & REQUEST_STOP) && spp_schedule.GetPerIteration() > 0)
+    while (!stop_flag.load() && spp_schedule.GetPerIteration() > 0)
     {
       shared_pixel_index = 0;
       buffer.AddSampleCount(GetSamplesPerPixel());
-      while (shared_pixel_index.load() < num_pixels && !(control_flag.load() & REQUEST_STOP))
-      {
-        tbb::parallel_for(0, num_threads, 1, [this](int task_num) {
-          this->RunRenderingWorker(*workers[task_num]);
-        });
-        if (control_flag.load() & REQUEST_INTERRUPT)
+      while_parallel_fed_interruptible(
+        /*func=*/[this](int pixel_index, int worker_num)
         {
-          CallInterruptCb(false);
-          control_flag.store(control_flag.load() & ~REQUEST_INTERRUPT);
-        }
-      } // Iteration over pixels
-      //NotifyRenderingPassFinished();
-      std::cout << "Iteration finished, spp = " << GetSamplesPerPixel() << ", total " << spp_schedule.GetTotal() << std::endl;
+          this->RunRenderingWorker(pixel_index, *workers[worker_num]);
+        },
+        /*feeder=*/[this]() -> boost::optional<int>
+        {
+          return this->FeedPixelIndex();
+        },
+        /*irq_handler=*/[this]() -> bool
+        {
+          if (this->stop_flag.load())
+            return false;
+          this->CallInterruptCb(false);
+          return true;
+        },
+        num_threads, the_task_group);
+      std::cout << "Iteration finished, past spp = " << GetSamplesPerPixel() << ", total taken " << spp_schedule.GetTotal() << std::endl;
       CallInterruptCb(true);
-      control_flag.store(control_flag.load() & ~REQUEST_INTERRUPT);
       spp_schedule.UpdateForNextPass();
     } // Pass iteration
   }
@@ -148,13 +150,14 @@ public:
   // Will potentially be called before Run is invoked!
   void RequestFullStop() override
   {
-    control_flag.store(REQUEST_STOP | control_flag.load());
+    stop_flag.store(true);
+    the_task_group.cancel();
   }
   
   // Will potentially be called before Run is invoked!
   void RequestInterrupt() override
   {
-    control_flag.store(REQUEST_INTERRUPT | control_flag.load());
+    the_task_group.cancel();
   }
   
   std::unique_ptr<Image> GenerateImage() override
@@ -174,32 +177,46 @@ protected:
   
   inline int GetSamplesPerPixel() const { return spp_schedule.GetPerIteration(); }
   
-private:     
-  void RunRenderingWorker(Worker &worker)
+private:
+  boost::optional<int> FeedPixelIndex()
   {
-    static constexpr int PIXEL_STRIDE = 64 / sizeof(Spectral3); // Because false sharing.
-    int pixel_index = 0;
-    while (control_flag.load() == RUN && (pixel_index = shared_pixel_index.fetch_and_add(PIXEL_STRIDE)) < num_pixels)
-    {     
-      int current_end_index = std::min(pixel_index + PIXEL_STRIDE, num_pixels);
-      for (; pixel_index < current_end_index; ++pixel_index)
+    int i = shared_pixel_index.fetch_and_add(PIXEL_STRIDE);
+    return i <= num_pixels ? i : boost::optional<int>();
+  }
+  
+  void RenderPixels(int pixel_index, Worker &worker)
+  {
+    int current_end_index = std::min(pixel_index + PIXEL_STRIDE, num_pixels);
+    for (; pixel_index < current_end_index; ++pixel_index)
+    {
+      const int nsmpl = GetSamplesPerPixel();
+      for(int i=0;i<nsmpl;i++)
       {
-        const int nsmpl = GetSamplesPerPixel();
-        for(int i=0;i<nsmpl;i++)
-        {
-          auto smpl = worker.RenderPixel(pixel_index);
-          buffer.Insert(pixel_index, smpl);
-        }
+        auto smpl = worker.RenderPixel(pixel_index);
+        buffer.Insert(pixel_index, smpl);
       }
-      
-      { // Fill in the samples from light tracing.
-        tbb::mutex::scoped_lock lock(buffer_mutex);
-        for (const auto &r : worker.GetSensorResponses())
-        {
-          assert(r);
-          buffer.Splat(r.unit_index, r.weight);
-        }
-      }
+    }    
+  }
+  
+  
+  void SplatLightSamples(Worker &worker)
+  {
+    for (const auto &r : worker.GetSensorResponses())
+    {
+      assert(r);
+      buffer.Splat(r.unit_index, r.weight);
+    }
+    worker.GetSensorResponses().clear();
+  }
+  
+  
+  void RunRenderingWorker(int pixel_index, Worker &worker)
+  {
+    RenderPixels(pixel_index, worker);
+    if (worker.GetSensorResponses().size() > 0)
+    { // Fill in the samples from light tracing.
+      tbb::spin_mutex::scoped_lock lock(buffer_mutex);
+      SplatLightSamples(worker);
     }
   }
 };
