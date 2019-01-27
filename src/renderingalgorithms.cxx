@@ -1,6 +1,6 @@
-#include "renderingalgorithms.hxx"
+#include "renderingalgorithms_simplebase.hxx"
 #include "rendering_randomwalk_impl.hxx"
-#include "rendering_pathtracing_impl.hxx"
+#include "renderingalgorithms_pathtracing.hxx"
 #include "image.hxx"
 
 #include <boost/filesystem.hpp>

@@ -13,28 +13,8 @@
 #include "camera.hxx"
 #include "renderbuffer.hxx"
 #include "util_thread.hxx"
+#include "renderingalgorithms_interface.hxx"
 
-
-using InterruptCallback = std::function<void(bool)>;
-
-
-class RenderingAlgo
-{
-  InterruptCallback irq_cb;
-public:
-  virtual ~RenderingAlgo() noexcept(false) {}
-  // The callback will be invoked from the same thread where Run was invoked.
-  void SetInterruptCallback(InterruptCallback cb) { irq_cb = cb; }
-  virtual void Run() = 0;
-  // Will cause the interrupt callback to be invoked after an unspecified amount of time.
-  // For intermediate status reports, images, etc. 
-  virtual void RequestInterrupt() = 0;
-  virtual void RequestFullStop() = 0; // Early termination due to user interaction.
-  // May be called from within the interrupt callback, or after Run returned.
-  virtual std::unique_ptr<Image> GenerateImage() = 0;
-protected:
-  void CallInterruptCb(bool is_complete_pass) { irq_cb(is_complete_pass); }
-};
 
 
 struct SensorResponse
@@ -184,6 +164,18 @@ private:
     return i <= num_pixels ? i : boost::optional<int>();
   }
   
+  
+  void RunRenderingWorker(int pixel_index, Worker &worker)
+  {
+    RenderPixels(pixel_index, worker);
+    if (worker.GetSensorResponses().size() > 0)
+    { // Fill in the samples from light tracing.
+      tbb::spin_mutex::scoped_lock lock(buffer_mutex);
+      SplatLightSamples(worker);
+    }
+  }
+  
+  
   void RenderPixels(int pixel_index, Worker &worker)
   {
     int current_end_index = std::min(pixel_index + PIXEL_STRIDE, num_pixels);
@@ -208,25 +200,10 @@ private:
     }
     worker.GetSensorResponses().clear();
   }
-  
-  
-  void RunRenderingWorker(int pixel_index, Worker &worker)
-  {
-    RenderPixels(pixel_index, worker);
-    if (worker.GetSensorResponses().size() > 0)
-    { // Fill in the samples from light tracing.
-      tbb::spin_mutex::scoped_lock lock(buffer_mutex);
-      SplatLightSamples(worker);
-    }
-  }
 };
 
 
 } // namespace SimplePixelByPixelRenderingDetails
-
-
-std::unique_ptr<RenderingAlgo> RenderAlgorithmFactory(const Scene &_scene, const RenderingParameters &_params);
-
 
 
 

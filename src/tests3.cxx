@@ -6,7 +6,7 @@
 #include <rapidjson/document.h>
 #include <boost/filesystem.hpp>
 
-#include "renderingalgorithms.hxx"
+#include "renderingalgorithms_simplebase.hxx"
 #include "rendering_randomwalk_impl.hxx"
 
 using namespace RandomWalk;

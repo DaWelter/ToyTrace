@@ -1,7 +1,7 @@
 #include "image.hxx"
 #include "scene.hxx"
 #include "renderbuffer.hxx"
-#include "renderingalgorithms.hxx"
+#include "renderingalgorithms_interface.hxx"
 
 #include <chrono>
 #include <thread>

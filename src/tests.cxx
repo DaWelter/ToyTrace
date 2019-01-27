@@ -14,7 +14,7 @@
 #include "infiniteplane.hxx"
 #include "sampler.hxx"
 #include "scene.hxx"
-#include "renderingalgorithms.hxx"
+#include "renderingalgorithms_simplebase.hxx"
 #include "atmosphere.hxx"
 #include "util.hxx"
 

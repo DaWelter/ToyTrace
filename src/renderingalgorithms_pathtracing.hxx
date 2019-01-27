@@ -1,5 +1,6 @@
 #pragma once
 #include "rendering_randomwalk_impl.hxx"
+#include "renderingalgorithms_simplebase.hxx"
 
 #include <unordered_map>
 #include <boost/functional/hash.hpp>
