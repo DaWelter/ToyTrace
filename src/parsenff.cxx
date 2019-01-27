@@ -1081,6 +1081,7 @@ void Scene::ParseNFF(const fs::path &filename, RenderingParameters *render_param
   NFFParser parser(this, render_params, is, filename);
   auto scope = parser.CreateScope();
   parser.Parse(scope);
+  envlight = std::make_unique<TotalEnvironmentalRadianceField>(this->envlights);
 }
 
 
@@ -1096,6 +1097,7 @@ void Scene::ParseNFF(std::istream &is, RenderingParameters *render_params)
   NFFParser parser(this, render_params, is, std::string());
   auto scope = parser.CreateScope();
   parser.Parse(scope);
+  envlight = std::make_unique<TotalEnvironmentalRadianceField>(this->envlights);
 }
 
 

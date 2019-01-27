@@ -69,7 +69,7 @@ link_libraries(${PNG_LIBRARY} ${JPEG_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${ASSI
 
 set(SOURCES src/image.cxx  src/parsenff.cxx  src/shader.cxx src/ray.cxx src/sampler.cxx
             src/phasefunctions.cxx src/atmosphere.cxx src/spectral.cxx src/primitive.cxx src/renderingalgorithms.cxx 
-            src/light.cxx src/texture.cxx src/embreeaccelerator.cxx src/scene.cxx)
+            src/light.cxx src/texture.cxx src/embreeaccelerator.cxx src/scene.cxx src/lightpicker_trivial.cxx)
 add_executable(toytrace src/toytrace.cxx ${SOURCES})
 target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE} ${Boost_FILESYSTEM_LIBRARY_RELEASE} tbb)
 

@@ -11,6 +11,8 @@
 #include "util.hxx"
 #include "shader_util.hxx"
 #include "renderbuffer.hxx"
+#include "lightpicker_trivial.hxx"
+
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic warning "-Wunused-parameter" 
@@ -148,115 +150,6 @@ inline void MediumTracker::leaveVolume(const Medium* medium)
   }
 }
 
-
-
-class NewLightPicker
-{
-  const Scene &scene;
-  Sampler &sampler;
-  ToyVector<std::pair<int,int>> arealight_refs;
-  ToyVector<int> volume_light_refs;
-  
-  void FindAreaLightGeometry()
-  {
-    for (int geom_idx=0; geom_idx<scene.GetNumGeometries(); ++geom_idx)
-    {
-      const auto &geom = scene.GetGeometry(geom_idx);
-      for (int prim_idx=0; prim_idx<geom.Size(); ++prim_idx)
-      {
-        auto &mat = scene.GetMaterialOf(geom_idx, prim_idx);
-        if (mat.emitter)
-        {
-          arealight_refs.push_back(std::make_pair(geom_idx, prim_idx));
-        }
-      }
-    }
-  }
-  
-  void FindVolumeLightGeometry()
-  {
-    for (int i = 0; i < scene.GetNumMaterials(); ++i)
-    {
-      const auto *medium = scene.GetMaterial(i).medium;
-      if (medium && medium->is_emissive)
-        volume_light_refs.push_back(i);
-    }
-  }
-  
-  
-public:
-  NewLightPicker(const Scene &_scene, Sampler &_sampler) 
-    : scene{_scene}, sampler{_sampler}
-  {
-    FindAreaLightGeometry();
-    FindVolumeLightGeometry();
-    const double nl = scene.GetNumLights();
-    const double ne = scene.GetNumEnvLights();
-    const double na = arealight_refs.size();
-    const double nv = volume_light_refs.size();
-    // Why do I need to initialize like this to not get a negative number in IDX_PROB_POINT?
-    // I mean when nl is zero and I assign an initializer list, the last entry is going to be like -something.e-42. Why???
-    const double normalize_factor = 1./(nl+ne+na+nv);
-    emitter_type_selection_probabilities[IDX_PROB_ENV] = ne*normalize_factor;
-    emitter_type_selection_probabilities[IDX_PROB_AREA] = na*normalize_factor;
-    emitter_type_selection_probabilities[IDX_PROB_POINT] = nl*normalize_factor;
-    emitter_type_selection_probabilities[IDX_PROB_VOLUME] = nv*normalize_factor;
-  }
-  
-public:
-  using LightPick = std::tuple<const ROI::PointEmitter*, double>;
-  using AreaLightPick = std::tuple<PrimRef, double>;
-  using VolumeLightPick = std::tuple<Medium const*, double>;
-  
-  static constexpr int IDX_PROB_ENV = 0;
-  static constexpr int IDX_PROB_AREA = 1;
-  static constexpr int IDX_PROB_POINT = 2;
-  static constexpr int IDX_PROB_VOLUME = 3;
-  std::array<double, 4> emitter_type_selection_probabilities;
-
-  LightPick PickLight()
-  {
-    const int nl = scene.GetNumLights();
-    assert(nl > 0);
-    int idx = sampler.UniformInt(0, nl-1);
-    const ROI::PointEmitter *light = &scene.GetLight(idx);
-    double pmf_of_light = 1./nl;
-    return LightPick{light, pmf_of_light};
-  }
-  
-  double PmfOfLight(const ROI::PointEmitter &) const
-  {
-    return 1./scene.GetNumLights();
-  }
-  
-  AreaLightPick PickAreaLight()
-  {
-    const int na = arealight_refs.size();
-    assert (na > 0);
-    int geom_idx, prim_idx;
-    std::tie(geom_idx, prim_idx) = arealight_refs[sampler.UniformInt(0, na-1)];
-    double pmf_of_light = 1./na;
-    return AreaLightPick{{&scene.GetGeometry(geom_idx),prim_idx}, pmf_of_light};
-  }
-
-  double PmfOfLight(const ROI::AreaEmitter &) const
-  {
-    return 1./arealight_refs.size();
-  }
-  
-  VolumeLightPick PickVolumeLight()
-  {
-    const int n = volume_light_refs.size();
-    assert (n > 0);
-    auto idx = volume_light_refs[sampler.UniformInt(0, n-1)];
-    return VolumeLightPick{scene.GetMaterial(idx).medium, 1./n};
-  }
-  
-  double PmfOfLight(const Medium &) const
-  {
-    return 1./volume_light_refs.size();
-  }
-};
 
 
 
@@ -472,6 +365,62 @@ struct PathNode
 
 
 
+
+// A set of callbacks to be invoked when a light is sampled.
+// Lights are pretty distinct types. So I use the visitor
+// pattern to invoke the appropriate action for the selected type.
+struct EmitterSampleVisitor
+{
+  const PathContext &context;
+  const Scene &scene;
+  Sampler &sampler;
+  Pdf &pdf;           // Return value.
+  RW::PathNode &node; // Return value.
+  
+  void operator()(const ROI::EnvironmentalRadianceField &env, double prob)
+  {
+    auto smpl = env.TakeDirectionSample(sampler, context);
+    node.node_type = RW::NodeType::ENV;
+    node.interaction.emitter_env = RW::EnvironmentalRadianceFieldInteraction{
+      smpl.coordinates,
+      env
+    };
+    node.interaction.emitter_env.radiance = smpl.value;
+    pdf = prob*smpl.pdf_or_pmf;
+  }
+  void operator()(const ROI::PointEmitter &light, double prob)
+  {
+    node.node_type = RW::NodeType::POINT_LIGHT;
+    node.interaction.emitter_point = RW::PointEmitterInteraction{
+      light.Position(),
+      light
+    };
+    pdf = Pdf::MakeFromDelta(prob);
+  }
+  void operator()(const PrimRef& prim_ref, double prob)
+  {
+    const auto &mat = scene.GetMaterialOf(prim_ref);
+    assert(mat.emitter); // Otherwise would would not have been selected.
+    auto smpl = mat.emitter->TakeAreaSample(prim_ref, sampler, context);
+    node.node_type = RW::NodeType::SURFACE_EMITTER;
+    node.interaction.surface = SurfaceInteraction{
+      smpl.coordinates };
+    pdf = prob*smpl.pdf_or_pmf;
+  }
+  void operator()(const Medium &medium, double prob)
+  {
+    Medium::VolumeSample smpl = medium.SampleEmissionPosition(sampler, context);
+    double pdf_which_cannot_be_delta = 0;
+    auto radiance =  medium.EvaluateEmission(smpl.pos, context, &pdf_which_cannot_be_delta);
+    node.node_type = RW::NodeType::VOLUME_EMITTER;
+    node.interaction.volume = VolumeInteraction(smpl.pos, medium, radiance, Spectral3{0.});
+    // The reason sigma_s is set to 0 in the line above, is that the initial light node will never be used for scattering.
+    pdf = prob*pdf_which_cannot_be_delta;
+  }
+};
+
+
+
 class RadianceEstimatorBase
 {
 protected:
@@ -479,17 +428,16 @@ protected:
   const Scene &scene;
   double sufficiently_long_distance_to_go_outside_the_scene_bounds;
   int max_path_node_count;
-private:
-  ROI::TotalEnvironmentalRadianceField envlight;
+
 protected:
-  NewLightPicker light_picker;
+  TrivialLightPicker light_picker;
   int sensor_connection_unit = {};
 public:
   RadianceEstimatorBase(const Scene &_scene, const AlgorithmParameters &algo_params = AlgorithmParameters{})
     : sampler{}, scene{_scene},     
       sufficiently_long_distance_to_go_outside_the_scene_bounds{10.*UpperBoundToBoundingBoxDiameter(_scene)},
       max_path_node_count{algo_params.max_ray_depth+1},
-      envlight{_scene}, light_picker{_scene, sampler}
+      light_picker{_scene}
   {
 
   }
@@ -748,62 +696,10 @@ public:
   }
   
   
-
-  
-  
   RW::PathNode SampleEmissiveEnd(const PathContext &context, Pdf &pdf)
   {
     RW::PathNode node;
-    int which_kind = TowerSampling<4>(light_picker.emitter_type_selection_probabilities.data(), sampler.Uniform01());
-    if (which_kind == NewLightPicker::IDX_PROB_ENV)
-    {
-      const auto &emitter = this->GetEnvLight();
-      auto smpl = emitter.TakeDirectionSample(sampler, context);
-      node.node_type = RW::NodeType::ENV;
-      node.interaction.emitter_env = RW::EnvironmentalRadianceFieldInteraction{
-        smpl.coordinates,
-        emitter
-      };
-      node.interaction.emitter_env.radiance = smpl.value;
-      pdf = smpl.pdf_or_pmf;
-    }
-    else if(which_kind == NewLightPicker::IDX_PROB_AREA)
-    {
-      auto [prim_ref, pmf_of_light] = light_picker.PickAreaLight();
-      const auto &mat = scene.GetMaterialOf(prim_ref);
-      assert(mat.emitter);
-      auto smpl = mat.emitter->TakeAreaSample(prim_ref, sampler, context);
-      node.node_type = RW::NodeType::SURFACE_EMITTER;
-      node.interaction.surface = SurfaceInteraction{
-        smpl.coordinates };
-      pdf = pmf_of_light * smpl.pdf_or_pmf;
-    }
-    else if(which_kind == NewLightPicker::IDX_PROB_VOLUME)
-    {
-      auto [medium, pmf_of_light] = light_picker.PickVolumeLight();
-      assert(medium != nullptr);
-      Medium::VolumeSample smpl = medium->SampleEmissionPosition(sampler, context);
-      double pdf_which_cannot_be_delta = 0;
-      auto radiance =  medium->EvaluateEmission(smpl.pos, context, &pdf_which_cannot_be_delta);
-      node.node_type = RW::NodeType::VOLUME_EMITTER;
-      node.interaction.volume = VolumeInteraction(smpl.pos, *medium, radiance, Spectral3{0.});
-      // The reason sigma_s is set to 0 in the line above, is that the initial light node will never be used for scattering.
-      pdf = pmf_of_light * pdf_which_cannot_be_delta;
-    }
-    else
-    {
-      const ROI::PointEmitter* light; 
-      double pmf_of_light;
-      std::tie(light, pmf_of_light) = light_picker.PickLight();
-      node.node_type = RW::NodeType::POINT_LIGHT;
-      node.interaction.emitter_point = RW::PointEmitterInteraction{
-        light->Position(),
-        *light
-      };
-      pdf = Pdf::MakeFromDelta(pmf_of_light);
-    }
-    pdf *= light_picker.emitter_type_selection_probabilities[which_kind];
-    assert (std::isfinite(pdf));
+    light_picker.PickLight(sampler, EmitterSampleVisitor{context, scene, sampler, pdf, node});
     return node;
   }
   
@@ -822,15 +718,6 @@ public:
     pdf = smpl.pdf_or_pmf;
     return node;
   }
-  
-  
-//   ScatterSample SampleScatterCoordinate(const PathNode &node, const PathContext &context)
-//   {
-//     if (node.IsScatterNode())
-//       return SampleScatterCoordinateOfScatterer(node, context);
-//     else
-//       return SampleScatterCoordinateOfEmitter(node, context);
-//   }
   
   
   // Generate y_i+1 given y_i and an incident direction, stored in node.
@@ -921,7 +808,6 @@ public:
       const auto &emitter = *ASSERT_NOT_NULL(GetMaterialOf(interaction, scene).emitter);
       double pdf = emitter.EvaluatePdf(node.interaction.surface.hitid, context);
       pdf *= light_picker.PmfOfLight(emitter);
-      pdf *= light_picker.emitter_type_selection_probabilities[NewLightPicker::IDX_PROB_AREA];
       return pdf;
     }
     else if(node.node_type == RW::NodeType::VOLUME_EMITTER)
@@ -930,14 +816,13 @@ public:
       double pdf = 0;
       interaction.medium().EvaluateEmission(interaction.pos, context, &pdf);
       pdf *= light_picker.PmfOfLight(interaction.medium());
-      pdf *= light_picker.emitter_type_selection_probabilities[NewLightPicker::IDX_PROB_VOLUME];
       return pdf;
     }
     else if(node.node_type == RW::NodeType::ENV)
     {
       const EnvironmentalRadianceFieldInteraction &interaction = node.interaction.emitter_env;
       double pdf = interaction.emitter->EvaluatePdf(interaction.pos, context);
-      pdf *= light_picker.emitter_type_selection_probabilities[NewLightPicker::IDX_PROB_ENV];
+      pdf *= light_picker.PmfOfLight(*interaction.emitter);
       return pdf;
     }
     else // Other things are either not emitters or cannot be hit by definition.
@@ -1057,12 +942,6 @@ public:
       position += AntiSelfIntersectionOffset(node.interaction.surface, exitant_dir);
     }
   }
-  
-  
-  const ROI::EnvironmentalRadianceField& GetEnvLight() const
-  {
-    return envlight;
-  }
 
   
   Spectral3 TransmittanceEstimate(RaySegment seg, MediumTracker &medium_tracker, const PathContext &context, VolumePdfCoefficients *volume_pdf_coeff = nullptr)
@@ -1120,7 +999,7 @@ public:
     }
     else
     {
-      const auto &emitter = this->GetEnvLight();
+      const auto &emitter = scene.GetTotalEnvLight();
       node.node_type = RW::NodeType::ENV;
       node.interaction.emitter_env = RW::EnvironmentalRadianceFieldInteraction{
         -collision.segment.ray.dir,

@@ -53,20 +53,6 @@ struct Material
   }
 };
 
-/*
-class PrimitiveIterator : public std::iterator<std::input_iterator_tag, PrimRef>
-{
-  PrimRef current;
-public:
-  PrimitiveIterator(const Scene &scene);
-  PrimitiveIterator(const PrimitiveIterator &other);
-  operator bool () const;
-  bool operator==(const PrimitiveIterator &other);
-  //bool operator!=(const PrimitiveIterator &other);
-  reference operator*() const;
-  PrimitiveIterator operator++(int); 
-};*/
-
 
 class Scene
 {
@@ -96,6 +82,7 @@ class Scene
   std::vector<std::unique_ptr<Light>> lights; // point lights
   std::vector<std::unique_ptr<Texture>> textures;
   Box boundingBox;
+  std::unique_ptr<EnvironmentalRadianceField> envlight;
   
 public:
   Scene();
@@ -115,15 +102,13 @@ public:
   }
   
   bool HasLights() const;
-  
-  int GetNumEnvLights() const
+ 
+  bool HasEnvLight() const { return envlights.size()>0; }
+
+  const RadianceOrImportance::EnvironmentalRadianceField& GetTotalEnvLight() const
   {
-    return envlights.size();
-  }
-  
-  const RadianceOrImportance::EnvironmentalRadianceField& GetEnvLight(int i) const
-  {
-    return *envlights[i];
+    assert(envlight.get() != nullptr);
+    return *envlight;
   }
   
   const Camera& GetCamera() const

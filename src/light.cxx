@@ -6,12 +6,12 @@ namespace RadianceOrImportance
   
 inline const EnvironmentalRadianceField& TotalEnvironmentalRadianceField::get(int i) const 
 { 
-  return scene.GetEnvLight(i);
+  return *envlights[i];
 }
 
 inline int TotalEnvironmentalRadianceField::size() const 
 { 
-  return scene.GetNumEnvLights(); 
+  return envlights.size(); 
 }
   
 DirectionalSample TotalEnvironmentalRadianceField::TakeDirectionSample(Sampler& sampler, const PathContext& context) const
