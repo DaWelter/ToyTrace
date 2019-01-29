@@ -597,6 +597,19 @@ void NFFParser::Parse(Scope &scope)
       else throw MakeException("Error");
       continue;
     }
+    
+    if (!strcmp(token, "vacuummedium"))
+    {
+      char name[LINESIZE];
+      int num = std::sscanf(line.c_str(), "vacuummedium %s", name);
+      if (num == 1)
+      {
+        auto m = std::make_unique<VacuumMedium>(scope.mediums.size());
+        InsertAndActivate(name, scope, std::move(m));
+      }
+      else throw MakeException("Error");
+      continue;
+    }
 
 
     if (!strcmp(token, "simpleatmosphere"))

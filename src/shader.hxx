@@ -172,7 +172,7 @@ public:
 class VacuumMedium : public Medium
 {
 public:
-  VacuumMedium() : Medium(-1) {}
+  VacuumMedium(int priority = -1) : Medium(priority) {}
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
   virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
   virtual VolumePdfCoefficients ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const override;
