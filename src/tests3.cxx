@@ -172,93 +172,93 @@ m testing/scenes/unitcube.dae
 }
 
 
-// TEST(Rendering, NextInteractionEstimation)
-// {
-//   Scene scene;
-//   const char* scenestr = R"""(
-// shader invisible
-// medium med1 3 3 3 0 0 0
-// 
-// m testing/scenes/unitcube.dae
-// 
-// transform 0 0 2 0 0 0
-// m testing/scenes/unitcube.dae
-// )""";
-//   scene.ParseNFFString(scenestr);
-//   scene.BuildAccelStructure();
-//   Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
-//   
-//   Spectral3 sigma = Color::RGBToSpectralSelection(RGB{3._rgb,3._rgb,3._rgb}, lambda_idx);
-//   double cube1_start = -0.5;
-//   double cube2_start = 1.5;
-//   double camera_start = -10.;
-//   auto AnalyticTrApprox = [=](double x) -> double
-//   {
-//     double first_cube_tr = (-sigma).exp().mean();
-//     if (x < cube1_start) 
-//       return 1.;
-//     if (x < cube1_start+1.)
-//       return (-(x-cube1_start)*sigma).exp().mean();
-//     if (x < cube2_start)
-//       return first_cube_tr;
-//     if (x < cube2_start+1.)
-//       return first_cube_tr*(-(x-cube2_start)*sigma).exp().mean();
-//     return first_cube_tr*(-sigma).exp().mean();
-//   };
-//   auto AnalyticSigmaApprox = [=](double x) -> double
-//   {
-//     if (cube1_start < x && x < cube1_start+1) return sigma.mean();
-//     if (cube2_start < x && x < cube2_start+1) return sigma.mean();
-//     return 0.;
-//   };
-//   
-//   
-//   RadianceEstimatorBase rt(scene);
-//   MediumTracker medium_tracker(scene);
-//   double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
-//   Ray ray{{ray_offset,0.,camera_start}, {0.,0.,1.}};
-//   medium_tracker.initializePosition(ray.org);
-//   ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
-//   
-//   int num_escaped = 0;
-//   Spectral3 weight_sum_interacted{0.};
-//   Spectral3 weight_sum_escaped{0.};
-//   
-//   constexpr int NUM_SAMPLES = 1000;
-//   for (int sample_num = 0; sample_num < NUM_SAMPLES; ++sample_num)
-//   {
-//     VolumePdfCoefficients volume_pdf_coeff{};
-//     RadianceEstimatorBase::CollisionData collision(ray);
-//     medium_tracker.initializePosition(ray.org);
-//     rt.TrackToNextInteraction(collision, medium_tracker, PathContext{lambda_idx}, &volume_pdf_coeff);
-//     EXPECT_EQ(collision.segment.ray.org[2], ray.org[2]);
-//     
-//     {
-//       double x = collision.smpl.t + camera_start;
-//       double tr = AnalyticTrApprox(x);
-//       double s = AnalyticSigmaApprox(x);
-//       CheckVolumePdfCoefficientsForMedium(volume_pdf_coeff, tr, 0., s, 1.e-5);
-//     }
-//     
-//     if (RadianceEstimatorBase::IsNotEscaped(collision))
-//     {
-//       weight_sum_interacted += collision.smpl.weight*collision.smpl.sigma_s;
-//     }
-//     else
-//     {
-//       weight_sum_escaped += collision.smpl.weight*collision.smpl.sigma_s;
-//       num_escaped++;
-//     }
-//   }
-//   weight_sum_escaped *= 1./(NUM_SAMPLES);
-//   weight_sum_interacted *= 1./(NUM_SAMPLES);
-//   
-//   auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, lambda_idx);
-//   Spectral3 expected_transmissions = (-2.*sigma_e).exp();
-//   // No idea what the variance is. So I determine the acceptance threshold experimentally.
-//   for (int i=0; i<static_size<Spectral3>(); ++i)
-//   {
-//     ASSERT_NEAR(weight_sum_escaped[i], expected_transmissions[i], 1.e-2);
-//     ASSERT_NEAR(weight_sum_interacted[i], 1.-expected_transmissions[i], 1.e-2);
-//   }
-// }
+TEST(Rendering, NextInteractionEstimation)
+{
+  Scene scene;
+  const char* scenestr = R"""(
+shader invisible
+medium med1 3 3 3 0 0 0
+
+m testing/scenes/unitcube.dae
+
+transform 0 0 2 0 0 0
+m testing/scenes/unitcube.dae
+)""";
+  scene.ParseNFFString(scenestr);
+  scene.BuildAccelStructure();
+  Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
+  
+  Spectral3 sigma = Color::RGBToSpectralSelection(RGB{3._rgb,3._rgb,3._rgb}, lambda_idx);
+  double cube1_start = -0.5;
+  double cube2_start = 1.5;
+  double camera_start = -10.;
+  auto AnalyticTrApprox = [=](double x) -> double
+  {
+    double first_cube_tr = (-sigma).exp().mean();
+    if (x < cube1_start) 
+      return 1.;
+    if (x < cube1_start+1.)
+      return (-(x-cube1_start)*sigma).exp().mean();
+    if (x < cube2_start)
+      return first_cube_tr;
+    if (x < cube2_start+1.)
+      return first_cube_tr*(-(x-cube2_start)*sigma).exp().mean();
+    return first_cube_tr*(-sigma).exp().mean();
+  };
+  auto AnalyticSigmaApprox = [=](double x) -> double
+  {
+    if (cube1_start < x && x < cube1_start+1) return sigma.mean();
+    if (cube2_start < x && x < cube2_start+1) return sigma.mean();
+    return 0.;
+  };
+  
+  
+  RadianceEstimatorBase rt(scene);
+  MediumTracker medium_tracker(scene);
+  double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
+  Ray ray{{ray_offset,0.,camera_start}, {0.,0.,1.}};
+  medium_tracker.initializePosition(ray.org);
+  ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
+  
+  int num_escaped = 0;
+  Spectral3 weight_sum_interacted{0.};
+  Spectral3 weight_sum_escaped{0.};
+  
+  constexpr int NUM_SAMPLES = 1000;
+  for (int sample_num = 0; sample_num < NUM_SAMPLES; ++sample_num)
+  {
+    VolumePdfCoefficients volume_pdf_coeff{};
+    //RadianceEstimatorBase::CollisionData collision(ray);
+    medium_tracker.initializePosition(ray.org);
+    rt.TrackToNextInteraction(ray, PathContext{lambda_idx}, medium_tracker, &volume_pdf_coeff,
+      /*surface_visitor=*/[&](const SurfaceInteraction &intersection, double distance, const Spectral3 &weight)
+      {
+        FAIL();
+      },
+      /*volume visitor=*/[&](const VolumeInteraction &interaction, double distance, const Spectral3 &weight)
+      {
+        double x = distance + camera_start;
+        double tr = AnalyticTrApprox(x);
+        double s = AnalyticSigmaApprox(x);
+        CheckVolumePdfCoefficientsForMedium(volume_pdf_coeff, tr, 0., s, 1.e-5);
+        weight_sum_interacted += weight*interaction.sigma_s;
+      },
+      /* escape_visitor=*/[&](const Spectral3 &weight)
+      {
+        weight_sum_escaped += weight;
+        num_escaped++;
+      }
+    );
+  }
+  weight_sum_escaped *= 1./(NUM_SAMPLES);
+  weight_sum_interacted *= 1./(NUM_SAMPLES);
+  
+  auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, lambda_idx);
+  Spectral3 expected_transmissions = (-2.*sigma_e).exp();
+  // No idea what the variance is. So I determine the acceptance threshold experimentally.
+  for (int i=0; i<static_size<Spectral3>(); ++i)
+  {
+    ASSERT_NEAR(weight_sum_escaped[i], expected_transmissions[i], 1.e-2);
+    ASSERT_NEAR(weight_sum_interacted[i], 1.-expected_transmissions[i], 1.e-2);
+  }
+}
