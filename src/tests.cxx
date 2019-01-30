@@ -17,6 +17,7 @@
 #include "renderingalgorithms_simplebase.hxx"
 #include "atmosphere.hxx"
 #include "util.hxx"
+#include "hashgrid.hxx"
 
 
 TEST(TestRaySegment, ExprTemplates)
@@ -974,6 +975,41 @@ TEST(GridIndices, RowMajor2d)
   EXPECT_EQ(x, 3);
   EXPECT_EQ(y, 4);
 }
+
+///////////////////////////////////////////////
+/// HashGrid
+///////////////////////////////////////////////
+
+TEST(HashGrid,HashGrid)
+{
+  // Generate points uniformly distributed on a sphere. Put them into the hash grid.
+  // Generate query points, check if points in the hashgrid are correctly reported
+  Sampler sampler;
+  ToyVector<Double3> points;
+  for (int i=0; i<10; ++i)
+  {
+    points.emplace_back(SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare()));
+  }
+  HashGrid hashgrid(0.1, points);
+  ToyVector<bool> reported_in_range(points.size(), false);
+  for (int j=0; j<10; ++j)
+  {
+    Double3 p_query = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
+    std::fill(reported_in_range.begin(), reported_in_range.end(), false);
+    hashgrid.Query(p_query,[&](int i){
+      reported_in_range[i] = (p_query - points[i]).norm() <= hashgrid.Radius();
+    });
+    for (int i=0; i<points.size(); ++i)
+    {
+      if (!reported_in_range[i])
+      {
+        auto distance = (p_query - points[i]).norm();
+        EXPECT_GE(distance,hashgrid.Radius());
+      }
+    }
+  }
+}
+
 
 
 //////////////////////////////////////////////
