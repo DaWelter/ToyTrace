@@ -44,6 +44,7 @@ public:
   
   void UpdateForNextPass()
   {
+    total_spp += spp;
     if (spp < 256)
     {
       spp *= 2;
@@ -52,7 +53,31 @@ public:
     {
       spp = max_spp - total_spp;
     }
+  }
+  
+  inline int GetPerIteration() const { return spp; }
+  inline int GetTotal() const { return total_spp; }
+};
+
+
+class SamplesPerPixelScheduleConstant
+{
+  int spp = 1; // Samples per pixel
+  int total_spp = 0; // Samples till now.
+  int max_spp;
+
+public:
+  SamplesPerPixelScheduleConstant(const RenderingParameters &render_params) 
+    : max_spp{render_params.max_samples_per_pixel}
+  {}
+  
+  void UpdateForNextPass()
+  {
     total_spp += spp;
+    if (max_spp > 0 && total_spp >= max_spp)
+    {
+      spp = 0;
+    }
   }
   
   inline int GetPerIteration() const { return spp; }

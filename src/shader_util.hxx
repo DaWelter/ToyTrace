@@ -25,8 +25,14 @@ struct PathContext
   int pixel_y = {-1};
 };
 
+struct LambdaSelection
+{
+  Index3 indices;  // Wavelength bin indices.
+  Spectral3 weights; // Sensitivity to wavelength (which ist constant = 1) divided by one over selection probability.
+};
 
-struct LambdaSelectionFactory
+
+struct LambdaSelectionStrategy
 {
   /* Stratified mode: Divide spectrum in N sections, where N is the number of simultaneously traced wavelengths.
    * Pick one wavelength from each section. In my case I pick the wavelength from the first section at random,
@@ -35,7 +41,7 @@ struct LambdaSelectionFactory
   static_assert(Color::NBINS == strata_size * Spectral3::RowsAtCompileTime, "Bin count must be multiple of number of simultaneously traced wavelengths");
   
   SpectralN lambda_weights;
-  LambdaSelectionFactory()
+  LambdaSelectionStrategy()
   {
     // One over the probability, that the wavelength is selected.
     lambda_weights.setConstant(strata_size);
@@ -51,12 +57,12 @@ struct LambdaSelectionFactory
     return idx[0];
   }
   
-  std::pair<Index3, Spectral3> WithWeights(Sampler &sampler) const
+  LambdaSelection WithWeights(Sampler &sampler) const
   {
     int main_idx = sampler.UniformInt(0, strata_size-1);
     auto idx     = MakeIndices(main_idx);
     auto weights = Take(lambda_weights, idx);
-    return std::make_pair(idx, weights);
+    return LambdaSelection{idx, weights};
   }
 };
 
@@ -154,4 +160,6 @@ inline const Shader& GetShaderOf(const SurfaceInteraction &ia, const Scene &scen
 {
   return *ASSERT_NOT_NULL(GetMaterialOf(ia, scene).shader);
 }
+
+
 

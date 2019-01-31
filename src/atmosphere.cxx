@@ -314,7 +314,7 @@ TabulatedConstituents::TabulatedConstituents(const std::string& filename)
     MajoranteType m;
     for (int lambda = 0; lambda < LAMBDA_STRATA_SIZE; ++lambda)
     {
-      auto lambda_idx = LambdaSelectionFactory::MakeIndices(lambda);
+      auto lambda_idx = LambdaSelectionStrategy::MakeIndices(lambda);
       m[lambda] = Take(s, lambda_idx).maxCoeff();
     }
     sigma_t_majorante.push_back(m);
@@ -409,7 +409,7 @@ void TabulatedConstituents::ComputeSigmaS(double altitude, Spectral3* sigma_s_of
 
 double TabulatedConstituents::ComputeSigmaTMajorante(double altitude, const Index3& lambda_idx) const
 {
-  int lambda_idx_primary = LambdaSelectionFactory::PrimaryIndex(lambda_idx);
+  int lambda_idx_primary = LambdaSelectionStrategy::PrimaryIndex(lambda_idx);
   double real_index = RealTableIndex(altitude);
   int idx = real_index;
   if (idx >= 0 && idx < AltitudeTableSize()-1)

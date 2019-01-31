@@ -43,7 +43,7 @@ public:
   
   void MaybeDemandInterrupt(RenderingAlgo &algo) const override
   {
-    
+    algo.RequestInterrupt(); 
   }
 };
 
@@ -62,7 +62,6 @@ public:
   
   void MaybeDemandInterrupt(RenderingAlgo &algo) const override
   {
-    algo.RequestInterrupt();
   }
 };
 
@@ -220,6 +219,7 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
       ("rd", po::value<int>(), "Max ray depth")
       ("spp", po::value<int>(), "Max samples per pixel")
       ("algo", po::value<std::string>()->default_value("pt"), "Rendering algorithm: pt or bdpt")
+      ("phm-radius", po::value<double>(), "Initial photon radius for photon mapping")
       ("pt-sample-mode", po::value<std::string>(), "Light sampling: 'bsdf' - bsdf importance sampling, 'lights' - sample lights aka. next event estimation, 'both' - both combined by MIS.")
       ("no-display", po::bool_switch()->default_value(false), "Don't open a display window")
       ("include,I", po::value<std::vector<std::string>>(), "Include paths")
@@ -301,7 +301,8 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
     render_params.algo_name = vm["algo"].as<std::string>();
     if (render_params.algo_name != "pt" &&
         render_params.algo_name != "bdpt" &&
-        render_params.algo_name != "normalvis")
+        render_params.algo_name != "normalvis" &&
+        render_params.algo_name != "photonmap")
       throw po::error("Algorithm must be pt or bdpt or normalvis");
     
     int max_spp = -1;
@@ -352,6 +353,14 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
       auto list_of_includes = vm["include"].as<std::vector<std::string>>();
       for (auto p : list_of_includes)
         render_params.search_paths.emplace_back(p);
+    }
+    
+    if (vm.count("phm-radius"))
+    {
+      auto r = vm["phm-radius"].as<double>();
+      if (r <= 0.)
+        throw po::error("Bad argument for phm-radius. Radius must be positive");
+      render_params.initial_photon_radius = r;
     }
   }
   catch(po::error &ex)

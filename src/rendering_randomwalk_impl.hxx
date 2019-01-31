@@ -12,7 +12,7 @@
 #include "shader_util.hxx"
 #include "renderbuffer.hxx"
 #include "lightpicker_trivial.hxx"
-
+#include "rendering_util.hxx"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic warning "-Wunused-parameter" 
@@ -26,166 +26,12 @@ namespace ROI = RadianceOrImportance;
 double UpperBoundToBoundingBoxDiameter(const Scene &scene);
 
 
-class IterateIntersectionsBetween
-{
-#if 0
-  RaySegment seg;
-  double tnear, tfar;
-#else
-  const RaySegment original_seg;
-  Double3 current_org;
-  double current_dist;
-#endif
-  const Scene &scene;
-public:
-  IterateIntersectionsBetween(const RaySegment &seg, const Scene &scene)
-    : original_seg{seg}, current_org{seg.ray.org}, current_dist{0.}, scene{scene}
-  {}
-  bool Next(RaySegment &seg, SurfaceInteraction &intersection);
-  double GetT() const { return current_dist; }
-};
-
-
-/* This thing tracks overlapping media volumes. Since it is a bit complicated
- * to physically correctly handle mixtures of media that would occur
- * in overlapping volumes, I take a simpler approach. This hands over the
- * medium with the highest associated priority. In case multiple volumes with the
- * same medium material overlap it will be as if there was the union of all of
- * those volumes.
- */
-class MediumTracker
-{
-  static constexpr int MAX_INTERSECTING_MEDIA = 4;
-  const Medium* current;
-  std::array<const Medium*, MAX_INTERSECTING_MEDIA> media;
-  const Scene &scene;
-  void enterVolume(const Medium *medium);
-  void leaveVolume(const Medium *medium);
-  const Medium* findMediumOfHighestPriority() const;
-  bool remove(const Medium *medium);
-  bool insert(const Medium *medium);
-public:
-  explicit MediumTracker(const Scene &_scene);
-  MediumTracker(const MediumTracker &_other) = default;
-  void initializePosition(const Double3 &pos);
-  void goingThroughSurface(const Double3 &dir_of_travel, const SurfaceInteraction &intersection);
-  const Medium& getCurrentMedium() const;
-};
-
-
-inline const Medium& MediumTracker::getCurrentMedium() const
-{
-  assert(current);
-  return *current;
-}
-
-
-inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const SurfaceInteraction& intersection)
-{
-  if (Dot(dir_of_travel, intersection.geometry_normal) < 0)
-    enterVolume(&GetMediumOf(intersection, scene));
-  else
-    leaveVolume(&GetMediumOf(intersection, scene));
-}
-
-
-inline const Medium* MediumTracker::findMediumOfHighestPriority() const
-{
-  const Medium* medium_max_prio = &scene.GetEmptySpaceMedium();
-  for (int i = 0; i < media.size(); ++i)
-  {
-    medium_max_prio = (media[i] &&  medium_max_prio->priority < media[i]->priority) ?
-                        media[i] : medium_max_prio;
-  }
-  return medium_max_prio;
-}
-
-
-inline bool MediumTracker::remove(const Medium *medium)
-{
-  bool is_found = false;
-  for (int i = 0; (i < media.size()) && !is_found; ++i)
-  {
-    is_found = media[i] == medium;
-    media[i] = is_found ? nullptr : media[i];
-  }
-  return is_found;
-}
-
-
-inline bool MediumTracker::insert(const Medium *medium)
-{
-  bool is_place_empty = false;
-  for (int i = 0; (i < media.size()) && !is_place_empty; ++i)
-  {
-    is_place_empty = media[i]==nullptr;
-    media[i] = is_place_empty ? medium : media[i];
-  }
-  return is_place_empty;
-}
-
-
-inline void MediumTracker::enterVolume(const Medium* medium)
-{
-  // Set one of the array entries that is currently nullptr to the new medium pointer.
-  // But only if there is room left. Otherwise the new medium is ignored.
-  bool was_inserted = insert(medium);
-  current = (was_inserted && medium->priority > current->priority) ? medium : current;
-}
-
-
-inline void MediumTracker::leaveVolume(const Medium* medium)
-{
-  // If the medium is in the media stack, remove it.
-  // And also make the medium of highest prio the current one.
-  remove(medium);
-  if (medium == current)
-  {
-    current = findMediumOfHighestPriority();
-  }
-}
-
 
 
 
 namespace RandomWalk
 {
 namespace RW = RandomWalk;
-
-
-
-// TODO: At least some of the data could be precomputed.
-// TODO: For improved precision it would make sense to move the scene center to the origin.
-struct EnvLightPointSamplingBeyondScene
-{
-  double diameter;
-  double sufficiently_long_distance_to_go_outside_the_scene_bounds;
-  Double3 box_center;
-  
-  EnvLightPointSamplingBeyondScene(const Scene &scene)
-  {
-    Box bb = scene.GetBoundingBox();
-    box_center = 0.5*(bb.max+bb.min);
-    diameter = Length(bb.max - bb.min);
-    sufficiently_long_distance_to_go_outside_the_scene_bounds = 10.*diameter;
-  }
-  
-  Double3 Sample(const Double3 &exitant_direction, Sampler &sampler) const
-  {
-    Double3 disc_sample = SampleTrafo::ToUniformDisc(sampler.UniformUnitSquare());
-    Eigen::Matrix3d frame = OrthogonalSystemZAligned(exitant_direction);
-    Double3 org = 
-      box_center +
-      -sufficiently_long_distance_to_go_outside_the_scene_bounds*exitant_direction
-      + frame * 0.5 * diameter * disc_sample;
-    return org;
-  }
-  
-  double Pdf(const Double3 &) const
-  {
-    return 1./(Pi*0.25*Sqr(diameter));
-  }
-};
 
 
 // Be warned there be dragons and worse.

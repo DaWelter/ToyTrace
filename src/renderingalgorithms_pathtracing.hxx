@@ -357,7 +357,7 @@ protected:
 
 class BdptWorker : public RadianceEstimatorBase, public Worker
 {
-  LambdaSelectionFactory lambda_selection_factory;
+  LambdaSelectionStrategy lambda_selection_factory;
   ToyVector<SensorResponse> rgb_responses;
 
   struct Splat : public ROI::PointEmitterArray::Response
@@ -405,8 +405,9 @@ public:
     eye_medium_tracker_before_node.clear();
     
     pixel_index = _pixel_index;
-    Spectral3 lambda_weights;
-    std::tie(this->lambda_idx, lambda_weights) = lambda_selection_factory.WithWeights(sampler);
+    auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
+    this->lambda_idx = lambda_selection.indices;
+    const auto &lambda_weights = lambda_selection.weights;
 
     eye_context = PathContext{this->lambda_idx, TransportType::RADIANCE};
     light_context = PathContext{this->lambda_idx, TransportType::IMPORTANCE};
@@ -702,7 +703,7 @@ public:
 
 class PathTracingWorker : public Worker, public RandomWalk::RadianceEstimatorBase
 { 
-  LambdaSelectionFactory lambda_selection_factory;
+  LambdaSelectionStrategy lambda_selection_factory;
   bool do_sample_brdf;
   bool do_sample_lights;
   ToyVector<SensorResponse> rgb_responses;
@@ -732,7 +733,7 @@ public:
     sensor_connection_unit = -1;
     
     auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
-    PathContext context{lambda_selection.first, TransportType::RADIANCE};
+    PathContext context{lambda_selection.indices, TransportType::RADIANCE};
     std::tie(context.pixel_x, context.pixel_y) = scene.GetCamera().UnitToPixel(pixel_index);
     PathContext light_context{context}; light_context.transport = IMPORTANCE;
     MediumTracker medium_tracker{scene};
@@ -744,7 +745,7 @@ public:
     StepResult step;
     step.node = SampleSensorEnd(pixel_index, context, step.scatter_pdf); // Note: abuse of scatter_pdf. This is not about scattering but picking the initial location.
     
-    Spectral3 beta{lambda_selection.second/step.scatter_pdf};
+    Spectral3 beta{lambda_selection.weights/step.scatter_pdf};
     
     InitializeMediumTracker(step.node, medium_tracker);
 
@@ -772,7 +773,7 @@ public:
             path_weight /= num_attempted_paths;
             rgb_responses.push_back({
               sensor_connection_unit,
-              Color::SpectralSelectionToRGB(path_weight, lambda_selection.first)
+              Color::SpectralSelectionToRGB(path_weight, lambda_selection.indices)
             }); // This part works via the auto-generated initializer list ctor.
           }
         }
@@ -812,7 +813,7 @@ public:
     }
 
  
-    return Color::SpectralSelectionToRGB(path_sample_values, lambda_selection.first);
+    return Color::SpectralSelectionToRGB(path_sample_values, lambda_selection.indices);
   }
   
   
