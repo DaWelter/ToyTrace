@@ -95,6 +95,8 @@ public:
     std::iota(current_selection_permutation.begin(), current_selection_permutation.end(), 0);
   }
   
+  static constexpr int NUM_SAMPLES_REQUIRED = strata_size; // On average to make a full sweep across the spectrum, i.e. to have all wavelengths covered.
+  
   static Index3 MakeIndices(int main_idx)
   {
     return Index3{main_idx, main_idx+strata_size, main_idx+2*strata_size};

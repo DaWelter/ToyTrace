@@ -36,8 +36,7 @@ struct Photon
 class PhotonmappingWorker
 {
   friend struct EmitterSampleVisitor;
-  const RenderingParameters& render_params;
-  const Scene& scene;
+  PhotonmappingRenderingAlgo *master;
   TrivialLightPicker light_picker;
   MediumTracker medium_tracker;
   Sampler sampler;
@@ -62,7 +61,7 @@ public:
   int num_photons_traced = 0;
   
   PhotonmappingWorker(PhotonmappingRenderingAlgo *master);
-  void StartNewPass(const LambdaSelection &lambda_selection, double photon_radius);
+  void StartNewPass(const LambdaSelection &lambda_selection);
   void TracePhotons(int count);
 };
 
@@ -78,7 +77,8 @@ class CameraRenderWorker
   RayTermination ray_termination;
   int current_node_count = 0;
   int pixel_index = 0;
-  double photon_radius_2;
+  double volume_photon_radius_2;
+  double surface_photon_radius_2;
 private:
   Ray GeneratePrimaryRay(Spectral3 &path_weight);
   bool TrackToNextInteractionAndRecordPixel(Ray &ray, Spectral3 &weight_accum);
@@ -90,7 +90,7 @@ private:
   void MaybeAddEmission(Ray& ray, const VolumeInteraction &interaction, Spectral3& weight_accum);
 public:
   CameraRenderWorker(PhotonmappingRenderingAlgo *master);
-  void StartNewPass(const LambdaSelection &lambda_selection, double photon_radius);
+  void StartNewPass(const LambdaSelection &lambda_selection);
   void Render(int pixel_index, int batch_size, int samples_per_pixel);
 
 };
@@ -100,9 +100,6 @@ class PhotonmappingRenderingAlgo : public RenderingAlgo
 {
   friend class PhotonmappingWorker;
   friend class CameraRenderWorker;
-protected:
-  const RenderingParameters &render_params;
-  const Scene &scene;
 private:
   static constexpr int PIXEL_STRIDE = 64 / sizeof(Spectral3); // Because false sharing.
   Spectral3ImageBuffer buffer;
@@ -112,8 +109,11 @@ private:
   ToyVector<Photon> photons_surface;
   int num_threads = 1;
   int num_pixels = 0;
+  int pass_index = 0;
   int num_photons_traced = 0;
-  double current_photon_radius = 0;
+  double current_surface_photon_radius = 0;
+  double current_volume_photon_radius = 0;
+  double radius_reduction_alpha = 2./3.;
   SamplesPerPixelScheduleConstant spp_schedule;
   tbb::atomic<int> shared_pixel_index = 0;
   tbb::task_group the_task_group;
@@ -124,13 +124,17 @@ private:
   ToyVector<PhotonmappingWorker> photonmap_workers;
   ToyVector<CameraRenderWorker> camerarender_workers;
 public:
+  const RenderingParameters &render_params;
+  const Scene &scene;
+public:
   PhotonmappingRenderingAlgo(const Scene &scene_, const RenderingParameters &render_params_)
     : RenderingAlgo{}, render_params{render_params_}, scene{scene_},
       buffer{render_params_.width, render_params_.height}, num_threads{0},
       spp_schedule{render_params_}
   {
     num_pixels = render_params.width * render_params.height;
-    current_photon_radius = render_params.initial_photon_radius;
+    current_surface_photon_radius = render_params.initial_photon_radius;
+    current_volume_photon_radius = render_params.initial_photon_radius;
   }
   
   void Run() override
@@ -143,52 +147,61 @@ public:
     num_threads = photonmap_workers.size();
     while (!stop_flag.load() && spp_schedule.GetPerIteration() > 0)
     {
-      shared_pixel_index = 0;
-      auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
-      tbb::parallel_for(0, (int)photonmap_workers.size(), [&](int i) {
-        photonmap_workers[i].StartNewPass(lambda_selection, current_photon_radius);
-        camerarender_workers[i].StartNewPass(lambda_selection, current_photon_radius);
-      });
-      while_parallel_fed_interruptible(
-        /*func=*/[this](int, int worker_num)
-        {
-          photonmap_workers[worker_num].TracePhotons(PIXEL_STRIDE*GetSamplesPerPixel());
-        },
-        /*feeder=*/[this]() -> boost::optional<int>
-        {
-          return this->FeedPixelIndex();
-        },
-        /*irq_handler=*/[this]() -> bool
-        {
-          return !(this->stop_flag.load());
-        },
-        num_threads, the_task_group);
-      
-      PrepareGlobalPhotonMap();
+      // Full sweep across spectrum counts as one pass.
+      // But one sweep will require multiple photon mapping passes since 
+      // each pass only covers part of the spectrum.
+      for (int spectrum_sweep_idx=0; 
+           (spectrum_sweep_idx <= decltype(lambda_selection_factory)::NUM_SAMPLES_REQUIRED) && !stop_flag.load();
+           ++spectrum_sweep_idx)
+      {
+        shared_pixel_index = 0;
+        auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
+        tbb::parallel_for(0, (int)photonmap_workers.size(), [&](int i) {
+          photonmap_workers[i].StartNewPass(lambda_selection);
+          camerarender_workers[i].StartNewPass(lambda_selection);
+        });
+        while_parallel_fed_interruptible(
+          /*func=*/[this](int, int worker_num)
+          {
+            photonmap_workers[worker_num].TracePhotons(PIXEL_STRIDE*GetSamplesPerPixel());
+          },
+          /*feeder=*/[this]() -> boost::optional<int>
+          {
+            return this->FeedPixelIndex();
+          },
+          /*irq_handler=*/[this]() -> bool
+          {
+            return !(this->stop_flag.load());
+          },
+          num_threads, the_task_group);
+        
+        PrepareGlobalPhotonMap();
 
-      buffer.AddSampleCount(GetSamplesPerPixel());      
-      shared_pixel_index = 0;
-      while_parallel_fed_interruptible(
-        /*func=*/[this](int pixel_index, int worker_num)
-        {
-          camerarender_workers[worker_num].Render(pixel_index, PIXEL_STRIDE, GetSamplesPerPixel());
-        },
-        /*feeder=*/[this]() -> boost::optional<int>
-        {
-          return this->FeedPixelIndex();
-        },
-        /*irq_handler=*/[this]() -> bool
-        {
-          if (this->stop_flag.load())
-            return false;
-          this->CallInterruptCb(false);
-          return true;
-        },
-        num_threads, the_task_group);      
-      
+        buffer.AddSampleCount(GetSamplesPerPixel());      
+        shared_pixel_index = 0;
+        while_parallel_fed_interruptible(
+          /*func=*/[this](int pixel_index, int worker_num)
+          {
+            camerarender_workers[worker_num].Render(pixel_index, PIXEL_STRIDE, GetSamplesPerPixel());
+          },
+          /*feeder=*/[this]() -> boost::optional<int>
+          {
+            return this->FeedPixelIndex();
+          },
+          /*irq_handler=*/[this]() -> bool
+          {
+            if (this->stop_flag.load())
+              return false;
+            this->CallInterruptCb(false);
+            return true;
+          },
+          num_threads, the_task_group);      
+      }
       std::cout << "Iteration finished, past spp = " << GetSamplesPerPixel() << ", total taken " << spp_schedule.GetTotal() << std::endl;
       CallInterruptCb(true);
       spp_schedule.UpdateForNextPass();
+      ++pass_index;
+      UpdatePhotonRadii();
     } // Pass iteration
   }
   
@@ -227,6 +240,8 @@ private:
   }
   
   void PrepareGlobalPhotonMap();
+  
+  void UpdatePhotonRadii();
 };
 
 
@@ -244,26 +259,37 @@ void PhotonmappingRenderingAlgo::PrepareGlobalPhotonMap()
   ToyVector<Double3> points; points.reserve(photons_surface.size());
   std::transform(photons_surface.begin(), photons_surface.end(), 
                  std::back_inserter(points), [](const Photon& p) { return p.position; });
-  hashgrid_surface = std::make_unique<HashGrid>(current_photon_radius, points);
+  hashgrid_surface = std::make_unique<HashGrid>(current_surface_photon_radius, points);
   points.clear();
   std::transform(photons_volume.begin(), photons_volume.end(), 
                  std::back_inserter(points), [](const Photon& p) { return p.position; });  
-  hashgrid_volume = std::make_unique<HashGrid>(current_photon_radius, points);
+  hashgrid_volume = std::make_unique<HashGrid>(current_volume_photon_radius, points);
 }
 
+
+void PhotonmappingRenderingAlgo::UpdatePhotonRadii()
+{
+  // This is the formula (15) from Knaus and Zwicker (2011) "Progressive Photon Mapping: A Probabilistic Approach"
+  double factor = (pass_index+1+radius_reduction_alpha)/(pass_index+2);
+  current_surface_photon_radius *= std::sqrt(factor);
+  // Equation (20) which is for volume photons
+  current_volume_photon_radius *= std::pow(factor, 1./3.);
+  std::cout << "Photon radii: " << current_surface_photon_radius << ", " << current_volume_photon_radius << std::endl;
+}
 
 
 struct EmitterSampleVisitor
 {
   PhotonmappingWorker* this_;
+  PhotonmappingRenderingAlgo *master;
   Ray out_ray;
   Spectral3 weight;
-  EmitterSampleVisitor(PhotonmappingWorker* this_) : this_{this_} {}
+  EmitterSampleVisitor(PhotonmappingWorker* this_) : this_{this_}, master{this_->master} {}
   
   void operator()(const ROI::EnvironmentalRadianceField &env, double prob)
   {
     auto smpl = env.TakeDirectionSample(this_->sampler, this_->context);
-    EnvLightPointSamplingBeyondScene gen{this_->scene};
+    EnvLightPointSamplingBeyondScene gen{master->scene};
     double pdf = gen.Pdf(smpl.coordinates);
     Double3 org = gen.Sample(smpl.coordinates, this_->sampler);
     weight = smpl.value / (prob*(double)smpl.pdf_or_pmf*(double)pdf);
@@ -280,7 +306,7 @@ struct EmitterSampleVisitor
   }
   void operator()(const PrimRef& prim_ref, double prob)
   {
-    const auto &mat = this_->scene.GetMaterialOf(prim_ref);
+    const auto &mat = master->scene.GetMaterialOf(prim_ref);
     assert(mat.emitter); // Otherwise would would not have been selected.
     auto area_smpl = mat.emitter->TakeAreaSample(prim_ref, this_->sampler, this_->context);
     auto dir_smpl = mat.emitter->TakeDirectionSampleFrom(area_smpl.coordinates, this_->sampler, this_->context);
@@ -309,7 +335,7 @@ struct EmitterSampleVisitor
 
 
 PhotonmappingWorker::PhotonmappingWorker(PhotonmappingRenderingAlgo *master)
-  : render_params{master->render_params}, scene{master->scene},
+  : master{master},
     light_picker{master->scene},
     medium_tracker{master->scene},
     context{},
@@ -319,13 +345,12 @@ PhotonmappingWorker::PhotonmappingWorker(PhotonmappingRenderingAlgo *master)
   photons_volume.reserve(1024);
 }
 
-void PhotonmappingWorker::StartNewPass(const LambdaSelection &lambda_selection, double photon_radius)
+void PhotonmappingWorker::StartNewPass(const LambdaSelection &lambda_selection)
 {
   this->lambda_selection = lambda_selection;
   context = PathContext{lambda_selection.indices, TransportType::IMPORTANCE};
-  const double r = photon_radius;
-  photon_volume_blur_weight = 1.0/(UnitSphereVolume*r*r*r);
-  photon_surface_blur_weight = 1.0/(UnitDiscSurfaceArea*r*r);
+  photon_volume_blur_weight = 1.0/(UnitSphereVolume*Cubed(master->current_volume_photon_radius));
+  photon_surface_blur_weight = 1.0/(UnitDiscSurfaceArea*Sqr(master->current_surface_photon_radius));
   photons_surface.clear();
   photons_volume.clear();
   num_photons_traced = 0;
@@ -360,7 +385,7 @@ void PhotonmappingWorker::TracePhotons(int count)
 
 bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &weight_accum)
 {
-  const bool keepgoing = TrackToNextInteraction(scene, ray, context, sampler, medium_tracker, nullptr,
+  const bool keepgoing = TrackToNextInteraction(master->scene, ray, context, sampler, medium_tracker, nullptr,
     /*surface=*/[&](const SurfaceInteraction &interaction, double distance, const Spectral3 &track_weight) -> bool
     {
       weight_accum *= track_weight;
@@ -394,7 +419,7 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
 
 bool PhotonmappingWorker::ScatterAt(Ray& ray, const SurfaceInteraction& interaction, const Spectral3 &, Spectral3& weight_accum)
 {
-  auto smpl = GetShaderOf(interaction,scene).SampleBSDF(-ray.dir, interaction, sampler, context);
+  auto smpl = GetShaderOf(interaction,master->scene).SampleBSDF(-ray.dir, interaction, sampler, context);
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, current_node_count, sampler))
   {
     weight_accum *= smpl.value * (BsdfCorrectionFactor(-ray.dir, interaction, smpl.coordinates, context.transport) *
@@ -433,11 +458,12 @@ CameraRenderWorker::CameraRenderWorker(Photonmapping::PhotonmappingRenderingAlgo
 {
 }
 
-void CameraRenderWorker::StartNewPass(const LambdaSelection& lambda_selection, double photon_radius)
+void CameraRenderWorker::StartNewPass(const LambdaSelection& lambda_selection)
 {
   this->lambda_selection = lambda_selection;
   context = PathContext{lambda_selection.indices, TransportType::RADIANCE};
-  photon_radius_2 = photon_radius*photon_radius;
+  surface_photon_radius_2 = Sqr(master->current_surface_photon_radius);
+  volume_photon_radius_2 = Sqr(master->current_volume_photon_radius);
 }
 
 
@@ -562,7 +588,7 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
   Spectral3 reflect_estimator{0.};
     master->hashgrid_surface->Query(interaction.pos, [&](int photon_idx){
     const auto &photon = master->photons_surface[photon_idx];
-    if ((photon.position - interaction.pos).squaredNorm() > photon_radius_2)
+    if ((photon.position - interaction.pos).squaredNorm() > surface_photon_radius_2)
       return;
     Spectral3 bsdf_val = GetShaderOf(interaction,master->scene).EvaluateBSDF(-incident_dir, interaction, -photon.direction.cast<double>(), context, nullptr);
     bsdf_val *= BsdfCorrectionFactor(-incident_dir, interaction, -photon.direction.cast<double>(), context.transport);
@@ -580,7 +606,7 @@ void CameraRenderWorker::AddPhotonContributions(const VolumeInteraction& interac
   Spectral3 inscatter_estimator{0.};
   master->hashgrid_volume->Query(interaction.pos, [&](int photon_idx){
     const auto &photon = master->photons_volume[photon_idx];
-    if ((photon.position - interaction.pos).squaredNorm() > photon_radius_2)
+    if ((photon.position - interaction.pos).squaredNorm() > volume_photon_radius_2)
       return;
     Spectral3 scatter_val = interaction.medium().EvaluatePhaseFunction(-incident_dir, interaction.pos, -photon.direction.cast<double>(), context, nullptr);
     inscatter_estimator += photon.weight*scatter_val;
