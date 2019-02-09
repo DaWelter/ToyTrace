@@ -67,6 +67,60 @@ struct LambdaSelectionStrategy
 };
 
 
+class LambdaSelectionStrategyShuffling
+{
+  /* Stratified mode: Divide spectrum in N sections, where N is the number of simultaneously traced wavelengths.
+   * Pick one wavelength from each section. In my case I pick the wavelength from the first section at random,
+   * and take the others at a fixed offset equal to the stratum size. */
+  static constexpr int strata_size = Color::NBINS / Spectral3::RowsAtCompileTime;
+  static_assert(Color::NBINS == strata_size * Spectral3::RowsAtCompileTime, "Bin count must be multiple of number of simultaneously traced wavelengths");
+  std::array<int,strata_size> current_selection_permutation;
+  int current_idx = strata_size;
+  
+  void Shuffle(Sampler &sampler)
+  {
+    std::random_shuffle(
+      current_selection_permutation.begin(),
+      current_selection_permutation.end(),
+      [&sampler](int n) {
+        return sampler.UniformInt(0, n-1);
+      }
+    );
+  }
+  
+public:
+  LambdaSelectionStrategyShuffling()
+  {
+    // One over the probability, that the wavelength is selected.
+    std::iota(current_selection_permutation.begin(), current_selection_permutation.end(), 0);
+  }
+  
+  static Index3 MakeIndices(int main_idx)
+  {
+    return Index3{main_idx, main_idx+strata_size, main_idx+2*strata_size};
+  }
+  
+  static int PrimaryIndex(const Index3 &idx)
+  {
+    return idx[0];
+  }
+  
+  LambdaSelection WithWeights(Sampler &sampler)
+  {
+    if (++current_idx >= current_selection_permutation.size())
+    {
+      Shuffle(sampler);
+      current_idx = 0;
+    }
+    int lambda_idx = current_selection_permutation[current_idx];
+    auto idx     = MakeIndices(lambda_idx);
+    auto weights = Spectral3{strata_size};
+    return LambdaSelection{idx, weights};
+  }
+};
+
+
+
 
 struct VolumePdfCoefficients
 {

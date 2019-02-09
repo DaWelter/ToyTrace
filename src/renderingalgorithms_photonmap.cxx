@@ -114,7 +114,7 @@ private:
   tbb::atomic<bool> stop_flag = false;
   tbb::spin_mutex buffer_mutex;
   Sampler sampler;
-  LambdaSelectionStrategy lambda_selection_factory;
+  LambdaSelectionStrategyShuffling lambda_selection_factory;
   ToyVector<PhotonmappingWorker> photonmap_workers;
   ToyVector<CameraRenderWorker> camerarender_workers;
 public:
