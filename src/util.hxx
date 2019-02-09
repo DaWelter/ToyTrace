@@ -19,6 +19,12 @@ inline T Sqr(const T &x)
 }
 
 template<class T>
+inline T Cubed(const T &x)
+{
+  return x*x*x;
+}
+
+template<class T>
 inline T Heaviside(const T &x)
 {
   return x>T{} ? T{1} : T{0};
