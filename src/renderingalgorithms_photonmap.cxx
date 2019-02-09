@@ -75,13 +75,19 @@ class CameraRenderWorker
   Sampler sampler;
   LambdaSelection lambda_selection;
   PathContext context;
+  RayTermination ray_termination;
+  int current_node_count = 0;
   int pixel_index = 0;
   double photon_radius_2;
 private:
   Ray GeneratePrimaryRay(Spectral3 &path_weight);
-  void TrackToNextInteractionAndRecordPixel(Ray &ray, Spectral3 &weight_accum);
+  bool TrackToNextInteractionAndRecordPixel(Ray &ray, Spectral3 &weight_accum);
   void AddPhotonContributions(const SurfaceInteraction &interaction, const Double3 &incident_dir, const Spectral3 &path_weight);
   void AddPhotonContributions(const VolumeInteraction& interaction, const Double3& incident_dir, const Spectral3& path_weight);
+  bool MaybeScatterAtSpecularLayer(Ray& ray, const SurfaceInteraction &interaction, Spectral3& weight_accum, const Spectral3 &track_weight);
+  void RecordMeasurementToCurrentPixel(const Spectral3 &measurement);
+  void MaybeAddEmission(Ray& ray, const SurfaceInteraction &interaction, Spectral3& weight_accum);
+  void MaybeAddEmission(Ray& ray, const VolumeInteraction &interaction, Spectral3& weight_accum);
 public:
   CameraRenderWorker(PhotonmappingRenderingAlgo *master);
   void StartNewPass(const LambdaSelection &lambda_selection, double photon_radius);
@@ -337,9 +343,6 @@ Ray PhotonmappingWorker::GeneratePrimaryRay(Spectral3 &path_weight)
 
 void PhotonmappingWorker::TracePhotons(int count)
 {
-  // Select source
-  // TracePrimaryPhotons
-  // Randomwalk.
   for (int photon_num = 0; photon_num < count; ++photon_num, ++num_photons_traced)
   {
     current_node_count = 2;
@@ -425,7 +428,8 @@ bool PhotonmappingWorker::ScatterAt(Ray& ray, const VolumeInteraction& interacti
 
 
 CameraRenderWorker::CameraRenderWorker(Photonmapping::PhotonmappingRenderingAlgo* master)
-  : master{master}, medium_tracker{master->scene}, context{}
+  : master{master}, medium_tracker{master->scene}, context{}, 
+    ray_termination{master->render_params}
 {
 }
 
@@ -444,13 +448,25 @@ void CameraRenderWorker::Render(int pixel_index_, int batch_size, int samples_pe
   {
     for (int i=0; i<samples_per_pixel; ++i)
     {
+      current_node_count = 2;
       Spectral3 weight_accum = lambda_selection.weights;
       Ray ray = GeneratePrimaryRay(weight_accum);
-      TrackToNextInteractionAndRecordPixel(ray, weight_accum);
+      bool keepgoing = true;
+      do 
+      {
+        keepgoing = TrackToNextInteractionAndRecordPixel(ray, weight_accum);
+      }
+      while (keepgoing);
     }
   }
 }
 
+
+void CameraRenderWorker::RecordMeasurementToCurrentPixel(const Spectral3 &measurement)
+{
+  auto color = Color::SpectralSelectionToRGB(measurement, lambda_selection.indices);
+  master->buffer.Insert(pixel_index, color);
+}
 
 
 Ray CameraRenderWorker::GeneratePrimaryRay(Spectral3& path_weight)
@@ -465,24 +481,79 @@ Ray CameraRenderWorker::GeneratePrimaryRay(Spectral3& path_weight)
 }
 
 
-void CameraRenderWorker::TrackToNextInteractionAndRecordPixel(Ray& ray, Spectral3& weight_accum)
+bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(Ray& ray, Spectral3& weight_accum)
 {
-  TrackToNextInteraction(master->scene, ray, context, sampler, medium_tracker, nullptr,
-    /*surface=*/[&](const SurfaceInteraction &interaction, double distance, const Spectral3 &track_weight) -> void
+  return TrackToNextInteraction(master->scene, ray, context, sampler, medium_tracker, nullptr,
+    /*surface=*/[&](const SurfaceInteraction &interaction, double distance, const Spectral3 &track_weight) -> bool
     {
       weight_accum *= track_weight;
       AddPhotonContributions(interaction, ray.dir, weight_accum);
+      MaybeAddEmission(ray, interaction, weight_accum);
+      current_node_count++;
+      return MaybeScatterAtSpecularLayer(ray, interaction, weight_accum, track_weight);
     },
-    /*volume=*/[&](const VolumeInteraction &interaction, double distance, const Spectral3 &track_weight) -> void
+    /*volume=*/[&](const VolumeInteraction &interaction, double distance, const Spectral3 &track_weight) -> bool
     {
       weight_accum *= track_weight;
       AddPhotonContributions(interaction, ray.dir, weight_accum);
+      MaybeAddEmission(ray, interaction, weight_accum);
+      return false;
     },
-    /*escape*/[&](const Spectral3 &weight) -> void
+    /*escape*/[&](const Spectral3 &track_weight) -> bool
     {
-      master->buffer.Insert(pixel_index, RGB{0._rgb});
+      //master->buffer.Insert(pixel_index, RGB{0._rgb});
+      const auto &emitter = master->scene.GetTotalEnvLight();
+      const auto radiance = emitter.Evaluate(-ray.dir, context);
+      RecordMeasurementToCurrentPixel(radiance * track_weight * weight_accum);
+      return false;
     }
   );
+}
+
+
+bool CameraRenderWorker::MaybeScatterAtSpecularLayer(Ray& ray, const SurfaceInteraction &interaction, Spectral3& weight_accum, const Spectral3 &track_weight)
+{
+  auto smpl = GetShaderOf(interaction,master->scene).SampleBSDF(-ray.dir, interaction, sampler, context);
+  if (!smpl.pdf_or_pmf.IsFromDelta())
+    return false;
+  if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, current_node_count, sampler))
+  {
+    weight_accum *= smpl.value * (BsdfCorrectionFactor(-ray.dir, interaction, smpl.coordinates, context.transport) *
+                  DFactorOf(interaction, smpl.coordinates) / smpl.pdf_or_pmf);
+    ray.dir = smpl.coordinates;
+    ray.org = interaction.pos + AntiSelfIntersectionOffset(interaction, ray.dir);
+    if (Dot(ray.dir, interaction.normal) < 0.)
+    {
+      // By definition, intersection.normal points to where the intersection ray is coming from.
+      // Thus we can determine if the sampled direction goes through the surface by looking
+      // if the direction goes in the opposite direction of the normal.
+      medium_tracker.goingThroughSurface(ray.dir, interaction);
+    }
+    return true;
+  }
+  else 
+    return false;
+}
+
+
+void CameraRenderWorker::MaybeAddEmission(Ray& ray, const SurfaceInteraction &interaction, Spectral3& weight_accum)
+{
+  const auto emitter = GetMaterialOf(interaction, master->scene).emitter; 
+  if (emitter)
+  {
+    Spectral3 radiance = emitter->Evaluate(interaction.hitid, -ray.dir, context, nullptr);
+    RecordMeasurementToCurrentPixel(radiance*weight_accum);
+  }
+}
+
+
+void CameraRenderWorker::MaybeAddEmission(Ray& , const VolumeInteraction &interaction, Spectral3& weight_accum)
+{
+  if (interaction.medium().is_emissive)
+  {
+    Spectral3 irradiance = interaction.medium().EvaluateEmission(interaction.pos, context, nullptr);
+    RecordMeasurementToCurrentPixel(irradiance*weight_accum/UnitSphereSurfaceArea);
+  }
 }
 
 
