@@ -334,6 +334,27 @@ private:
 
 } // namespace BdptDetail
 
+
+class BdptWorker;
+
+
+class BdptAlgo : public SimplePixelByPixelRenderingDetails::SimplePixelByPixelRenderingAlgo
+{
+  friend class BdptWorker;
+  bool enable_debug_buffers = false;
+  BdptDetail::DebugBuffers debug_buffers;
+  BdptDetail::DebugBuffers debug_buffers_mis;
+  tbb::spin_mutex debug_buffer_mutex;
+public:
+  BdptAlgo(const Scene &scene_,const RenderingParameters &render_params_)
+    : SimplePixelByPixelRenderingAlgo{render_params_,scene_}
+  {}
+protected:
+  std::unique_ptr<SimplePixelByPixelRenderingDetails::Worker> AllocateWorker(int i) override;
+  void PassCompleted() override;
+};
+
+
 class BdptWorker : public RadianceEstimatorBase, public Worker
 {
   LambdaSelectionFactory lambda_selection_factory;
@@ -357,13 +378,10 @@ class BdptWorker : public RadianceEstimatorBase, public Worker
   int pixel_index;
   PathContext eye_context;
   PathContext light_context;
-  
-  bool enable_debug_buffers;
-  BdptDetail::DebugBuffers debug_buffers;
-  BdptDetail::DebugBuffers debug_buffers_mis;
+  BdptAlgo* master;
   
 public:
-  BdptWorker(const Scene &_scene, const AlgorithmParameters &algo_params) 
+  BdptWorker(const Scene &_scene, const AlgorithmParameters &algo_params, BdptAlgo* master) 
   : RadianceEstimatorBase{_scene, algo_params},
     lambda_selection_factory{},
     eye_history{*this},
@@ -371,7 +389,7 @@ public:
     light_history{*this},
     bdptmis{_scene},
     eye_medium_tracker_before_node{},
-    enable_debug_buffers{algo_params.num_threads <= 0}
+    master{master}
   {
     rgb_responses.reserve(1024);
     eye_medium_tracker_before_node.reserve(32);
@@ -650,15 +668,16 @@ public:
   
   void AddToDebugBuffer(int unit_index, int s, int t, double mis_weight, const Spectral3 &path_weight)
   {
-    if (!enable_debug_buffers)
+    if (!master->enable_debug_buffers)
       return;
 
+    tbb::spin_mutex::scoped_lock lock(master->debug_buffer_mutex);
     auto key = std::make_pair(s, t);
-    auto it = debug_buffers.find(key);
-    if (it == debug_buffers.end())
+    auto it = master->debug_buffers.find(key);
+    if (it == master->debug_buffers.end())
     {
       bool _;
-      std::tie(it, _) = debug_buffers.insert(std::make_pair(
+      std::tie(it, _) = master->debug_buffers.insert(std::make_pair(
         key, Spectral3ImageBuffer(scene.GetCamera().xres, scene.GetCamera().yres)));
 
     }
@@ -666,20 +685,17 @@ public:
     
     if (!path_weight.isZero())
     {
-      it = debug_buffers_mis.find(key);
-      if (it == debug_buffers_mis.end())
+      it = master->debug_buffers_mis.find(key);
+      if (it == master->debug_buffers_mis.end())
       {
         bool _;
-        std::tie(it, _) = debug_buffers_mis.insert(std::make_pair(
+        std::tie(it, _) = master->debug_buffers_mis.insert(std::make_pair(
           key, Spectral3ImageBuffer(scene.GetCamera().xres, scene.GetCamera().yres)));
 
       }
       it->second.Insert(unit_index, RGB{Color::RGBScalar{mis_weight}});
     }
   }
-  
-  
-  //void NotifyPassesFinished(int pass_count) override;
 };
 
 
@@ -816,6 +832,7 @@ public:
     return mis_weight;
   }
 };
+
 
 
 

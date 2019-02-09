@@ -100,6 +100,7 @@ public:
     for (int i=0; i<std::max(1, this->render_params.num_threads); ++i)
       workers.push_back(AllocateWorker(i));
     num_threads = workers.size();
+    int pass = 0;
     while (!stop_flag.load() && spp_schedule.GetPerIteration() > 0)
     {
       shared_pixel_index = 0;
@@ -122,6 +123,7 @@ public:
         },
         num_threads, the_task_group);
       std::cout << "Iteration finished, past spp = " << GetSamplesPerPixel() << ", total taken " << spp_schedule.GetTotal() << std::endl;
+      PassCompleted();
       CallInterruptCb(true);
       spp_schedule.UpdateForNextPass();
     } // Pass iteration
@@ -153,6 +155,8 @@ protected:
   // Implementation must override this.
   virtual std::unique_ptr<Worker> AllocateWorker(int num) = 0;
 
+  virtual void PassCompleted() {};
+  
   inline int GetNumPixels() const { return num_pixels; }
   
   inline int GetSamplesPerPixel() const { return spp_schedule.GetPerIteration(); }
