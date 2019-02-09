@@ -273,28 +273,37 @@ public:
   
   bool SurvivalAtNthScatterNode(Spectral3 &scatter_coeff, int node_count, Sampler &sampler) const
   {
+    return SurvivalAtNthScatterNode(scatter_coeff, scatter_coeff, node_count, sampler);
+  }
+  
+  bool SurvivalAtNthScatterNode(Spectral3 &weight, const Spectral3 &scatter_coeff, int node_count, Sampler &sampler) const
+  {
     if (node_count <= max_node_count)
     {
-      return !RouletteTerminationAllowedAtLength(node_count) || RouletteSurvival(scatter_coeff, sampler);
+      if (node_count <= min_node_count)
+      {
+        return true;
+      }
+      return RouletteSurvival(weight, scatter_coeff, sampler);
     }
-    else
-      return false;
+    // Else
+    return false;
   }
-  
-private:
-  bool RouletteTerminationAllowedAtLength(int n) const
+/*  
+  bool TerminateDueToNodeCount(int node_count) const
   {
-    return n > min_node_count;
-  }
+    return node_count > max_node_count;
+  }*/
   
-  bool RouletteSurvival(Spectral3 &coeff, Sampler &sampler) const
+private: 
+  bool RouletteSurvival(Spectral3 &weight, const Spectral3 &coeff, Sampler &sampler) const
   {
     assert (coeff.maxCoeff() >= 0.);
     // Clip at 0.9 to make the path terminate in high-albedo scenes.
     double p_survive = std::min(0.9, coeff.maxCoeff());
     if (sampler.Uniform01() > p_survive)
       return false;
-    coeff *= 1./p_survive;
+    weight *= 1./p_survive;
     return true;
   }
 };
