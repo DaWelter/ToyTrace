@@ -592,11 +592,10 @@ public:
   
   std::tuple<int, int, int> OmegaToCell(const Double3 &w) const
   {
-    int side, i, j;
-    double u, v, z;
+    double u = 0, v = 0, z = 0;
     int max_abs_axis;
     z = w.array().abs().maxCoeff(&max_abs_axis);
-    side = max_abs_axis*2 + (w[max_abs_axis]>0 ? 0 : 1);
+    int side = max_abs_axis*2 + (w[max_abs_axis]>0 ? 0 : 1);
     switch(side)
     {
       case 0:
@@ -619,8 +618,8 @@ public:
     v /= z;
     assert(u >= -1.001 && u <= 1.001);
     assert(v >= -1.001 && v <= 1.001);
-    i = (u+1.)*0.5*bins_per_axis;
-    j = (v+1.)*0.5*bins_per_axis;
+    int i = (u+1.)*0.5*bins_per_axis;
+    int j = (v+1.)*0.5*bins_per_axis;
     i = std::max(0, std::min(bins_per_axis-1, i));
     j = std::max(0, std::min(bins_per_axis-1, j));
     return std::make_tuple(side, i, j);
