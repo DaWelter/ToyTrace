@@ -21,6 +21,8 @@
 #include <boost/filesystem/path.hpp>
 #include <boost/filesystem/operations.hpp>
 
+#include <yaml-cpp/yaml.h>
+
 using namespace RadianceOrImportance;
 namespace fs = boost::filesystem;
 
@@ -151,6 +153,8 @@ public:
   }
 
   void Parse(Scope &scope);
+  void ParseYaml(const std::string &yaml_section, Scope &scope);
+  void ParseYamlNode(const std::string &key, const YAML::Node &node, Scope &scope);
   Scope CreateScope();
 private:
   void ParseMesh(const char *filename, Scope &scope);
@@ -204,6 +208,24 @@ void NFFParser::Parse(Scope &scope)
       break;
     }
     
+    if (!strcmp(token,"yaml{")) {
+      std::string yaml_section; 
+      yaml_section.reserve(1024);
+      bool properly_terminated = false;
+      while (NextLine() && !(properly_terminated = startswith(line, "}yaml")))
+      {
+        yaml_section.append(line);
+        yaml_section.append("\n"); // Newline was removed from the line. Put it back in.
+      }
+      if (!properly_terminated)
+        throw MakeException("Error. Yaml section was not terminated with }yaml token.");
+      if (!yaml_section.empty())
+      {
+        yaml_section.pop_back(); // Don't need the last newline.
+        ParseYaml(yaml_section, scope);
+      }
+      continue;
+    }
     
     if (!strcmp(token, "transform"))
     {
@@ -888,6 +910,95 @@ void NFFParser::Parse(Scope &scope)
     throw MakeException("Unkown directive");
   }
 };
+
+
+// Adapted from https://github.com/jbeder/yaml-cpp/wiki/Tutorial
+namespace YAML {
+template<>
+struct convert<Double3> {
+  static bool decode(const Node& node, Double3& rhs) {
+    if(!node.IsSequence() || node.size() != 3) {
+      return false;
+    }
+
+    rhs[0] = node[0].as<double>();
+    rhs[1] = node[1].as<double>();
+    rhs[2] = node[2].as<double>();
+    return true;
+  }
+};
+}
+
+
+
+void NFFParser::ParseYaml(const std::string& yaml_section_str, Scope& scope)
+{
+  std::cout << "Parse YAML:\n--------\n" << yaml_section_str << "\n-------\n" << std::flush;
+  YAML::Node doc = YAML::Load(yaml_section_str);
+  /* Example: Transform
+   * - transform:
+   *   pos: [x, y, z]
+   *   hpb: [ h, p, b ]
+   *   scale: [x, y, z]
+   *   angle_in_degree
+   * 
+   * - shader: myshader
+   *   param1: ....
+   *   param2: ....
+   * 
+   * - medium: mymedium
+   *   priority: 1
+   *   param1: ....
+   *   param2: ....
+   * 
+   * - material: ...
+   *   shader: myshader
+   *   medium: mymedium
+   *   emissive: myarealight
+   */
+  for(YAML::const_iterator it = doc.begin(); it!=doc.end(); ++it)
+  {
+    ParseYamlNode(it->first.as<std::string>(), it->second, scope);
+  }
+}
+
+
+void NFFParser::ParseYamlNode(const std::string &key, const YAML::Node &node, Scope &scope)
+{
+  if (key == "transform")
+  {
+    auto trafo = decltype(scope.currentTransform)::Identity();
+    auto pos_node   = node["pos"];
+    auto hpb_node   = node["hpb"];
+    auto scale_node = node["scale"];
+    if (pos_node)
+    {
+      trafo = Eigen::Translation3d(pos_node.as<Double3>());
+    }
+    if (hpb_node)
+    {
+      auto r = hpb_node.as<Double3>();
+      if (node["angle_in_degree"] && node["angle_in_degree"].as<bool>())
+        r *= Pi/180.;
+      // The heading, pitch, bank convention assuming Y is up and Z is forward!
+      trafo = trafo *
+        Eigen::AngleAxisd(r[0], Eigen::Vector3d::UnitY()) *
+        Eigen::AngleAxisd(r[1], Eigen::Vector3d::UnitX()) *
+        Eigen::AngleAxisd(r[2], Eigen::Vector3d::UnitZ());
+    }
+    if (scale_node)
+    {
+      auto s = scale_node.as<Double3>();
+      trafo = trafo * Eigen::Scaling(s);
+    }
+    scope.currentTransform = trafo;
+    std::cout << "Transform: t=\n" << scope.currentTransform.translation() << "\nr=\n" << scope.currentTransform.linear() << std::endl;
+  }
+  else if (key == "shader")
+  {
+    
+  }
+}
 
 
 // Example see: https://github.com/assimp/assimp/blob/master/samples/SimpleOpenGL/Sample_SimpleOpenGL.c

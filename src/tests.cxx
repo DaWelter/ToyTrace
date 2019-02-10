@@ -742,6 +742,33 @@ m testing/scenes/cornelbox.dae
 }
 
 
+TEST(Parser, YamlEmbedTransformLoad)
+{
+  const char* scenestr = R"""(
+v
+from 0 1.2 -1.3
+at 0 0.6 0
+up 0 1 0
+resolution 128 128
+angle 50
+
+yaml{
+transform:
+  pos: [ 1, 2, 3]
+  hpb: [ 0, 90, 0]
+  angle_in_degree : true
+shader: 
+  name: itsname
+  type: itstype
+  param: foo
+}yaml
+s 0 0 0 1.0
+)""";
+  Scene scene;
+  scene.ParseNFFString(scenestr);
+}
+
+
 class TextureLoadTest : public testing::Test
 {
 protected:
