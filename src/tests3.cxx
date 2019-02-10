@@ -3,7 +3,11 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
+
+#ifdef HAVE_JSON
 #include <rapidjson/document.h>
+#endif
+
 #include <boost/filesystem.hpp>
 
 #include "renderingalgorithms_simplebase.hxx"

@@ -232,7 +232,7 @@ void TestProbabilityOfMeanLowerThanUpperBound(double sample_avg, double sample_s
   }
 }
 
-
+#ifdef HAVE_JSON
 namespace rj
 {
 
@@ -273,7 +273,7 @@ void Write(rj::Document &doc, const std::string &filename)
 }
 
 }
-
+#endif
 
 
 
@@ -1042,7 +1042,9 @@ public:
     }
   }
   
+#ifdef HAVE_JSON
   rj::Value CubemapToJSON(rj::Alloc &alloc);
+#endif
   void DumpVisualization(const std::string filename);
 };
 
@@ -1332,7 +1334,7 @@ class PhaseFunctionTests : public SamplingConsistencyTest
 
 
 
-
+#ifdef HAVE_JSON
 class ScatterVisualization
 {
   const Scatterer &scatterer;
@@ -1459,11 +1461,7 @@ void SamplingConsistencyTest::DumpVisualization(const std::string filename)
   doc.AddMember("vis_samples", thing, alloc);
   rj::Write(doc, filename);
 }
-
-
-
-
-
+#endif
 
 
 TEST(PhasefunctionTests, Uniform)

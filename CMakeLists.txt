@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 2.8)
 project(toytrace)
 
+set (Rapidjson_ENABLE False CACHE BOOL "For debug data output and loading of atmospheric data.")
+
 set (CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} -std=c++17) # Set this only for c++ files.
 add_compile_options (-Wextra -Wall)
 add_compile_options (-Wno-sign-compare -Wno-unused-parameter -Wno-unused-variable -Wno-char-subscripts -Winit-self -Wno-unused-function)
@@ -43,14 +45,22 @@ set(Cubature_DIR "external/cubature")
 
 find_package(JPEG)
 find_package(PNG)
-find_path(Rapidjson_INCLUDE_DIR
-  NAMES rapidjson/rapidjson.h
-  PATHS
-    ${CMAKE_INSTALL_PREFIX}/include
-    /usr/include
-    /usr/local/include
-)
-message(STATUS "Rapidjson: ${Rapidjson_INCLUDE_DIR}")
+
+if (Rapidjson_ENABLE)
+  find_path(Rapidjson_INCLUDE_DIR
+    NAMES rapidjson/rapidjson.h
+    PATHS
+      ${CMAKE_INSTALL_PREFIX}/include
+      /usr/include
+      /usr/local/include
+  )
+  if (NOT Rapidjson_INCLUDE_DIR)
+    message(FATAL_ERROR "Rapidjson not found!")
+  else()
+    message(STATUS "Rapidjson: ${Rapidjson_INCLUDE_DIR}")
+  endif()
+  add_definitions("-DHAVE_JSON")
+endif()
 
 find_path(YAML_CPP_INCLUDE_DIR 
   NAMES yaml-cpp/yaml.h

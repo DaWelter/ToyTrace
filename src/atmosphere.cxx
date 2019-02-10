@@ -1,5 +1,8 @@
-#include <rapidjson/document.h>
 #include <fstream>
+
+#ifdef HAVE_JSON
+#include <rapidjson/document.h>
+#endif
 
 #include "atmosphere.hxx"
 #include "ray.hxx"
@@ -264,11 +267,7 @@ double ExponentialConstituentDistribution::ComputeSigmaTMajorante(double altitud
   return (sigma_s + sigma_a).maxCoeff();
 }
 
-
-
-
-
-
+#ifdef HAVE_JSON
 std::vector<Color::SpectralN> ReadArrayOfSpectra(const rapidjson::Value &array)
 {
   std::vector<Color::SpectralN> ret;
@@ -287,10 +286,11 @@ std::vector<Color::SpectralN> ReadArrayOfSpectra(const rapidjson::Value &array)
   }
   return ret;
 }
-
+#endif
 
 TabulatedConstituents::TabulatedConstituents(const std::string& filename)
 {
+#ifdef HAVE_JSON
   rapidjson::Document d;
   std::ifstream is(filename.c_str(), std::ios::binary | std::ios::ate);
   std::string data;
@@ -341,6 +341,9 @@ TabulatedConstituents::TabulatedConstituents(const std::string& filename)
   delta_h = d["deltaH"].GetDouble();
   upper_altitude_cutoff = lower_altitude_cutoff + delta_h * (sigma_t_majorante.size()-1);
   inv_delta_h = 1./delta_h;
+#else
+  throw std::runtime_error("Reading of TabulatedConstituents not implement.");
+#endif
 }
 
 

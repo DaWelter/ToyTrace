@@ -5,8 +5,11 @@
 #include <algorithm>
 #include <iostream>
 #include <fstream>
-#include <rapidjson/document.h>
 #include <boost/filesystem.hpp>
+
+#ifdef HAVE_JSON
+#include <rapidjson/document.h>
+#endif
 
 #include "ray.hxx"
 #include "image.hxx"
@@ -876,6 +879,7 @@ TEST(SimpleAtmosphereTest, LowestPoint)
 }
 
 
+#ifdef HAVE_JSON
 TEST(AtmosphereTest, LoadTabulatedData)
 {
   const std::string filename = "testing/scenes/earth_atmosphere_collision_coefficients.json";
@@ -899,7 +903,7 @@ TEST(AtmosphereTest, LoadTabulatedData)
   const auto& value = sigma_t_at_altitude0[0];
   ASSERT_TRUE(std::isfinite(value.GetDouble()));
 }
-
+#endif
 
 }
 
