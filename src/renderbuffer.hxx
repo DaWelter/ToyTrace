@@ -43,7 +43,7 @@ public:
     ++splat_count;
   }
   
-  void ToImage(Image &dest, int ystart, int yend) const
+  void ToImage(Image &dest, int ystart, int yend, const bool convert_linear_to_srgb = true) const
   {
     assert (ystart >= 0 && yend>= ystart && yend <= dest.height());
     Color::RGBScalar splat_weight(splat_count>0 ? double(xres*yres)/(splat_count) : 0.); // Multiply with xres*yres because I divided it out in the path tracer code.
@@ -60,7 +60,9 @@ public:
         if (isfinite)
         {
           for (int i=0; i<3; ++i)
-            rgb[i] = value(Color::LinearToSRGB(average[i])*255.999_rgb);
+          {
+            rgb[i] = convert_linear_to_srgb ? value(Color::LinearToSRGB(average[i])*255.999_rgb) : value(average[i]*255.999_rgb);
+          }
           dest.set_pixel(x, dest.height() - 1 - y, rgb[0], rgb[1], rgb[2]);
         }
       }
