@@ -216,8 +216,7 @@ m testing/scenes/unitcube.dae
     return 0.;
   };
   
-  
-  RadianceEstimatorBase rt(scene);
+  Sampler sampler;
   MediumTracker medium_tracker(scene);
   double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
   Ray ray{{ray_offset,0.,camera_start}, {0.,0.,1.}};
@@ -234,7 +233,7 @@ m testing/scenes/unitcube.dae
     VolumePdfCoefficients volume_pdf_coeff{};
     //RadianceEstimatorBase::CollisionData collision(ray);
     medium_tracker.initializePosition(ray.org);
-    rt.TrackToNextInteraction(ray, PathContext{lambda_idx}, medium_tracker, &volume_pdf_coeff,
+    TrackToNextInteraction(scene, ray, PathContext{lambda_idx}, Spectral3::Ones(), sampler, medium_tracker, &volume_pdf_coeff,
       /*surface_visitor=*/[&](const SurfaceInteraction &intersection, double distance, const Spectral3 &weight)
       {
         FAIL();

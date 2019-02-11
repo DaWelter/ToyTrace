@@ -37,11 +37,11 @@ const PhaseFunctions::PhaseFunction& AtmosphereTemplate<ConstituentDistribution_
 
 // Spectral tracking scheme based on Kutz et al. (2017) "Spectral and Decomposition Tracking for Rendering Heterogeneous Volumes".
 template<class ConstituentDistribution_, class Geometry_>
-Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_>::SampleInteractionPoint(const RaySegment &segment, Sampler &sampler, const PathContext &context) const
+Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_>::SampleInteractionPoint(const RaySegment &segment, const Spectral3 &initial_weights, Sampler &sampler, const PathContext &context) const
 {
   Medium::InteractionSample smpl{
     0.,
-    Spectral3{1.},
+    initial_weights,
     Spectral3::Zero()
   };
   Spectral3 sigma_s, sigma_a;

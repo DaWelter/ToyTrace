@@ -171,6 +171,7 @@ inline TrackToNextInteraction(
   const Scene &scene,
   const Ray &ray,
   const PathContext &context,
+  const Spectral3 &initial_weight,
   Sampler &sampler,
   MediumTracker &medium_tracker,
   VolumePdfCoefficients *volume_pdf_coeff,
@@ -180,7 +181,7 @@ inline TrackToNextInteraction(
 {
   static constexpr int MAX_ITERATIONS = 100; // For safety, in case somethign goes wrong with the intersections ...
   
-  Spectral3 total_weight{1.};
+  Spectral3 weight{1.};
   
   RaySegment segment;
   SurfaceInteraction intersection;
@@ -193,8 +194,8 @@ inline TrackToNextInteraction(
     bool hit = iter.Next(segment, intersection);
 
     const Medium& medium = medium_tracker.getCurrentMedium();
-    const auto medium_smpl = medium.SampleInteractionPoint(segment, sampler, context);
-    total_weight *= medium_smpl.weight;
+    const auto medium_smpl = medium.SampleInteractionPoint(segment, weight*initial_weight, sampler, context);
+    weight *= medium_smpl.weight;
     
     const bool interacted_w_medium = medium_smpl.t < segment.length;
     const bool hit_invisible_wall =
@@ -224,18 +225,18 @@ inline TrackToNextInteraction(
       if (interacted_w_medium)
       {
         VolumeInteraction interaction{segment.EndPoint(), medium, Spectral3{0.}, medium_smpl.sigma_s};
-        return volume_visitor(interaction, prev_t+medium_smpl.t, total_weight);
+        return volume_visitor(interaction, prev_t+medium_smpl.t, weight);
       }
       else if (hit)
       {
-        return surface_visitor(intersection, iter.GetT(), total_weight);
+        return surface_visitor(intersection, iter.GetT(), weight);
       }
       break; // Escaped the scene.
     }
     assert (interfaces_crossed < MAX_ITERATIONS-1);
   }
   
-  return escape_visitor(total_weight);
+  return escape_visitor(weight);
 };
 
 
@@ -284,7 +285,8 @@ public:
       {
         return true;
       }
-      return RouletteSurvival(weight, scatter_coeff, sampler);
+      //return RouletteSurvival(weight, scatter_coeff, sampler);
+      return true;
     }
     // Else
     return false;

@@ -336,14 +336,15 @@ public:
     MaybeHandlePassageThroughSurface(source_node, ray.dir, medium_tracker);
 
     TrackToNextInteraction(ray, context, medium_tracker, volume_pdf_coeff, 
-      /*surface_visitor=*/[&](const SurfaceInteraction &intersection, double distance, const Spectral3 &weight)
+      /*surface_visitor=*/[&](const SurfaceInteraction &intersection, double distance, const Spectral3 &weight) -> bool
       {
         node_sample.beta_factor *= weight;
         node_sample.segment = RaySegment{ray, distance};
         node_sample.node.node_type = RW::NodeType::SURFACE_SCATTER;
         node_sample.node.interaction.surface = intersection;
+        return true;
       },
-      /*volume visitor=*/[&](const VolumeInteraction &interaction, double distance, const Spectral3 &weight)
+      /*volume visitor=*/[&](const VolumeInteraction &interaction, double distance, const Spectral3 &weight) -> bool
       {
         node_sample.beta_factor *= weight;
         node_sample.segment = RaySegment{ray, distance};
@@ -352,8 +353,9 @@ public:
         node_sample.node.interaction.volume = interaction;
         node_sample.node.interaction.volume.radiance = radiance;
         node_sample.node.node_type = RW::NodeType::VOLUME_SCATTER;
+        return true;
       },
-      /* escape_visitor=*/[&](const Spectral3 &weight)
+      /* escape_visitor=*/[&](const Spectral3 &weight) -> bool
       {
         node_sample.beta_factor *= weight;
         node_sample.segment = RaySegment{ray, LargeNumber};
@@ -364,6 +366,7 @@ public:
           emitter
         };
         node_sample.node.interaction.emitter_env.radiance = emitter.Evaluate(-ray.dir, context);
+        return false;
       }
     );
     
@@ -839,67 +842,9 @@ public:
     VolumeHitVisitor &&volume_visitor,
     EscapeVisitor &&escape_visitor)
   {
-    static constexpr int MAX_ITERATIONS = 100; // For safety, in case somethign goes wrong with the intersections ...
-    
-    Spectral3 total_weight{1.};
-    
-    RaySegment segment;
-    SurfaceInteraction intersection;
-    IterateIntersectionsBetween iter{RaySegment{ray, LargeNumber}, scene};
-    
-    for (int interfaces_crossed=0; interfaces_crossed < MAX_ITERATIONS; ++interfaces_crossed)
-    {
-      double prev_t = iter.GetT();
-      
-      bool hit = iter.Next(segment, intersection);
-
-      const Medium& medium = medium_tracker.getCurrentMedium();
-      const auto medium_smpl = medium.SampleInteractionPoint(segment, sampler, context);
-      total_weight *= medium_smpl.weight;
-      
-      const bool interacted_w_medium = medium_smpl.t < segment.length;
-      const bool hit_invisible_wall =
-        hit && 
-        scene.GetMaterialOf(intersection.hitid).shader==&scene.GetInvisibleShader() &&
-        scene.GetMaterialOf(intersection.hitid).emitter==nullptr;
-      const bool cont = !interacted_w_medium && hit_invisible_wall;
-      
-      segment.length = std::min(segment.length, medium_smpl.t);
-      
-      if (volume_pdf_coeff != nullptr)
-      {
-        VolumePdfCoefficients local_coeff = medium_tracker.getCurrentMedium().ComputeVolumePdfCoefficients(segment, context);
-        Accumulate(*volume_pdf_coeff, local_coeff, interfaces_crossed==0, !cont);
-      }
-
-      // If there was a medium interaction, it came before the next surface, and we can surely return.
-      // Else it is possible to hit a perfectly transparent wall. I want to pass through it and keep on going.
-      // If we hit something else then we surely want to return to process it further.
-      // Finally there is the possibility of the photon escaping out of the scene to infinity.
-      if (cont)
-      {
-        medium_tracker.goingThroughSurface(segment.ray.dir, intersection);
-      }
-      else
-      {
-        if (interacted_w_medium)
-        {
-          VolumeInteraction interaction{segment.EndPoint(), medium, Spectral3{0.}, medium_smpl.sigma_s};
-          volume_visitor(interaction, prev_t+medium_smpl.t, total_weight);
-          return true;
-        }
-        else if (hit)
-        {
-          surface_visitor(intersection, iter.GetT(), total_weight);
-          return true;
-        }
-        break; // Escaped the scene.
-      }
-      assert (interfaces_crossed < MAX_ITERATIONS-1);
-    }
-    
-    escape_visitor(total_weight);
-    return false;
+    return ::TrackToNextInteraction(
+      scene,ray,context,Spectral3::Ones(), sampler, medium_tracker,
+      volume_pdf_coeff, std::move(surface_visitor), std::move(volume_visitor), std::move(escape_visitor));
   }
 };
 

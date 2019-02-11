@@ -586,7 +586,7 @@ Medium::PhaseSample EmissiveDemoMedium::SamplePhaseFunction(const Double3& incid
 }
 
 
-Medium::InteractionSample EmissiveDemoMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler, const PathContext &context) const
+Medium::InteractionSample EmissiveDemoMedium::SampleInteractionPoint(const RaySegment& segment, const Spectral3 &initial_weights, Sampler& sampler, const PathContext &context) const
 {
   auto [ok, tnear, tfar] = ClipRayToSphereInterior(segment.ray.org, segment.ray.dir, 0, segment.length, this->pos, this->radius);
   Medium::InteractionSample smpl;
@@ -660,7 +660,7 @@ Spectral3 VacuumMedium::EvaluatePhaseFunction(const Double3& indcident_dir, cons
 }
 
 
-Medium::InteractionSample VacuumMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler, const PathContext &context) const
+Medium::InteractionSample VacuumMedium::SampleInteractionPoint(const RaySegment& segment, const Spectral3 &initial_weights, Sampler& sampler, const PathContext &context) const
 {
   return Medium::InteractionSample{
       LargeNumber,
@@ -716,11 +716,14 @@ ScatterSample HomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir
 }
 
 
-Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler, const PathContext &context) const
+Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, const Spectral3 &initial_weights, Sampler& sampler, const PathContext &context) const
 {
+  // Ref: Kutz et a. (2017) "Spectral and Decomposition Tracking for Rendering Heterogeneous Volumes"
+  // Much simplified with constant coefficients.
+  // Also, very importantly, sigma_s is not multiplied to the final weight! Compare with Algorithm 4, Line 10.
   Medium::InteractionSample smpl{
     0.,
-    Spectral3{1.},
+    Spectral3::Ones(),
     Spectral3::Zero()
   };
   // Shadow the member var by the new var taking only the current lambdas.
@@ -742,7 +745,7 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
       Spectral3 sigma_n = sigma_t_majorant - sigma_ext;
       assert(sigma_n.minCoeff() >= -1.e-3); // By definition of the majorante
       double prob_t, prob_n;
-      TrackingDetail::ComputeProbabilitiesHistoryScheme(smpl.weight, {sigma_s, sigma_n}, {prob_t, prob_n});
+      TrackingDetail::ComputeProbabilitiesHistoryScheme(smpl.weight*initial_weights, {sigma_s, sigma_n}, {prob_t, prob_n});
       double r = sampler.Uniform01();
       if (r < prob_t) // Scattering/Absorption
       {
@@ -811,7 +814,7 @@ Medium::PhaseSample MonochromaticHomogeneousMedium::SamplePhaseFunction(const Do
 }
 
 
-Medium::InteractionSample MonochromaticHomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, Sampler& sampler, const PathContext &context) const
+Medium::InteractionSample MonochromaticHomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, const Spectral3 &initial_weights, Sampler& sampler, const PathContext &context) const
 {
   Medium::InteractionSample smpl;
   smpl.t = - std::log(1-sampler.Uniform01()) / sigma_ext;
