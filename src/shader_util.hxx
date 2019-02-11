@@ -193,10 +193,18 @@ inline void ComputeProbabilitiesHistoryScheme(
     it_probs->get() = p;
     normalization += p;
   }
-  double norm_inv = 1./normalization;
-  it_probs = probs.begin();
-  for (; it_probs != probs.end(); ++it_probs)
-    it_probs->get() *= norm_inv;
+  if (normalization > 0.)
+  {
+    double norm_inv = 1./normalization;
+    for (it_probs = probs.begin(); it_probs != probs.end(); ++it_probs)
+      it_probs->get() *= norm_inv; 
+  }
+  else // Zeroed weights?
+  {
+    const double p = 1.0/probs.size();
+    for (it_probs = probs.begin(); it_probs != probs.end(); ++it_probs)
+      it_probs->get() = p;
+  }
 }
 
 } // TrackingDetail
