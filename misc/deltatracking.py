@@ -18,7 +18,9 @@ ms.init('single_box', 'const')
 def print_weights_stats(name, weights):
   estimate = np.average(weights, axis=0)
   stdev    = np.std(weights, axis=0) / math.sqrt(len(weights))
-  per_channel = ['%f +/- %f' % (a, b) for (a,b) in zip(estimate, stdev)]
+  minval   = np.amin(weights, axis=0)
+  maxval   = np.amax(weights, axis=0)
+  per_channel = ['%f +/- %f [%f, %f]' % (a, b,c,d) for (a,b,c,d) in zip(estimate, stdev, minval, maxval)]
   print(name, " estimate: ", ', '.join(per_channel))
 
 
