@@ -152,9 +152,15 @@ int main(int argc, char *argv[])
   
   auto algo = RenderAlgorithmFactory(scene, render_params);
   
+  auto time_of_last_image_request = std::chrono::steady_clock::now();
+  
   algo->SetInterruptCallback([&](bool is_complete_pass){
-    auto im = algo->GenerateImage();
-    image_queue.push(ImageWorkItem{im.release(), is_complete_pass}); // Would use emplace but my TBB believes that I have no variadic template argument support.
+    if ((std::chrono::steady_clock::now() - time_of_last_image_request > std::chrono::milliseconds(1000)) || is_complete_pass)
+    {
+      auto im = algo->GenerateImage();
+      image_queue.push(ImageWorkItem{im.release(), is_complete_pass}); // Would use emplace but my TBB believes that I have no variadic template argument support.
+      time_of_last_image_request = std::chrono::steady_clock::now();
+    }
   });
 
   tbb::tbb_thread watchdog_and_image_updater([&] {
