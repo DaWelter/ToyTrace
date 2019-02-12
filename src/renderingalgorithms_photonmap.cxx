@@ -25,11 +25,14 @@ using SimplePixelByPixelRenderingDetails::SamplesPerPixelSchedule;
 using SimplePixelByPixelRenderingDetails::SamplesPerPixelScheduleConstant;
 class PhotonmappingRenderingAlgo;
 
+//#define DEBUG_BUFFERS
+
 struct Photon
 {
   Double3 position;
   Spectral3 weight;
   Float3 direction;
+  int level;
 };
 
 
@@ -41,6 +44,7 @@ class PhotonmappingWorker
   MediumTracker medium_tracker;
   Sampler sampler;
   int current_node_count = 0;
+  Spectral3 current_emission;
   LambdaSelection lambda_selection;
   PathContext context;
   RayTermination ray_termination;
@@ -51,7 +55,7 @@ private:
   bool TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &weight_accum);
   bool ScatterAt(Ray &ray, const SurfaceInteraction &interaction, const Spectral3 &track_weigh, Spectral3 &weight_accum);
   bool ScatterAt(Ray &ray, const VolumeInteraction &interaction, const Spectral3 &track_weigh, Spectral3 &weight_accum);
-  
+  void RecordPathThroughputStatistics(const Spectral3 &weight);
 public:  
   // Public access because this class is hardly a chance to missuse.
   // Simply run TracePhotons as much as desired, then get the photons
@@ -59,6 +63,7 @@ public:
   ToyVector<Photon> photons_volume;
   ToyVector<Photon> photons_surface;
   int num_photons_traced = 0;
+  SpectralN max_throughput_weight;
   
   PhotonmappingWorker(PhotonmappingRenderingAlgo *master);
   void StartNewPass(const LambdaSelection &lambda_selection);
@@ -95,7 +100,7 @@ public:
 
 };
 
-// TODO: Radius decay with alpha = 2/3, following Hachisukas extended path sampling paper.
+
 class PhotonmappingRenderingAlgo : public RenderingAlgo
 {
   friend class PhotonmappingWorker;
@@ -123,6 +128,10 @@ private:
   LambdaSelectionStrategyShuffling lambda_selection_factory;
   ToyVector<PhotonmappingWorker> photonmap_workers;
   ToyVector<CameraRenderWorker> camerarender_workers;
+#ifdef DEBUG_BUFFERS  
+  ToyVector<Spectral3ImageBuffer> debugbuffers;
+#endif
+  SpectralN max_throughput_weight{0.};
 public:
   const RenderingParameters &render_params;
   const Scene &scene;
@@ -135,6 +144,12 @@ public:
     num_pixels = render_params.width * render_params.height;
     current_surface_photon_radius = render_params.initial_photon_radius;
     current_volume_photon_radius = render_params.initial_photon_radius;
+#ifdef DEBUG_BUFFERS
+    for (int i=0; i<10; ++i)
+    {
+      debugbuffers.emplace_back(render_params.width, render_params.height);
+    }
+#endif
   }
   
   void Run() override
@@ -177,7 +192,11 @@ public:
         
         PrepareGlobalPhotonMap();
 
-        buffer.AddSampleCount(GetSamplesPerPixel());      
+        buffer.AddSampleCount(GetSamplesPerPixel()); 
+#ifdef DEBUG_BUFFERS
+        for (auto &b : debugbuffers) b.AddSampleCount(GetSamplesPerPixel());
+#endif
+        
         shared_pixel_index = 0;
         while_parallel_fed_interruptible(
           /*func=*/[this](int pixel_index, int worker_num)
@@ -197,7 +216,7 @@ public:
           },
           num_threads, the_task_group);      
       }
-      std::cout << "Iteration finished, past spp = " << GetSamplesPerPixel() << ", total taken " << spp_schedule.GetTotal() << std::endl;
+      std::cout << "Sweep " << spp_schedule.GetTotal() << " finished" << std::endl;
       CallInterruptCb(true);
       spp_schedule.UpdateForNextPass();
       ++pass_index;
@@ -224,6 +243,24 @@ public:
     tbb::parallel_for(0, render_params.height, [&](int row){
       buffer.ToImage(*bm, row, row+1);  
     });
+#ifdef DEBUG_BUFFERS
+    int buf_num = 0;
+    for (auto &b : debugbuffers)
+    {
+      Image im(render_params.width, render_params.height);
+      tbb::parallel_for(0, render_params.height, [&](int row){
+        b.ToImage(im, row, row+1, /*convert_linear_to_srgb=*/ false);  
+      });
+      im.write(strconcat("/tmp/debug",(buf_num++),".png"));
+    }
+    {
+    Image im(render_params.width, render_params.height);
+    tbb::parallel_for(0, render_params.height, [&](int row){
+      buffer.ToImage(im, row, row+1, /*convert_linear_to_srgb=*/ false);  
+    });
+    im.write("/tmp/debug.png");
+    }
+#endif
     return bm;
   }
   
@@ -250,12 +287,15 @@ void PhotonmappingRenderingAlgo::PrepareGlobalPhotonMap()
   photons_volume.clear();
   photons_surface.clear();
   num_photons_traced = 0;
+
   for(auto &worker : photonmap_workers)
   {
     photons_volume.insert(photons_volume.end(), worker.photons_volume.begin(), worker.photons_volume.end());
     photons_surface.insert(photons_surface.end(), worker.photons_surface.begin(), worker.photons_surface.end());
     num_photons_traced += worker.num_photons_traced;
+    max_throughput_weight = max_throughput_weight.cwiseMax(worker.max_throughput_weight);
   }
+  std::cout << "Max throughput = " << max_throughput_weight << std::endl;
   ToyVector<Double3> points; points.reserve(photons_surface.size());
   std::transform(photons_surface.begin(), photons_surface.end(), 
                  std::back_inserter(points), [](const Photon& p) { return p.position; });
@@ -354,6 +394,7 @@ void PhotonmappingWorker::StartNewPass(const LambdaSelection &lambda_selection)
   photons_surface.clear();
   photons_volume.clear();
   num_photons_traced = 0;
+  max_throughput_weight.setConstant(0.);
 }
 
 
@@ -371,9 +412,11 @@ void PhotonmappingWorker::TracePhotons(int count)
   for (int photon_num = 0; photon_num < count; ++photon_num, ++num_photons_traced)
   {
     current_node_count = 2;
-    Spectral3 weight_accum{1.}; // Weights due to wavelength selection is accounted for in view subpath weights.
-    Ray ray = GeneratePrimaryRay(weight_accum);
+    // Weights due to wavelength selection is accounted for in view subpath weights.
+    current_emission.setConstant(1.);
+    Ray ray = GeneratePrimaryRay(current_emission);
     bool keepgoing = true;
+    Spectral3 weight_accum{1.}; 
     do
     {
       keepgoing = TrackToNextInteractionAndScatter(ray, weight_accum);
@@ -385,16 +428,18 @@ void PhotonmappingWorker::TracePhotons(int count)
 
 bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &weight_accum)
 {
-  const bool keepgoing = TrackToNextInteraction(master->scene, ray, context, sampler, medium_tracker, nullptr,
+  const bool keepgoing = TrackToNextInteraction(master->scene, ray, context, weight_accum*current_emission, sampler, medium_tracker, nullptr,
     /*surface=*/[&](const SurfaceInteraction &interaction, double distance, const Spectral3 &track_weight) -> bool
     {
       weight_accum *= track_weight;
       photons_surface.push_back({
         interaction.pos,
-        photon_surface_blur_weight*weight_accum,
-        ray.dir.cast<float>()
+        photon_surface_blur_weight*weight_accum*current_emission,
+        ray.dir.cast<float>(),
+        current_node_count
       });
       current_node_count++;
+      RecordPathThroughputStatistics(weight_accum);
       return ScatterAt(ray, interaction, track_weight, weight_accum);
     },
     /*volume=*/[&](const VolumeInteraction &interaction, double distance, const Spectral3 &track_weight) -> bool
@@ -402,10 +447,12 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
       weight_accum *= track_weight;
       photons_volume.push_back({
         interaction.pos,
-        photon_volume_blur_weight*weight_accum,
-        ray.dir.cast<float>()
+        photon_volume_blur_weight*weight_accum*current_emission,
+        ray.dir.cast<float>(),
+        current_node_count
       });
       current_node_count++;
+      RecordPathThroughputStatistics(weight_accum);
       return ScatterAt(ray, interaction, track_weight, weight_accum);
     },
     /*escape*/[&](const Spectral3 &weight) -> bool
@@ -414,6 +461,14 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
     }
   );
   return keepgoing;
+}
+
+
+void PhotonmappingWorker::RecordPathThroughputStatistics(const Spectral3 &weight)
+{
+  for (int i=0; i<lambda_selection.indices.size(); ++i)
+    max_throughput_weight[lambda_selection.indices[i]] = 
+      std::max(max_throughput_weight[lambda_selection.indices[i]], weight[i]);
 }
 
 
@@ -509,7 +564,7 @@ Ray CameraRenderWorker::GeneratePrimaryRay(Spectral3& path_weight)
 
 bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(Ray& ray, Spectral3& weight_accum)
 {
-  return TrackToNextInteraction(master->scene, ray, context, sampler, medium_tracker, nullptr,
+  return TrackToNextInteraction(master->scene, ray, context, weight_accum, sampler, medium_tracker, nullptr,
     /*surface=*/[&](const SurfaceInteraction &interaction, double distance, const Spectral3 &track_weight) -> bool
     {
       weight_accum *= track_weight;
@@ -594,6 +649,13 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
     bsdf_val *= BsdfCorrectionFactor(-incident_dir, interaction, -photon.direction.cast<double>(), context.transport);
     //bsdf_val *= DFactorOf(interaction, -photon.direction.cast<double>());
     reflect_estimator += photon.weight*bsdf_val;
+#ifdef DEBUG_BUFFERS
+    if (photon.level < master->debugbuffers.size()) {
+      Spectral3 w = path_weight*photon.weight*bsdf_val/master->num_photons_traced;
+      auto color = Color::SpectralSelectionToRGB(w, lambda_selection.indices);
+      master->debugbuffers[photon.level].Insert(pixel_index, color);
+    }
+#endif
   });
   Spectral3 weight = path_weight*reflect_estimator/master->num_photons_traced;
   auto color = Color::SpectralSelectionToRGB(weight, lambda_selection.indices);
@@ -610,6 +672,13 @@ void CameraRenderWorker::AddPhotonContributions(const VolumeInteraction& interac
       return;
     Spectral3 scatter_val = interaction.medium().EvaluatePhaseFunction(-incident_dir, interaction.pos, -photon.direction.cast<double>(), context, nullptr);
     inscatter_estimator += photon.weight*scatter_val;
+#ifdef DEBUG_BUFFERS
+    if (photon.level < master->debugbuffers.size()) {
+      Spectral3 w = interaction.sigma_s*path_weight*photon.weight*scatter_val/master->num_photons_traced;
+      auto color = Color::SpectralSelectionToRGB(w, lambda_selection.indices);
+      master->debugbuffers[photon.level].Insert(pixel_index, color);
+    }
+#endif
   });
   Spectral3 weight = interaction.sigma_s*path_weight*inscatter_estimator/master->num_photons_traced;
   auto color = Color::SpectralSelectionToRGB(weight, lambda_selection.indices);
