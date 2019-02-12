@@ -1357,7 +1357,10 @@ public:
     for (int snum = 0; snum<Nsamples; ++snum)
     {
       auto smpl = scatterer.MakeScatterSample(reverse_incident_dir, sampler);
+      double cosn = scatterer.SurfaceNormalCosineOrOne(smpl.coordinates, false);
       rj::Value json_smpl = rj::ScatterSampleToJSON(smpl, alloc);
+      json_smpl.AddMember("cosn", cosn, alloc);
+      json_smpl.AddMember("weight", rj::Array3ToJSON((smpl.value * cosn / smpl.pdf_or_pmf).array(),alloc), alloc);
       json_samples.PushBack(json_smpl, alloc);
     }
     //doc.AddMember("samples", json_samples, alloc);
