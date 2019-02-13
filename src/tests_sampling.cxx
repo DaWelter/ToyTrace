@@ -1950,7 +1950,7 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
   for (int i=0; i<N; ++i)
   {
     PathContext context{lambda_idx};
-    Medium::InteractionSample s = medium.SampleInteractionPoint(RaySegment{{{0.,0.,0.}, {0., 0., 1.,}}, cutoff_length}, sampler, context);
+    Medium::InteractionSample s = medium.SampleInteractionPoint(RaySegment{{{0.,0.,0.}, {0., 0., 1.,}}, cutoff_length}, Spectral3::Ones(), sampler, context);
     if (s.t  > cutoff_length)
       img.SetColor(255, 0, 0);
     else
