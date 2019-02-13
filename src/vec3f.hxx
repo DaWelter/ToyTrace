@@ -93,44 +93,72 @@ constexpr int static_size()
 //   };
 // }
 
-//namespace Eigen
-//{
-template<VECDARG>
-inline std::ostream& operator<<(std::ostream &os, const VECD &v)
+
+template<class Derived>
+inline std::ostream& operator<<(std::ostream &os, const Eigen::MatrixBase<Derived> &v)
 {
-  os << "<";
-  for (int i=0; i<d; ++i)
+  if (v.cols() > 1)
   {
-    os << v[i];
-    if (i < d -1) os << ",";
+    os << "<";
+    for (int i=0; i<v.rows(); ++i)
+    {
+      os << "<";
+      for (int j=0; j<v.cols(); ++j)      
+      {
+        os << v(i,j);
+        if (j < v.cols()-1) os << ", ";
+      }
+      os << ">";
+      if (i < v.rows()-1) os << ",\n ";
+    }
+    os << ">";
   }
-  os << ">";
+  else
+  {
+    os << "<";
+    for (int j=0; j<v.rows(); ++j)      
+    {
+      os << v(j,0);
+      if (j < v.rows()-1) os << ", ";
+    }
+    os << ">T";
+  }
   return os;
 }
 
-template<VECDARG>
-inline std::istream& operator>>(std::istream &is, VECD &v)
+template<class Derived>
+inline std::ostream& operator<<(std::ostream &os, const Eigen::ArrayBase<Derived> &v)
 {
-  char c;
-  is >> c;
-  if (c != '<') { is.setstate(std::ios_base::failbit); return is; }
-  for (int i=0; i<d; ++i)
+  if (v.cols() > 1)
   {
-    is >> v[i];
-    if (i < d -1) is >> c;
-    if (c != ',') { is.setstate(std::ios_base::failbit); return is; }
+    os << "[";
+    for (int i=0; i<v.rows(); ++i)
+    {
+      os << "[";
+      for (int j=0; j<v.cols(); ++j)      
+      {
+        os << v(i,j);
+        if (j < v.cols()-1) os << ", ";
+      }
+      os << "]";
+      if (i < v.rows()-1) os << ",\n";
+    }
+    os << "]";
   }
-  is >> c;
-  if (c != '>') { is.setstate(std::ios_base::failbit); return is; }
-  return is;
+  else
+  {
+    os << "[";
+    for (int j=0; j<v.rows(); ++j)      
+    {
+      os << v(j,0);
+      if (j < v.rows()-1) os << ", ";
+    }
+    os << "]T";
+  }
+  return os;
 }
 
 
-// template <class U, class T, int dim>
-// inline Vec<U, dim> Cast(const Vec<T, dim> &v)
-// {
-//   return v.template cast<U>().eval();
-// }
 
 template<class T>
 inline T Cross( const Eigen::Matrix<T,2,1>& u, const Eigen::Matrix<T,2,1> &v )

@@ -343,6 +343,21 @@ TEST(BasicAssumptions, CommaInitializers)
 }
 
 
+TEST(BasicAssumptions, OutputOperator)
+{
+  Double3 p{1,2,3};
+  std::cout << p << std::endl;
+  Spectral3 q{1,2,3};
+  std::cout << q << std::endl;
+  Eigen::Matrix3f m; 
+  m << 1, 2, 3,
+       4, 5, 6,
+       7, 8, 9;
+  std::cout << m << std::endl;
+  
+}
+
+
 TEST(BasicAssumptions, AlignmentAllocator)
 {
   std::vector<double, boost::alignment::aligned_allocator<double, 128>> v{1., 2., 3.};
