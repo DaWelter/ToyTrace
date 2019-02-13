@@ -183,9 +183,18 @@ SpecularTransmissiveDielectricShader::SpecularTransmissiveDielectricShader(doubl
 
 ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
 {
-  double shn_dot_i = std::abs(Dot(surface_hit.shading_normal, reverse_incident_dir));
+  double shn_dot_i = Dot(surface_hit.shading_normal, reverse_incident_dir);
+  double geomn_dot_i = Dot(surface_hit.normal, reverse_incident_dir);
+  const bool is_consistent_normal = shn_dot_i * geomn_dot_i >= 0.;
+  // Use geometry normal if incident direction comes in below the shading ground plane.
+  Double3 shading_normal = is_consistent_normal ? surface_hit.shading_normal : surface_hit.normal;
+  shn_dot_i = is_consistent_normal ? shn_dot_i : geomn_dot_i;
+  // Continue with shader sampling ...
   bool entering = Dot(surface_hit.geometry_normal, reverse_incident_dir) > 0.;
   double eta_i_over_t = entering ? 1./ior_ratio  : ior_ratio; // eta_i refers to ior on the side of the incomming random walk! 
+  assert(shn_dot_i >=0); // Because we require geometry normal to point to the 
+  // incident direction and because shading normal must have dot product with 
+  // same sign as dot product with geometry normal.
   
   /* Citing Veach (pg. 147): "Specular BSDF’s contain Dirac distribu-
   tions, which means that the only allowable operation is sampling: there must be an explicit
@@ -208,10 +217,10 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
   double radiance_weight = (context.transport==RADIANCE) ? Sqr(eta_i_over_t) : 1.;
   
   double fresnel_reflectivity = 1.;
-  boost::optional<Double3> wt = Refracted(reverse_incident_dir, surface_hit.shading_normal, eta_i_over_t);
+  boost::optional<Double3> wt = Refracted(reverse_incident_dir, shading_normal, eta_i_over_t);
   if (wt)
   {
-    double abs_shn_dot_r = std::abs(Dot(*wt, surface_hit.shading_normal));
+    double abs_shn_dot_r = std::abs(Dot(*wt, shading_normal));
     fresnel_reflectivity = FresnelReflectivity(shn_dot_i,abs_shn_dot_r, eta_i_over_t);
   }
   assert (fresnel_reflectivity >= -0.00001 && fresnel_reflectivity <= 1.000001);
@@ -223,12 +232,12 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
   ScatterSample smpl;
   if (do_sample_reflection)
   {
-    Double3 wr = Reflected(reverse_incident_dir, surface_hit.shading_normal);
+    Double3 wr = Reflected(reverse_incident_dir, shading_normal);
     smpl.coordinates = wr;
     smpl.pdf_or_pmf = Pdf::MakeFromDelta(pr_sample_reflect);
     if (OnSameSide(reverse_incident_dir, surface_hit, wr))
     {
-      double tmp = OneOverCosThetaLight(shn_dot_i, Dot(wr, surface_hit.shading_normal));
+      double tmp = OneOverCosThetaLight(shn_dot_i, Dot(wr, shading_normal));
       smpl.value = Spectral3{fresnel_reflectivity*tmp};
     }
     else
@@ -242,7 +251,7 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
       smpl.value = Spectral3{0.}; // Should be on other side of geometric surface, but we are not!
     else
     {
-      double tmp = OneOverCosThetaLight(shn_dot_i, -Dot(*wt, surface_hit.shading_normal));
+      double tmp = OneOverCosThetaLight(shn_dot_i, -Dot(*wt, shading_normal));
       smpl.value = Spectral3{(1.-fresnel_reflectivity)*tmp*radiance_weight};
     }
   }
