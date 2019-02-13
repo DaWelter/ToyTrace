@@ -9,7 +9,6 @@
 #include <boost/variant.hpp>
 #include <boost/variant/polymorphic_get.hpp>
 #include <boost/align/aligned_allocator.hpp>
-#include <boost/property_tree/ptree.hpp>
 #include <boost/any.hpp>
 
 #include "gtest/gtest.h"
@@ -778,45 +777,6 @@ TEST(Span, Test)
   auto span2 = f(things);
   EXPECT_EQ(span2[0], 42);
   //span2[0] = 42; Expectedly, does not compile.
-}
-
-//////////////////////////////////////////////
-//// Ptree building in style
-//////////////////////////////////////////////
-namespace make_pt_detail
-{
-namespace pt = boost::property_tree;
-  
-inline void put_pt(pt::ptree &dst)
-{
-}
-
-template<class T, class ... Args>
-inline void put_pt(pt::ptree &dst, const char* name, const T &x, Args&& ... args)
-{
-  dst.put(name, x);
-  put_pt(dst, args...);
-}
-
-}
-
-template<class ... Args>
-boost::property_tree::ptree make_pt(Args&& ...args)
-{
-  namespace pt = boost::property_tree;
-  pt::ptree dst;
-  make_pt_detail::put_pt(dst, args...);
-  return dst;
-}
-
-
-TEST(PTree, MakeInStyle)
-{
-  namespace pt = boost::property_tree;
-  pt::ptree tree = make_pt("foo", Spectral3{1.}, "bar", 1., "baz", 42);
-  // EXPECT_EQ(tree.get<Spectral3>("foo")[0], 1.);  // Bah! Compile error. Needs operator>> :-(
-  EXPECT_EQ(tree.get<double>("bar"), 1.);
-  EXPECT_EQ(tree.get<int>("baz"), 42);
 }
 
 
