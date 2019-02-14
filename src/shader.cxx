@@ -736,9 +736,10 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
     Spectral3::Zero()
   };
   // Shadow the member var by the new var taking only the current lambdas.
-  Spectral3 sigma_ext = Take(this->sigma_ext, context.lambda_idx);
-  Spectral3 sigma_s   = Take(this->sigma_s,   context.lambda_idx);
+  const Spectral3 sigma_ext = Take(this->sigma_ext, context.lambda_idx);
+  const Spectral3 sigma_s   = Take(this->sigma_s,   context.lambda_idx);
   double sigma_t_majorant = sigma_ext.maxCoeff();
+  const Spectral3 sigma_n = sigma_t_majorant - sigma_ext;
   double inv_sigma_t_majorant = 1./sigma_t_majorant;
   constexpr int emergency_abort_max_num_iterations = 100;
   int iteration = 0;
@@ -751,7 +752,6 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
     }
     else
     {
-      Spectral3 sigma_n = sigma_t_majorant - sigma_ext;
       assert(sigma_n.minCoeff() >= -1.e-3); // By definition of the majorante
       double prob_t, prob_n;
       TrackingDetail::ComputeProbabilitiesHistoryScheme(smpl.weight*initial_weights, {sigma_s, sigma_n}, {prob_t, prob_n});
