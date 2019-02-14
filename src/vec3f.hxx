@@ -247,7 +247,7 @@ inline boost::optional<Double3> Refracted(const Double3 &wi, const Double3 &n, d
 
 
 #ifndef NDEBUG
-#define ASSERT_NORMALIZED(v) assert(std::abs(LengthSqr(v) - 1.) < 1.e-6)
+#define ASSERT_NORMALIZED(v) assert(std::abs(LengthSqr(v) - 1.) < 1.e-5)
 #else
 #define ASSERT_NORMALIZED(v) ((void)0)
 #endif
