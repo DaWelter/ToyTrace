@@ -1007,6 +1007,18 @@ TEST(GridIndices, RowMajor2d)
   EXPECT_EQ(y, 4);
 }
 
+//////////////////////////////////////////////
+/// Utilities
+//////////////////////////////////////////////
+
+TEST(Utils,StartsEndsWith)
+{
+    EXPECT_TRUE(startswith("foobar","foo"));
+    EXPECT_FALSE(startswith("foobar","baz"));
+    EXPECT_TRUE(endswith("foobar","bar"));
+    EXPECT_FALSE(endswith("foobar","foo"));
+}
+
 ///////////////////////////////////////////////
 /// HashGrid
 ///////////////////////////////////////////////

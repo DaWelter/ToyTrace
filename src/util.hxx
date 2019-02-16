@@ -231,6 +231,12 @@ inline bool startswith(const std::string &a, const std::string &b)
   return a.substr(0, b.size()) == b;
 }
 
+inline bool endswith(const std::string &a, const std::string &b)
+{
+  if (a.size() < b.size())
+    return false;
+  return a.substr(a.size()-b.size(), b.size()) == b;
+}
 
 
 //  There is no hash support for pairs in the STL.
