@@ -250,7 +250,7 @@ inline double BsdfCorrectionFactor(const Double3 &reverse_incident_dir, const Su
   const Double3 &light_incident = transport==RADIANCE ? exitant_dir : reverse_incident_dir;
   const double correction =  std::abs(Dot(intersection.shading_normal, light_incident))/
                             (std::abs(Dot(intersection.normal, light_incident))+Epsilon);
-  return correction;
+  return std::min(correction, 10.); // Don't allow weights to grow arbitrarily large
 }
 
 
