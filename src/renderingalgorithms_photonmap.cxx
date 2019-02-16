@@ -13,10 +13,13 @@
 #include "util_thread.hxx"
 #include "hashgrid.hxx"
 #include "rendering_util.hxx"
+#include "pathlogger.hxx"
 
 #include "renderingalgorithms_interface.hxx"
 #include "renderingalgorithms_simplebase.hxx"
 #include "lightpicker_trivial.hxx"
+
+
 
 
 namespace Photonmapping
@@ -26,6 +29,7 @@ using SimplePixelByPixelRenderingDetails::SamplesPerPixelScheduleConstant;
 class PhotonmappingRenderingAlgo;
 
 //#define DEBUG_BUFFERS
+#define LOGGING
 
 struct Photon
 {
@@ -55,7 +59,6 @@ private:
   bool TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &weight_accum);
   bool ScatterAt(Ray &ray, const SurfaceInteraction &interaction, const Spectral3 &track_weigh, Spectral3 &weight_accum);
   bool ScatterAt(Ray &ray, const VolumeInteraction &interaction, const Spectral3 &track_weigh, Spectral3 &weight_accum);
-  void RecordPathThroughputStatistics(const Spectral3 &weight);
 public:  
   // Public access because this class is hardly a chance to missuse.
   // Simply run TracePhotons as much as desired, then get the photons
@@ -63,7 +66,10 @@ public:
   ToyVector<Photon> photons_volume;
   ToyVector<Photon> photons_surface;
   int num_photons_traced = 0;
-  SpectralN max_throughput_weight;
+  SpectralN max_throughput_weight{0};
+  double max_bsdf_correction_weight{0};
+  SpectralN max_uncorrected_bsdf_weight{0};
+  Pathlogger logger;
   
   PhotonmappingWorker(PhotonmappingRenderingAlgo *master);
   void StartNewPass(const LambdaSelection &lambda_selection);
@@ -132,6 +138,8 @@ private:
   ToyVector<Spectral3ImageBuffer> debugbuffers;
 #endif
   SpectralN max_throughput_weight{0.};
+  double max_bsdf_correction_weight{0};
+  SpectralN max_uncorrected_bsdf_weight{0};
 public:
   const RenderingParameters &render_params;
   const Scene &scene;
@@ -294,8 +302,12 @@ void PhotonmappingRenderingAlgo::PrepareGlobalPhotonMap()
     photons_surface.insert(photons_surface.end(), worker.photons_surface.begin(), worker.photons_surface.end());
     num_photons_traced += worker.num_photons_traced;
     max_throughput_weight = max_throughput_weight.cwiseMax(worker.max_throughput_weight);
+    max_bsdf_correction_weight = std::max(max_bsdf_correction_weight,worker.max_bsdf_correction_weight);
+    max_uncorrected_bsdf_weight = max_uncorrected_bsdf_weight.cwiseMax(worker.max_uncorrected_bsdf_weight);
   }
   std::cout << "Max throughput = " << max_throughput_weight << std::endl;
+  std::cout << "max_bsdf_correction_weight = " << max_bsdf_correction_weight << std::endl;
+  std::cout << "max_uncorrected_bsdf_weight= " << max_uncorrected_bsdf_weight << std::endl;
   ToyVector<Double3> points; points.reserve(photons_surface.size());
   std::transform(photons_surface.begin(), photons_surface.end(), 
                  std::back_inserter(points), [](const Photon& p) { return p.position; });
@@ -415,6 +427,15 @@ void PhotonmappingWorker::TracePhotons(int count)
     // Weights due to wavelength selection is accounted for in view subpath weights.
     current_emission.setConstant(1.);
     Ray ray = GeneratePrimaryRay(current_emission);
+#ifdef LOGGING
+    {
+      logger.NewPath();
+      auto &l = logger.AddNode();
+      l.position = ray.org;
+      l.exitant_dir = ray.dir;
+      l.weight_after = Spectral3::Ones();
+    }
+#endif    
     bool keepgoing = true;
     Spectral3 weight_accum{1.}; 
     do
@@ -422,6 +443,18 @@ void PhotonmappingWorker::TracePhotons(int count)
       keepgoing = TrackToNextInteractionAndScatter(ray, weight_accum);
     }
     while (keepgoing);
+    if (weight_accum.maxCoeff() > 1000.)
+    {
+      logger.WritePath();
+    }
+  }
+}
+
+inline void SpectralMaxInplace(SpectralN &combined, const LambdaSelection &l, const Spectral3 &val)
+{
+  for (int i=0; i<l.indices.size(); ++i)
+  {
+    combined[l.indices[i]] = std::max(combined[l.indices[i]], val[i]);
   }
 }
 
@@ -439,7 +472,7 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
         current_node_count
       });
       current_node_count++;
-      RecordPathThroughputStatistics(weight_accum);
+      SpectralMaxInplace(max_throughput_weight, lambda_selection, weight_accum);
       return ScatterAt(ray, interaction, track_weight, weight_accum);
     },
     /*volume=*/[&](const VolumeInteraction &interaction, double distance, const Spectral3 &track_weight) -> bool
@@ -452,7 +485,7 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
         current_node_count
       });
       current_node_count++;
-      RecordPathThroughputStatistics(weight_accum);
+      SpectralMaxInplace(max_throughput_weight, lambda_selection, weight_accum);
       return ScatterAt(ray, interaction, track_weight, weight_accum);
     },
     /*escape*/[&](const Spectral3 &weight) -> bool
@@ -464,21 +497,24 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
 }
 
 
-void PhotonmappingWorker::RecordPathThroughputStatistics(const Spectral3 &weight)
-{
-  for (int i=0; i<lambda_selection.indices.size(); ++i)
-    max_throughput_weight[lambda_selection.indices[i]] = 
-      std::max(max_throughput_weight[lambda_selection.indices[i]], weight[i]);
-}
-
-
 bool PhotonmappingWorker::ScatterAt(Ray& ray, const SurfaceInteraction& interaction, const Spectral3 &, Spectral3& weight_accum)
 {
+#ifdef LOGGING
+  auto &l = logger.AddNode();
+  l.position = interaction.pos;
+  l.normal = interaction.shading_normal;
+  l.incident_dir = ray.dir;
+  l.weight_before = weight_accum;
+#endif
   auto smpl = GetShaderOf(interaction,master->scene).SampleBSDF(-ray.dir, interaction, sampler, context);
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, current_node_count, sampler))
   {
-    weight_accum *= smpl.value * (BsdfCorrectionFactor(-ray.dir, interaction, smpl.coordinates, context.transport) *
-                  DFactorOf(interaction, smpl.coordinates) / smpl.pdf_or_pmf);
+    smpl.value *= DFactorOf(interaction, smpl.coordinates) / smpl.pdf_or_pmf;
+    SpectralMaxInplace(max_uncorrected_bsdf_weight, lambda_selection, smpl.value);
+    auto corr = BsdfCorrectionFactor(-ray.dir, interaction, smpl.coordinates, context.transport);
+    smpl.value *= corr;
+    max_bsdf_correction_weight = std::max(max_bsdf_correction_weight, corr);
+    weight_accum *= smpl.value;
     ray.dir = smpl.coordinates;
     ray.org = interaction.pos + AntiSelfIntersectionOffset(interaction, ray.dir);
     if (Dot(ray.dir, interaction.normal) < 0.)
@@ -488,6 +524,10 @@ bool PhotonmappingWorker::ScatterAt(Ray& ray, const SurfaceInteraction& interact
       // if the direction goes in the opposite direction of the normal.
       medium_tracker.goingThroughSurface(ray.dir, interaction);
     }
+#ifdef LOGGING
+    l.exitant_dir = ray.dir;
+    l.weight_after = weight_accum;
+#endif
     return true;
   }
   else 
@@ -497,11 +537,21 @@ bool PhotonmappingWorker::ScatterAt(Ray& ray, const SurfaceInteraction& interact
 
 bool PhotonmappingWorker::ScatterAt(Ray& ray, const VolumeInteraction& interaction, const Spectral3 &track_weight, Spectral3& weight_accum)
 {
+#ifdef LOGGING
+  auto &l = logger.AddNode();
+  l.position = interaction.pos;
+  l.incident_dir = ray.dir;
+  l.weight_before = weight_accum;
+#endif
   auto smpl = interaction.medium().SamplePhaseFunction(-ray.dir, interaction.pos, sampler, context);
   bool survive = ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, current_node_count, sampler);
   weight_accum *= interaction.sigma_s*smpl.value / smpl.pdf_or_pmf;
   ray.dir = smpl.coordinates;
   ray.org = interaction.pos;
+#ifdef LOGGING
+  l.exitant_dir = ray.dir;
+  l.weight_after = weight_accum;
+#endif
   return survive;
 }
 

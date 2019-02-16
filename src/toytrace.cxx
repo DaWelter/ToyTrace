@@ -2,6 +2,7 @@
 #include "scene.hxx"
 #include "renderbuffer.hxx"
 #include "renderingalgorithms_interface.hxx"
+#include "pathlogger.hxx"
 
 #include <chrono>
 #include <thread>
@@ -149,6 +150,10 @@ int main(int argc, char *argv[])
       PopAndProcessQueueItem();
     }
   });
+  
+#ifdef HAVE_JSON
+  Pathlogger::Init("/tmp/paths.json");
+#endif
   
   auto algo = RenderAlgorithmFactory(scene, render_params);
   
