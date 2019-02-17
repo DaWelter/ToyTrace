@@ -10,7 +10,7 @@
 
 namespace SampleTrafo
 {
-Double3 ToUniformDisc(Double2 r);
+Double3 ToUniformDisc(Double2 r); // In the x-y plane
 Double3 ToUniformSphere(Double2 r);
 Double3 ToUniformHemisphere(Double2 r);
 Double3 ToUniformSphereSection(double cos_opening_angle, Double2 r);

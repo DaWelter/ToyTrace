@@ -21,6 +21,7 @@
 #include "atmosphere.hxx"
 #include "util.hxx"
 #include "hashgrid.hxx"
+#include "photonintersector.hxx"
 
 
 TEST(TestRaySegment, ExprTemplates)
@@ -1053,6 +1054,52 @@ TEST(HashGrid,HashGrid)
   }
 }
 
+///////////////////////////////////////////////
+/// Photonintersector
+///////////////////////////////////////////////
+
+
+inline std::tuple<double, double> PointLineDistance(const Ray &r, const Double3 &p)
+{
+  Double3 d = p - r.org;
+  double distance = Dot(d, r.dir);
+  double radial_distance2 = LengthSqr(Cross(d, r.dir));
+  return std::make_tuple(distance, radial_distance2);
+}
+
+
+TEST(Photonintersector, Photonintersector)
+{
+  // Like the hash grid case. But here we use ray intersections.
+  const double radius = 0.2;
+  Sampler sampler;
+  ToyVector<Double3> points;
+  for (int i=0; i<10; ++i)
+  {
+    points.emplace_back(SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare()));
+  }
+  PhotonIntersector intersector(radius, points);
+  ToyVector<bool> reported_in_range(points.size(), false);
+  for (int j=0; j<100; ++j)
+  {
+    Ray ray {
+      SampleTrafo::ToUniformDisc(sampler.UniformUnitSquare())*1.5,
+      {0,0,1}};
+    ray.org[2] = -2.;
+    const double distance = 2.;
+
+    std::fill(reported_in_range.begin(), reported_in_range.end(), false);
+    intersector.Query(ray, distance, [&](int i) {
+      reported_in_range[i] = true;
+    });
+    for (int i=0; i<points.size(); ++i)
+    {
+      auto [d, r2] = PointLineDistance(ray, points[i]);
+      bool in_range = d>=0. && d<=distance && r2 <= radius*radius;
+      EXPECT_EQ(in_range, reported_in_range[i]);
+    }
+  }
+}
 
 
 //////////////////////////////////////////////
