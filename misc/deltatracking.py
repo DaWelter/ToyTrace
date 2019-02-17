@@ -38,6 +38,7 @@ def evaluate_spectral_tracking(sample_generator_function):
   print ("Escaping fraction: ", 1. - np.sum(mask_interacting.astype(np.float32))/Nsamples)
 
   weights = np.asarray([q[1] for q in samples])
+  x = np.asarray([q[0] for q in samples])
 
   escaping_weights = weights.copy()
   escaping_weights[mask_interacting] = 0.
@@ -103,14 +104,13 @@ def spectral_tracking():
         weights *= sigma_n / ms.sigma_t_majorante_across_channels / pn
 
 
-def spectral_tracking_no_absorption():
+def spectral_tracking_no_absorption(x = 0, weights = None):
   """
     pg.  111:10, Algorithm 4.
     Modified as per Sec. 5.1.3.
     Removal of volume absorption/emission events.
   """
-  weights = np.ones(2, np.float32)
-  x = 0.
+  weights = weights.copy() if weights is not None else np.ones(2, np.float32)
   while True:
     x += exp_sample(ms.sigma_t_majorante_across_channels)
     if x > ms.domain_length:
@@ -128,9 +128,35 @@ def spectral_tracking_no_absorption():
         weights *= sigma_n / ms.sigma_t_majorante_across_channels / pn
 
 
-evaluate_spectral_tracking(spectral_tracking)
-evaluate_spectral_tracking(spectral_tracking_no_absorption)
+def iterated_tracking():
+  w0 = np.asarray([ 80., 1.])
+  x = [0]
+  w = [w0.copy()]  #np.ones(2, np.float32)
+  while x[-1] < ms.domain_length:
+    x_, w_ = spectral_tracking_no_absorption(x[-1], w[-1])
+    x.append(x_)
+    w.append(w_)
+  #for w_ in w:
+  #  w_ /= w0
+  return x, w
 
+
+def analyze_iterated_tracking():
+  x, w = [], []
+  for _ in range(1000): # Number of rollouts
+    xi, wi = iterated_tracking()
+    x.extend(xi)
+    w.extend(wi)
+  w = np.asarray(w)
+  pyplot.scatter(x, w.T[0], c='r')
+  pyplot.scatter(x, w.T[1], c='b')
+  pyplot.show()
+
+
+
+#evaluate_spectral_tracking(spectral_tracking)
+#evaluate_spectral_tracking(spectral_tracking_no_absorption)
+analyze_iterated_tracking()
 
 # pyplot.plot(ms.x_arr, ms.sigma_s_arr[:,0], c = 'r')
 # pyplot.plot(ms.x_arr, ms.transm_array[:,0], c = 'r')
@@ -191,20 +217,5 @@ def weighted_delta_tracking_no_absorption(lambda_):
       else:
         w *= sigma_n / sigma_t_majorante_lambda / pn
 
-# Nsamples = 10000
-# samples_per_lambda = [ [] for _ in  range(ms.sigma_s_arr.shape[1]) ]
-# escapes_per_lambda = np.zeros(ms.sigma_s_arr.shape[1], np.float32)
-# for lambda_ in  range(len(samples_per_lambda)):
-#   for i in range(Nsamples):
-#     x, w = weighted_delta_tracking_no_absorption(lambda_)
-#     samples_per_lambda[lambda_].append(w)
-#     escapes_per_lambda[lambda_] += 1 if x > ms.domain_length else 0
-# samples_per_lambda = np.asarray(samples_per_lambda).T
-#
-# estimate = np.average(samples_per_lambda, axis=0)
-# stdev    = np.std(samples_per_lambda, axis=0) / math.sqrt(len(samples_per_lambda))
-#
-# print ("Single Lambda Tracking: ", estimate, " +/- ", stdev)
-# print ("Fraction of escapes: ", escapes_per_lambda / len(samples_per_lambda))
 
 
