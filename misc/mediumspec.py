@@ -32,7 +32,7 @@ def init(coefficient_distribution, integrand):
     # A single box. But varying heights per wavelength.
     def get_sigma_s_(x):
       if 0.25 < x <= 0.75:
-        return np.asarray([4., 1.])
+        return np.asarray([5, 10])
       else:
         return np.asarray([0., 0.])
     def get_sigma_a_(x):
@@ -55,6 +55,7 @@ def init(coefficient_distribution, integrand):
 
 def discretized_solution_():
   global sigma_t_majorante, sigma_t_majorante_across_channels
+  global transm_array
   # Discretize to arrays. Thus I can plot the functions. And also calculate the RTE integral numerically.
   sigma_s_arr = np.asarray(map(get_sigma_s, x_arr))
   sigma_a_arr = np.asarray(map(get_sigma_a, x_arr))
