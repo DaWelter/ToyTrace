@@ -1080,6 +1080,7 @@ TEST(Photonintersector, Photonintersector)
   }
   PhotonIntersector intersector(radius, points);
   ToyVector<bool> reported_in_range(points.size(), false);
+  ToyVector<double> reported_distance(points.size());
   for (int j=0; j<100; ++j)
   {
     Ray ray {
@@ -1089,14 +1090,22 @@ TEST(Photonintersector, Photonintersector)
     const double distance = 2.;
 
     std::fill(reported_in_range.begin(), reported_in_range.end(), false);
-    intersector.Query(ray, distance, [&](int i) {
-      reported_in_range[i] = true;
-    });
+    constexpr int BUFFER_SIZE = 1024;
+    int items[BUFFER_SIZE];
+    float distances[BUFFER_SIZE];
+    int n = intersector.Query(ray, distance, items, distances, BUFFER_SIZE);
+    for (int i=0; i<n; ++i)
+    {
+      reported_in_range[items[i]] = true;
+      reported_distance[items[i]] = distances[i];
+    }
     for (int i=0; i<points.size(); ++i)
     {
       auto [d, r2] = PointLineDistance(ray, points[i]);
       bool in_range = d>=0. && d<=distance && r2 <= radius*radius;
       EXPECT_EQ(in_range, reported_in_range[i]);
+      if (reported_in_range[i])
+        EXPECT_NEAR(d, reported_distance[i], 1.e-3);
     }
   }
 }

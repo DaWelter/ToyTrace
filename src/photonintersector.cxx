@@ -32,13 +32,9 @@ PhotonIntersector::~PhotonIntersector()
 
 void PhotonIntersector::occlusionFilter(const RTCFilterFunctionNArguments* args)
 {
-  /* avoid crashing when debug visualizations are used */
-  if (args->context == nullptr) return;
-
   assert(args->N == 1);
   int* valid = args->valid;
   const IntersectContext* context = (const IntersectContext*) args->context;
-  Ray* ray = (Ray*)args->ray;
   RTCHit* hit = (RTCHit*)args->hit;
 
   /* ignore inactive rays */
@@ -63,6 +59,12 @@ void PhotonIntersector::occlusionFilter(const RTCFilterFunctionNArguments* args)
 
   //Vec3fa h = ray->org + ray->dir * ray->tfar;
 
+  // Buffer is full. Don't report any more.
+  if (ray2->num_items >= ray2->buffer_size) {
+    valid[0]=1; return;
+  }
+  
+  ray2->distances[ray2->num_items] = ray2->ray.tfar;
   ray2->items[ray2->num_items++] = hit->primID;
   
 //   /* calculate and accumulate transparency */
@@ -71,4 +73,40 @@ void PhotonIntersector::occlusionFilter(const RTCFilterFunctionNArguments* args)
 //   ray2->transparency = T;
 //   if (T != 0.0f) 
   valid[0] = 0;
+}
+
+
+int PhotonIntersector::Query(const Ray &ray, double length, int *items, float *distances, const int buffer_size)
+{
+  IntersectContext context;
+  rtcInitIntersectContext(&context);
+  Ray2 rtrayhit;
+  context.userRayExt = &rtrayhit;
+  RTCRay &rtray = rtrayhit.ray;
+  rtray.org_x = ray.org[0];
+  rtray.org_y = ray.org[1];
+  rtray.org_z = ray.org[2];
+  rtray.tnear = 0.f;
+  rtray.dir_x = ray.dir[0];
+  rtray.dir_y = ray.dir[1];
+  rtray.dir_z = ray.dir[2];
+  rtray.time = 0.f;
+  rtray.tfar = static_cast<float>(length);
+  rtray.mask = -1;
+  rtray.id = 0;
+  rtray.flags = 0;
+  RTCHit &rthit = rtrayhit.hit;
+  rthit.geomID = RTC_INVALID_GEOMETRY_ID;
+  rthit.primID = RTC_INVALID_GEOMETRY_ID;
+  rthit.instID[0] = RTC_INVALID_GEOMETRY_ID; 
+  rtrayhit.firstHit = 0;
+  rtrayhit.lastHit = 0;
+  rtrayhit.items = items;
+  rtrayhit.distances = distances;
+  rtrayhit.num_items = 0;
+  rtrayhit.buffer_size = buffer_size;
+  
+  /* intersect ray with scene */
+  rtcOccluded1(rtscene, &context, &rtrayhit.ray);
+  return rtrayhit.num_items;
 }
