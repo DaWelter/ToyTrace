@@ -130,20 +130,27 @@ public:
   {
     Double3 pos;
   };
-
+  
+  struct MaterialCoefficients
+  {
+    Spectral3 sigma_s;
+    Spectral3 sigma_t;
+  };
+  
   const bool is_emissive;
   const int priority;
   Medium(int _priority, bool is_emissive_ = false) : is_emissive{is_emissive_}, priority(_priority) {}
   virtual ~Medium() {}
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, const Spectral3 &initial_weights, Sampler &sampler, const PathContext &context) const = 0;
   virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const = 0;
+  virtual void ConstructShortBeamTransmittance(const RaySegment &segment, Sampler &sampler, const PathContext &context, PiecewiseConstantTransmittance &pct) const = 0;
   virtual VolumePdfCoefficients ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const = 0; // Can be approximate. Deterministic.
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const = 0;
   virtual Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;  
   virtual VolumeSample SampleEmissionPosition(Sampler &sampler, const PathContext &context) const;
   virtual Spectral3 EvaluateEmission(const Double3 &pos, const PathContext &context, double *pos_pdf) const;
+  virtual MaterialCoefficients EvaluateCoeffs(const Double3 &pos, const PathContext &context) const = 0;
 };
-
 
 /* An emissive ball. The geometry of the ball is specified here because I don't have a general
  * boundary representation which would support generating photons within it's volume. So this medium
@@ -161,11 +168,13 @@ public:
   EmissiveDemoMedium(double sigma_s_, double sigma_a, double extra_emission_multiplier_, double temperature, const Double3 &pos_, double radius_, int priority);
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, const Spectral3 &initial_weights, Sampler &sampler, const PathContext &context) const override;
   virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
+  virtual void ConstructShortBeamTransmittance(const RaySegment &segment, Sampler &sampler, const PathContext &context, PiecewiseConstantTransmittance &pct) const override;
   virtual VolumePdfCoefficients ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;
   virtual Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
   virtual VolumeSample SampleEmissionPosition(Sampler &sampler, const PathContext &context) const override;
   virtual Spectral3 EvaluateEmission(const Double3 &pos, const PathContext &context, double *pos_pdf) const override;
+  virtual MaterialCoefficients EvaluateCoeffs(const Double3 &pos, const PathContext &context) const override;
 };
 
 
@@ -175,25 +184,29 @@ public:
   VacuumMedium(int priority = -1) : Medium(priority) {}
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, const Spectral3 &initial_weights, Sampler &sampler, const PathContext &context) const override;
   virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
+  virtual void ConstructShortBeamTransmittance(const RaySegment &segment, Sampler &sampler, const PathContext &context, PiecewiseConstantTransmittance &pct) const override;
   virtual VolumePdfCoefficients ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;
   virtual Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
+  virtual MaterialCoefficients EvaluateCoeffs(const Double3 &pos, const PathContext &context) const override;
 };
 
 
 class HomogeneousMedium : public Medium
 {
   SpectralN sigma_s, sigma_a, sigma_ext;
-  Spectral3 EvaluateTransmission(double x, const Spectral3 &sigma_ext) const;
+  Spectral3 EvaluateTransmissionHomogeneous(double x, const Spectral3 &sigma_ext) const;
 public:
   std::unique_ptr<PhaseFunctions::PhaseFunction> phasefunction; // filled by parser
 public:
   HomogeneousMedium(const SpectralN &_sigma_s, const SpectralN &_sigma_a, int _priority); 
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, const Spectral3 &initial_weights, Sampler &sampler, const PathContext &context) const override;
   virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
+  virtual void ConstructShortBeamTransmittance(const RaySegment &segment, Sampler &sampler, const PathContext &context, PiecewiseConstantTransmittance &pct) const override;
   virtual VolumePdfCoefficients ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;
   virtual Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
+  virtual MaterialCoefficients EvaluateCoeffs(const Double3 &pos, const PathContext &context) const override;
 };
 
 
@@ -206,9 +219,11 @@ public:
   MonochromaticHomogeneousMedium(double _sigma_s, double _sigma_a, int _priority); 
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, const Spectral3 &initial_weights, Sampler &sampler, const PathContext &context) const override;
   virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
+  virtual void ConstructShortBeamTransmittance(const RaySegment &segment, Sampler &sampler, const PathContext &context, PiecewiseConstantTransmittance &pct) const override;
   virtual VolumePdfCoefficients ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const override;
   virtual PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;
   virtual Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
+  virtual MaterialCoefficients EvaluateCoeffs(const Double3 &pos, const PathContext &context) const override;
 };
 
 

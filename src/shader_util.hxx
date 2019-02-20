@@ -175,12 +175,21 @@ public:
     return boundaries.back();
   }
   
+  void Clear()
+  {
+    boundaries.clear();
+    weights.clear();
+  }
+  
   // Lookup
   Spectral3 operator()(float t) const
   {
     auto it = std::upper_bound(boundaries.begin(), boundaries.end(), t);
-    if (t < *it)
+    if (it != boundaries.end())
+    {
+      assert (t <= boundaries.back());
       return weights[it-boundaries.begin()];
+    }
     else // t is larger than last element in the sequence
       return Spectral3::Zero();
   }

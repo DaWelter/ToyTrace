@@ -267,6 +267,111 @@ m testing/scenes/unitcube.dae
 }
 
 
+
+TEST(Rendering, TrackBeam)
+{
+  Scene scene;
+  const char* scenestr = R"""(
+shader invisible
+medium med1 3 0
+
+m testing/scenes/unitcube.dae
+
+transform 0 0 2 0 0 0
+m testing/scenes/unitcube.dae
+)""";
+  scene.ParseNFFString(scenestr);
+  scene.BuildAccelStructure();
+  Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
+  Spectral3 sigma = Color::RGBToSpectralSelection(RGB{3._rgb,3._rgb,3._rgb}, lambda_idx);
+  double cube1_start = -0.5;
+  double cube2_start = 1.5;
+  double camera_start = -10.;
+  auto AnalyticTrApprox = [=](double x) -> double
+  {
+    double first_cube_tr = (-sigma).exp().mean();
+    if (x < cube1_start) 
+      return 1.;
+    if (x < cube1_start+1.)
+      return (-(x-cube1_start)*sigma).exp().mean();
+    if (x < cube2_start)
+      return first_cube_tr;
+    if (x < cube2_start+1.)
+      return first_cube_tr*(-(x-cube2_start)*sigma).exp().mean();
+    return first_cube_tr*(-sigma).exp().mean();
+  };
+  auto AnalyticSigmaApprox = [=](double x) -> double
+  {
+    if (cube1_start < x && x < cube1_start+1) return sigma.mean();
+    if (cube2_start < x && x < cube2_start+1) return sigma.mean();
+    return 0.;
+  };
+  constexpr int NUM_PROBES = 5;
+  double probe_locations[NUM_PROBES] = {
+    -1., 0., 1., 2., 5.
+  }; 
+  
+  Sampler sampler;
+  MediumTracker medium_tracker(scene);
+  double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
+  Ray ray{{ray_offset,0.,camera_start}, {0.,0.,1.}};
+  medium_tracker.initializePosition(ray.org);
+  ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
+  
+  int num_escaped = 0;
+  Spectral3 weight_sum_probed[NUM_PROBES];
+  for (int i=0; i<NUM_PROBES; ++i) weight_sum_probed[i] = Spectral3::Zero();
+  Spectral3 weight_sum_escaped{0.};
+  
+  constexpr int NUM_SAMPLES = 10000;
+  for (int sample_num = 0; sample_num < NUM_SAMPLES; ++sample_num)
+  {
+    medium_tracker.initializePosition(ray.org);
+    TrackBeam(scene, ray, PathContext{lambda_idx}, sampler, medium_tracker,
+      /*surface_visitor=*/[&](const SurfaceInteraction &intersection, const Spectral3 &weight)
+      {
+        FAIL();
+      },
+      /*segment visitor=*/[&](const RaySegment &segment, const Medium &medium, const PiecewiseConstantTransmittance &pct, const Spectral3 &weight)
+      {
+        for (int i = 0; i<NUM_PROBES; ++i)
+        {
+          // Convert probe location to distance along local segment.
+          double distance = Dot(ray.PointAt(probe_locations[i]-camera_start)-segment.ray.org, ray.dir);
+          if (distance >= 0 && distance < segment.length)
+            weight_sum_probed[i] += weight*pct(distance);
+        }
+      },
+      /* escape_visitor=*/[&](const Spectral3 &weight)
+      {
+        weight_sum_escaped += weight;
+        num_escaped++;
+      }
+    );
+  }
+  
+  for (int probe_idx=0; probe_idx<NUM_PROBES; ++probe_idx)
+  {
+    weight_sum_probed[probe_idx] *= 1./(NUM_SAMPLES);
+    double expected_transmission = AnalyticTrApprox(probe_locations[probe_idx]);
+    for (int i=0; i<static_size<Spectral3>(); ++i)
+    {
+      ASSERT_NEAR(weight_sum_probed[probe_idx][i], expected_transmission, 1.e-2);
+    }
+  }
+
+  weight_sum_escaped *= 1./(NUM_SAMPLES);
+  auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, lambda_idx);
+  Spectral3 expected_transmissions = (-2.*sigma_e).exp();
+  // No idea what the variance is. So I determine the acceptance threshold experimentally.
+  for (int i=0; i<static_size<Spectral3>(); ++i)
+  {
+    ASSERT_NEAR(weight_sum_escaped[i], expected_transmissions[i], 1.e-2);
+  }
+}
+
+
+
 TEST(Rendering,PiecewiseConstantTransmittance)
 {
   PiecewiseConstantTransmittance pct;

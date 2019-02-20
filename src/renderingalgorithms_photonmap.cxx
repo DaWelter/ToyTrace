@@ -14,6 +14,7 @@
 #include "hashgrid.hxx"
 #include "rendering_util.hxx"
 #include "pathlogger.hxx"
+#include "photonintersector.hxx"
 
 #include "renderingalgorithms_interface.hxx"
 #include "renderingalgorithms_simplebase.hxx"
@@ -52,8 +53,8 @@ class PhotonmappingWorker
   LambdaSelection lambda_selection;
   PathContext context;
   RayTermination ray_termination;
-  double photon_volume_blur_weight;
-  double photon_surface_blur_weight;
+//   double photon_volume_blur_weight;
+//   double photon_surface_blur_weight;
 private:
   Ray GeneratePrimaryRay(Spectral3 &path_weight);
   bool TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &weight_accum);
@@ -90,6 +91,8 @@ class CameraRenderWorker
   int pixel_index = 0;
   double volume_photon_radius_2;
   double surface_photon_radius_2;
+  double photon_volume_blur_weight;
+  double photon_surface_blur_weight;
 private:
   Ray GeneratePrimaryRay(Spectral3 &path_weight);
   bool TrackToNextInteractionAndRecordPixel(Ray &ray, Spectral3 &weight_accum);
@@ -99,6 +102,7 @@ private:
   void RecordMeasurementToCurrentPixel(const Spectral3 &measurement);
   void MaybeAddEmission(Ray& ray, const SurfaceInteraction &interaction, Spectral3& weight_accum);
   void MaybeAddEmission(Ray& ray, const VolumeInteraction &interaction, Spectral3& weight_accum);
+  void AddPhotonBeamContributions(const RaySegment &segment, const Medium &medium, const PiecewiseConstantTransmittance &pct, const Spectral3 &track_weight);
 public:
   CameraRenderWorker(PhotonmappingRenderingAlgo *master);
   void StartNewPass(const LambdaSelection &lambda_selection);
@@ -116,6 +120,7 @@ private:
   Spectral3ImageBuffer buffer;
   std::unique_ptr<HashGrid> hashgrid_volume; // Photon Lookup
   std::unique_ptr<HashGrid> hashgrid_surface;
+  std::unique_ptr<PhotonIntersector> beampointaccel;
   ToyVector<Photon> photons_volume;
   ToyVector<Photon> photons_surface;
   int num_threads = 1;
@@ -124,7 +129,7 @@ private:
   int num_photons_traced = 0;
   double current_surface_photon_radius = 0;
   double current_volume_photon_radius = 0;
-  double radius_reduction_alpha = 1./3.;
+  double radius_reduction_alpha = 1./3.; // Less means faster reduction. 2/3 is suggested in the unified path sampling paper.
   SamplesPerPixelScheduleConstant spp_schedule;
   tbb::atomic<int> shared_pixel_index = 0;
   tbb::task_group the_task_group;
@@ -316,6 +321,8 @@ void PhotonmappingRenderingAlgo::PrepareGlobalPhotonMap()
   std::transform(photons_volume.begin(), photons_volume.end(), 
                  std::back_inserter(points), [](const Photon& p) { return p.position; });  
   hashgrid_volume = std::make_unique<HashGrid>(current_volume_photon_radius, points);
+  
+  beampointaccel = std::make_unique<PhotonIntersector>(current_surface_photon_radius, points);
 }
 
 
@@ -401,8 +408,8 @@ void PhotonmappingWorker::StartNewPass(const LambdaSelection &lambda_selection)
 {
   this->lambda_selection = lambda_selection;
   context = PathContext{lambda_selection.indices, TransportType::IMPORTANCE};
-  photon_volume_blur_weight = 1.0/(UnitSphereVolume*Cubed(master->current_volume_photon_radius));
-  photon_surface_blur_weight = 1.0/(UnitDiscSurfaceArea*Sqr(master->current_surface_photon_radius));
+//   photon_volume_blur_weight = 1.0/(UnitSphereVolume*Cubed(master->current_volume_photon_radius));
+//   photon_surface_blur_weight = 1.0/(UnitDiscSurfaceArea*Sqr(master->current_surface_photon_radius));
   photons_surface.clear();
   photons_volume.clear();
   num_photons_traced = 0;
@@ -467,7 +474,7 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
       weight_accum *= track_weight;
       photons_surface.push_back({
         interaction.pos,
-        photon_surface_blur_weight*weight_accum*current_emission,
+        /*photon_surface_blur_weight**/weight_accum*current_emission,
         ray.dir.cast<float>(),
         current_node_count
       });
@@ -480,7 +487,7 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
       weight_accum *= track_weight;
       photons_volume.push_back({
         interaction.pos,
-        photon_volume_blur_weight*weight_accum*current_emission,
+        /*photon_volume_blur_weight**/weight_accum*current_emission,
         ray.dir.cast<float>(),
         current_node_count
       });
@@ -569,6 +576,8 @@ void CameraRenderWorker::StartNewPass(const LambdaSelection& lambda_selection)
   context = PathContext{lambda_selection.indices, TransportType::RADIANCE};
   surface_photon_radius_2 = Sqr(master->current_surface_photon_radius);
   volume_photon_radius_2 = Sqr(master->current_volume_photon_radius);
+  photon_volume_blur_weight = 1.0/(UnitSphereVolume*Cubed(master->current_volume_photon_radius));
+  photon_surface_blur_weight = 1.0/(UnitDiscSurfaceArea*Sqr(master->current_surface_photon_radius));
 }
 
 
@@ -614,6 +623,7 @@ Ray CameraRenderWorker::GeneratePrimaryRay(Spectral3& path_weight)
 
 bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(Ray& ray, Spectral3& weight_accum)
 {
+#if 0
   return TrackToNextInteraction(master->scene, ray, context, weight_accum, sampler, medium_tracker, nullptr,
     /*surface=*/[&](const SurfaceInteraction &interaction, double distance, const Spectral3 &track_weight) -> bool
     {
@@ -626,19 +636,42 @@ bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(Ray& ray, Spectral
     /*volume=*/[&](const VolumeInteraction &interaction, double distance, const Spectral3 &track_weight) -> bool
     {
       weight_accum *= track_weight;
-      AddPhotonContributions(interaction, ray.dir, weight_accum);
+      //AddPhotonContributions(interaction, ray.dir, weight_accum);
       MaybeAddEmission(ray, interaction, weight_accum);
       return false;
     },
     /*escape*/[&](const Spectral3 &track_weight) -> bool
     {
-      //master->buffer.Insert(pixel_index, RGB{0._rgb});
       const auto &emitter = master->scene.GetTotalEnvLight();
       const auto radiance = emitter.Evaluate(-ray.dir, context);
       RecordMeasurementToCurrentPixel(radiance * track_weight * weight_accum);
       return false;
     }
   );
+#else
+  bool keepgoing = false;
+  TrackBeam(master->scene, ray, context, sampler, medium_tracker,
+    /*surface_visitor=*/[&](const SurfaceInteraction &interaction, const Spectral3 &track_weight)
+    {
+      weight_accum *= track_weight;
+      AddPhotonContributions(interaction, ray.dir, weight_accum);
+      MaybeAddEmission(ray, interaction, weight_accum);
+      current_node_count++;
+      keepgoing = MaybeScatterAtSpecularLayer(ray, interaction, weight_accum, track_weight);
+    },
+    /*segment visitor=*/[&](const RaySegment &segment, const Medium &medium, const PiecewiseConstantTransmittance &pct, const Spectral3 &track_weight)
+    {
+      AddPhotonBeamContributions(segment, medium, pct, weight_accum*track_weight);
+    },
+    /* escape_visitor=*/[&](const Spectral3 &track_weight)
+    {
+      const auto &emitter = master->scene.GetTotalEnvLight();
+      const auto radiance = emitter.Evaluate(-ray.dir, context);
+      RecordMeasurementToCurrentPixel(radiance * track_weight * weight_accum);
+    }
+  );
+  return keepgoing;
+#endif
 }
 
 
@@ -701,13 +734,13 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
     reflect_estimator += photon.weight*bsdf_val;
 #ifdef DEBUG_BUFFERS
     if (photon.level < master->debugbuffers.size()) {
-      Spectral3 w = path_weight*photon.weight*bsdf_val/master->num_photons_traced;
+      Spectral3 w = path_weight*photon.weight*bsdf_val*photon_surface_blur_weight/master->num_photons_traced;
       auto color = Color::SpectralSelectionToRGB(w, lambda_selection.indices);
       master->debugbuffers[photon.level].Insert(pixel_index, color);
     }
 #endif
   });
-  Spectral3 weight = path_weight*reflect_estimator/master->num_photons_traced;
+  Spectral3 weight = path_weight*reflect_estimator*(photon_surface_blur_weight/master->num_photons_traced);
   auto color = Color::SpectralSelectionToRGB(weight, lambda_selection.indices);
   master->buffer.Insert(pixel_index, color);
 }
@@ -724,14 +757,33 @@ void CameraRenderWorker::AddPhotonContributions(const VolumeInteraction& interac
     inscatter_estimator += photon.weight*scatter_val;
 #ifdef DEBUG_BUFFERS
     if (photon.level < master->debugbuffers.size()) {
-      Spectral3 w = interaction.sigma_s*path_weight*photon.weight*scatter_val/master->num_photons_traced;
+      Spectral3 w = interaction.sigma_s*path_weight*photon.weight*scatter_val*photon_volume_blur_weight*master->num_photons_traced;
       auto color = Color::SpectralSelectionToRGB(w, lambda_selection.indices);
       master->debugbuffers[photon.level].Insert(pixel_index, color);
     }
 #endif
   });
-  Spectral3 weight = interaction.sigma_s*path_weight*inscatter_estimator/master->num_photons_traced;
+  Spectral3 weight = interaction.sigma_s*path_weight*inscatter_estimator*(photon_volume_blur_weight/master->num_photons_traced);
   auto color = Color::SpectralSelectionToRGB(weight, lambda_selection.indices);
+  master->buffer.Insert(pixel_index, color);
+}
+
+
+void CameraRenderWorker::AddPhotonBeamContributions(const RaySegment &segment, const Medium &medium, const PiecewiseConstantTransmittance &pct, const Spectral3 &path_weight)
+{
+  Spectral3 inscatter_estimator{0.}; // Integral over the query ray.
+  int photon_idx[1024];
+  float photon_distance[1024];
+  const int n = master->beampointaccel->Query(segment.ray, pct.End(), photon_idx, photon_distance, 1024);
+  for (int i=0; i<n; ++i)
+  {
+    const auto &photon = master->photons_volume[photon_idx[i]];
+    Spectral3 scatter_val = medium.EvaluatePhaseFunction(-segment.ray.dir, photon.position, -photon.direction.cast<double>(), context, nullptr);
+    auto [sigma_s, _] = medium.EvaluateCoeffs(photon.position, context);
+    inscatter_estimator += scatter_val*sigma_s*photon.weight*pct(photon_distance[i]);
+  }
+  inscatter_estimator *= path_weight*(photon_surface_blur_weight/master->num_photons_traced);
+  auto color = Color::SpectralSelectionToRGB(inscatter_estimator, lambda_selection.indices);
   master->buffer.Insert(pixel_index, color);
 }
 

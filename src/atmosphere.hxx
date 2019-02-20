@@ -36,9 +36,11 @@ public:
   AtmosphereTemplate(const Geometry &geometry_, const ConstituentDistribution &constituents_, int _priority);
   InteractionSample SampleInteractionPoint(const RaySegment &segment, const Spectral3 &initial_weights, Sampler &sampler, const PathContext &context) const override;
   Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
+  void ConstructShortBeamTransmittance(const RaySegment &segment, Sampler &sampler, const PathContext &context, PiecewiseConstantTransmittance &pct) const override;
   VolumePdfCoefficients ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const override;
   PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;
   Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
+  MaterialCoefficients EvaluateCoeffs(const Double3 &pos, const PathContext &context) const override;
 };
 
 

@@ -240,6 +240,74 @@ inline TrackToNextInteraction(
 };
 
 
+
+template<class SurfaceHitVisitor, class EscapeVisitor, class SegmentVisitor>
+inline void TrackBeam(
+  const Scene &scene,
+  const Ray &ray,
+  const PathContext &context,
+  Sampler &sampler,
+  MediumTracker &medium_tracker,
+  SurfaceHitVisitor &&surface_visitor,
+  SegmentVisitor &&segment_visitor,
+  EscapeVisitor &&escape_visitor)
+{
+  static constexpr int MAX_ITERATIONS = 100; // For safety, in case somethign goes wrong with the intersections ...
+  
+  Spectral3 weight{1.};
+  bool has_weight = true;
+  
+  RaySegment segment;
+  SurfaceInteraction intersection;
+  IterateIntersectionsBetween iter{RaySegment{ray, LargeNumber}, scene};
+  PiecewiseConstantTransmittance pct;
+  
+  for (int interfaces_crossed=0; interfaces_crossed < MAX_ITERATIONS; ++interfaces_crossed)
+  {   
+    bool hit = iter.Next(segment, intersection);
+
+    const Medium& medium = medium_tracker.getCurrentMedium();
+    medium.ConstructShortBeamTransmittance(segment, sampler, context, pct);
+    
+    segment_visitor(segment, medium, pct, weight);
+    
+    weight *= pct(segment.length);
+    pct.Clear();
+    
+    has_weight = weight.maxCoeff()>0.;
+    const bool hit_invisible_wall =
+      hit && 
+      scene.GetMaterialOf(intersection.hitid).shader==&scene.GetInvisibleShader() &&
+      scene.GetMaterialOf(intersection.hitid).emitter==nullptr;
+
+    if (has_weight)
+    {
+      if (hit_invisible_wall)
+      {
+        medium_tracker.goingThroughSurface(segment.ray.dir, intersection);
+      }
+      else
+      {
+        if (hit)
+        {
+          surface_visitor(intersection, weight);
+          return;
+        }
+        else
+        {
+          escape_visitor(weight);
+          return;
+        }
+      }
+    }
+    else 
+      return;
+    assert (interfaces_crossed < MAX_ITERATIONS-1);
+  }
+};
+
+
+
 /* Straight forwardly following Cpt 5.3 Veach's thesis.
   * Basically when multiplied, it turns fs(wi -> wo, Nshd) into the corrected BSDF fs(wi->wo, Nsh)*Dot(Nshd,wi)/Dot(N,wi),
   * where wi refers to the incident direction of light as per Eq. 5.17.

@@ -158,6 +158,13 @@ Spectral3 AtmosphereTemplate<ConstituentDistribution_, Geometry_>::EvaluateTrans
 
 
 template<class ConstituentDistribution_, class Geometry_>
+void AtmosphereTemplate<ConstituentDistribution_, Geometry_>::ConstructShortBeamTransmittance(const RaySegment &segment, Sampler &sampler, const PathContext &context, PiecewiseConstantTransmittance &pct)  const
+{
+  throw std::runtime_error("not implemented");
+}
+
+
+template<class ConstituentDistribution_, class Geometry_>
 VolumePdfCoefficients AtmosphereTemplate<ConstituentDistribution_, Geometry_>::ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const
 {
   auto lowest_point = geometry.ComputeLowestPointAlong(segment);
@@ -173,6 +180,17 @@ VolumePdfCoefficients AtmosphereTemplate<ConstituentDistribution_, Geometry_>::C
   };
 }
 
+
+
+template<typename ConstituentDistribution_, typename Geometry_> 
+Medium::MaterialCoefficients AtmosphereTemplate<ConstituentDistribution_, Geometry_>::EvaluateCoeffs(const Double3& pos, const PathContext& context) const
+{
+  Medium::MaterialCoefficients ret;
+  constituents.ComputeCollisionCoefficients(
+        geometry.ComputeAltitude(pos), ret.sigma_s, ret.sigma_t, context.lambda_idx);
+  ret.sigma_t += ret.sigma_s;
+  return ret;
+}
 
 
 template<class ConstituentDistribution_, class Geometry_>

@@ -571,6 +571,7 @@ Spectral3 Medium::EvaluateEmission(const Double3 &pos, const PathContext &contex
   return Spectral3::Zero();
 }
 
+
 /*****************************************
 * Derived media classes 
 ****************************************/
@@ -643,6 +644,13 @@ Spectral3 EmissiveDemoMedium::EvaluateTransmission(const RaySegment& segment, Sa
 }
 
 
+void EmissiveDemoMedium::ConstructShortBeamTransmittance(const RaySegment& segment, Sampler& sampler, const PathContext& context, PiecewiseConstantTransmittance& pct) const
+{
+  throw std::runtime_error("not implemented");
+}
+
+
+
 Medium::VolumeSample EmissiveDemoMedium::SampleEmissionPosition(Sampler &sampler, const PathContext &context) const
 {
   Double3 r { sampler.Uniform01(), sampler.Uniform01(), sampler.Uniform01() };
@@ -657,6 +665,12 @@ Spectral3 EmissiveDemoMedium::EvaluateEmission(const Double3 &pos, const PathCon
   if (pos_pdf)
     *pos_pdf = in_emissive_volume ? one_over_its_volume : 0.;
   return in_emissive_volume ? (sigma_a*Take(spectrum, context.lambda_idx)).eval() : Spectral3::Zero();
+}
+
+
+Medium::MaterialCoefficients EmissiveDemoMedium::EvaluateCoeffs(const Double3& pos, const PathContext& context) const
+{
+  throw std::runtime_error("not implemented");
 }
 
 
@@ -695,6 +709,12 @@ Spectral3 VacuumMedium::EvaluateTransmission(const RaySegment& segment, Sampler 
 }
 
 
+void VacuumMedium::ConstructShortBeamTransmittance(const RaySegment& segment, Sampler& sampler, const PathContext& context, PiecewiseConstantTransmittance& pct) const
+{
+  pct.PushBack(LargeFloat, Spectral3::Ones());
+}
+
+
 VolumePdfCoefficients VacuumMedium::ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const
 {
   return VolumePdfCoefficients{
@@ -703,6 +723,15 @@ VolumePdfCoefficients VacuumMedium::ComputeVolumePdfCoefficients(const RaySegmen
     1.
   };
 }
+
+Medium::MaterialCoefficients VacuumMedium::EvaluateCoeffs(const Double3& pos, const PathContext& context) const
+{
+  return { 
+    Spectral3::Zero(),
+    Spectral3::Zero()
+  };
+}
+
 
 
 
@@ -773,7 +802,7 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
 }
 
 
-inline Spectral3 HomogeneousMedium::EvaluateTransmission(double x, const Spectral3& sigma_ext) const
+inline Spectral3 HomogeneousMedium::EvaluateTransmissionHomogeneous(double x, const Spectral3& sigma_ext) const
 {
   return (-sigma_ext * x).exp();
 }
@@ -781,9 +810,34 @@ inline Spectral3 HomogeneousMedium::EvaluateTransmission(double x, const Spectra
 
 Spectral3 HomogeneousMedium::EvaluateTransmission(const RaySegment& segment, Sampler &sampler, const PathContext &context) const
 {
-  Spectral3 sigma_ext = Take(this->sigma_ext, context.lambda_idx);
-  return EvaluateTransmission(segment.length, sigma_ext);
+  const Spectral3 sigma_ext = Take(this->sigma_ext, context.lambda_idx);
+  return EvaluateTransmissionHomogeneous(segment.length, sigma_ext);
 }
+
+
+void HomogeneousMedium::ConstructShortBeamTransmittance(const RaySegment& segment, Sampler& sampler, const PathContext& context, PiecewiseConstantTransmittance& pct) const
+{
+  const Spectral3 sigma_ext = Take(this->sigma_ext, context.lambda_idx);
+  constexpr auto N = static_size<Spectral3>();
+  std::pair<double,int> items[N]; 
+  for (int i=0; i<N; ++i)
+  {
+    items[i].first = - std::log(1-sampler.Uniform01()) / sigma_ext[i];
+    items[i].second = i;
+    for (int j=i; j>0 && items[j-1].first>items[j].first; --j)
+    {
+      std::swap(items[j-1], items[j]);
+    }
+  }
+  // Zero out the spectral channels one after another.
+  Spectral3 w = Spectral3::Ones();
+  for (int i=0; i<N; ++i)
+  {
+    pct.PushBack(items[i].first, w);
+    w[items[i].second] = 0;
+  }
+}
+
 
 
 VolumePdfCoefficients HomogeneousMedium::ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const
@@ -791,7 +845,7 @@ VolumePdfCoefficients HomogeneousMedium::ComputeVolumePdfCoefficients(const RayS
   // We take the mean over the densities that would be appropriate for single-lambda sampling. So this is only approximate.
   // With Peter Kutz's spectral tracking method the actual pdf is not accessible in closed form.
    Spectral3 sigma_ext = Take(this->sigma_ext, context.lambda_idx);
-   double tr = EvaluateTransmission(segment.length, sigma_ext).mean();
+   double tr = EvaluateTransmissionHomogeneous(segment.length, sigma_ext).mean();
    double e  = sigma_ext.mean();
    return VolumePdfCoefficients{
      e*tr,
@@ -799,6 +853,16 @@ VolumePdfCoefficients HomogeneousMedium::ComputeVolumePdfCoefficients(const RayS
      tr,
    }; // Forward and backward is the same in homogeneous media.
 }
+
+
+Medium::MaterialCoefficients HomogeneousMedium::EvaluateCoeffs(const Double3& pos, const PathContext& context) const
+{
+  return {
+    Take(this->sigma_s, context.lambda_idx),
+    Take(this->sigma_ext, context.lambda_idx)
+  };
+}
+
 
 
 
@@ -851,3 +915,20 @@ Spectral3 MonochromaticHomogeneousMedium::EvaluateTransmission(const RaySegment&
 {
   return Spectral3{std::exp(-sigma_ext * segment.length)};
 }
+
+
+void MonochromaticHomogeneousMedium::ConstructShortBeamTransmittance(const RaySegment& segment, Sampler& sampler, const PathContext& context, PiecewiseConstantTransmittance& pct) const
+{
+  double t = - std::log(1-sampler.Uniform01()) / sigma_ext;
+  pct.PushBack(t, Spectral3::Ones());
+}
+
+
+Medium::MaterialCoefficients MonochromaticHomogeneousMedium::EvaluateCoeffs(const Double3& pos, const PathContext& context) const
+{
+  return {
+    Spectral3{sigma_s},
+    Spectral3{sigma_ext}
+  };
+}
+
