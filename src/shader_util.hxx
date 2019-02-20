@@ -7,6 +7,10 @@
 #include "ray.hxx"
 #include "scene.hxx"
 
+#include <boost/container/small_vector.hpp>
+
+
+
 enum TransportType : char 
 {
   RADIANCE,
@@ -148,6 +152,39 @@ inline void Accumulate(VolumePdfCoefficients &accumulated, const VolumePdfCoeffi
   accumulated.pdf_scatter_bwd *= is_first ? segment_coeff.pdf_scatter_bwd : segment_coeff.transmittance;
   accumulated.transmittance *= segment_coeff.transmittance;
 }
+
+
+class PiecewiseConstantTransmittance
+{
+  static constexpr int PIECEWISE_STATIC_ALLOC_SIZE = 96;
+  using Boundaries = boost::container::small_vector<float, PIECEWISE_STATIC_ALLOC_SIZE>;
+  using Weights = boost::container::small_vector<Spectral3, PIECEWISE_STATIC_ALLOC_SIZE>;
+  Boundaries boundaries;
+  Weights weights;
+public:
+  void PushBack(float t, const Spectral3 &weight)
+  {
+    assert(boundaries.empty() || t>boundaries.back());
+    boundaries.push_back(t);
+    weights.push_back(weight);
+  }
+  
+  float End() const
+  {
+    assert(!boundaries.empty());
+    return boundaries.back();
+  }
+  
+  // Lookup
+  Spectral3 operator()(float t) const
+  {
+    auto it = std::upper_bound(boundaries.begin(), boundaries.end(), t);
+    if (t < *it)
+      return weights[it-boundaries.begin()];
+    else // t is larger than last element in the sequence
+      return Spectral3::Zero();
+  }
+};
 
 
 namespace TrackingDetail

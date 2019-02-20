@@ -265,3 +265,36 @@ m testing/scenes/unitcube.dae
     ASSERT_NEAR(weight_sum_interacted[i], 1.-expected_transmissions[i], 1.e-2);
   }
 }
+
+
+TEST(Rendering,PiecewiseConstantTransmittance)
+{
+  PiecewiseConstantTransmittance pct;
+  pct.PushBack(0., Spectral3{2.});
+  ASSERT_NEAR(pct(-0.1)[0], 2., 1.e-3);
+  ASSERT_NEAR(pct(0.1)[0], 0., 1.e-3);
+  
+  pct.PushBack(1., Spectral3{1.});
+  ASSERT_NEAR(pct(-0.1)[0], 2., 1.e-3);
+  ASSERT_NEAR(pct(0.1)[0], 1., 1.e-3);
+  ASSERT_NEAR(pct(0.9)[0], 1., 1.e-3);
+  ASSERT_NEAR(pct(1.1)[0], 0., 1.e-3);
+  
+  pct.PushBack(2., Spectral3{3.});
+  ASSERT_NEAR(pct(-0.1)[0], 2., 1.e-3);
+  ASSERT_NEAR(pct(0.1)[0], 1., 1.e-3);
+  ASSERT_NEAR(pct(0.9)[0], 1., 1.e-3);
+  ASSERT_NEAR(pct(1.1)[0], 3., 1.e-3);
+  ASSERT_NEAR(pct(1.9)[0], 3., 1.e-3);
+  ASSERT_NEAR(pct(2.1)[0], 0., 1.e-3);
+  
+  pct.PushBack(3., Spectral3{4.});
+  ASSERT_NEAR(pct(-0.1)[0], 2., 1.e-3);
+  ASSERT_NEAR(pct(0.1)[0], 1., 1.e-3);
+  ASSERT_NEAR(pct(0.9)[0], 1., 1.e-3);
+  ASSERT_NEAR(pct(1.1)[0], 3., 1.e-3);
+  ASSERT_NEAR(pct(1.9)[0], 3., 1.e-3);
+  ASSERT_NEAR(pct(2.1)[0], 4., 1.e-3);
+  ASSERT_NEAR(pct(2.9)[0], 4., 1.e-3);
+  ASSERT_NEAR(pct(3.1)[0], 0., 1.e-3);
+}
