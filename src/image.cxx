@@ -5,8 +5,13 @@
 #define cimg_use_png 1
 #define cimg_use_jpeg 1
 #define cimg_debug 0
+#ifdef _MSC_VER 
+#define cimg_OS 2
+#else
 #define cimg_OS 1
 #define cimg_display 1
+#endif
+
 
 #include "image.hxx"
 
@@ -27,7 +32,7 @@ Image::Image()
   col[0]=col[1]=col[2] = 0;
   opacity=1.0f;
   static_assert(sizeof(priv)==sizeof(CImgType), "memory reserve size must equal size of CImg<T>");
-  new(TOCIMG(priv)) CImgType( (uint)0, (uint)0, (uint)1, (uint)3 );
+  new(TOCIMG(priv)) CImgType( (unsigned)0, (unsigned)0, (unsigned)1, (unsigned)3 );
 }
 
 Image::Image( const Image &other )

@@ -78,7 +78,7 @@ public:
         auto fx = scaled_point[0] - x;
         auto fy = scaled_point[1] - y;
         auto fz = scaled_point[2] - z;
-        for (uint i=0; i<8; ++i)
+        for (int i=0; i<8; ++i)
         {
             int cx = ((i & 1) != 0) ? x : (x + (fx < 0.5 ? -1 : 1));
             int cy = ((i & 2) != 0) ? y : (y + (fy < 0.5 ? -1 : 1));
@@ -95,11 +95,11 @@ private:
     int GetCellIndex(int x, int y, int z)
     {
         // Computes hash and from hash the bucket index in one go. Just like in a normal hash table.
-        uint ux = (uint)(x);
-        uint uy = (uint)(y);
-        uint uz = (uint)(z);
+        auto ux = (unsigned)(x);
+		auto uy = (unsigned)(y);
+		auto uz = (unsigned)(z);
         return (int) (((ux* 73856093) ^ (uy* 19349663) ^
-            (uz* 83492791)) % (uint) (cell_count));
+            (uz* 83492791)) % (unsigned) (cell_count));
     }
 
     int GetCellIndex(const Double3 &point)

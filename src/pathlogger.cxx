@@ -1,5 +1,6 @@
 #include "pathlogger.hxx"
 
+#ifdef HAVE_JSON
 
 std::string Pathlogger::filename;
 tbb::concurrent_bounded_queue<Pathlogger::Path> Pathlogger::to_process;
@@ -63,3 +64,5 @@ void Pathlogger::Init(const std::string& filename_)
   filename = filename_;
   io_thread = std::make_unique<tbb::tbb_thread>(DoIo); // Start
 }
+
+#endif

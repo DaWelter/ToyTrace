@@ -172,7 +172,7 @@ public:
   void ParseYamlNode(const std::string &key, const YAML::Node &node, Scope &scope);
   Scope CreateScope();
 private:
-  void ParseMesh(const char *filename, Scope &scope);
+  void ParseMesh(const fs::path &filename, Scope &scope);
   MaterialIndex GetMaterialIndexOfCurrentParams(const Scope &scope);
   MaterialIndex MaterialInsertAndOrGetIndex(const Material &m);
   void InsertAndActivate(const char*, Scope &scope, std::unique_ptr<Medium> x);
@@ -1111,8 +1111,11 @@ public:
   {
   }
   
-  void Read(const char *filename)
+  void Read(const fs::path &filename_path)
   {
+	const std::string filename_str = filename_path.string();
+	const char* filename = filename_str.c_str();
+
     std::printf("Reading Mesh: %s\n", filename);
     this->aiscene = aiImportFile(filename, 
       aiProcess_Triangulate 
@@ -1297,7 +1300,7 @@ private:
 };
 
 
-void NFFParser::ParseMesh(const char* filename, Scope &scope)
+void NFFParser::ParseMesh(const fs::path &filename, Scope &scope)
 {
   AssimpReader(*this, scope).Read(filename);
 }

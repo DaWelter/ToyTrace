@@ -54,7 +54,11 @@ RGB SpectrumToRGB(int bin, Scalar intensity)
   return x;
 }
 
+#ifdef _MSC_VER
+#define RESTRICT __restrict
+#else
 #define RESTRICT __restrict__// Because I can!
+#endif
 
 inline void LinComb(double *RESTRICT dst, double a, const double *RESTRICT sa, double b, const double *RESTRICT sb, double c, const double *RESTRICT sc)
 {

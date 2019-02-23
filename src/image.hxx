@@ -77,10 +77,15 @@ private:
   void MyDrawText( int x, int y, const char* text, const uchar* colbg );
   void MyRescale( int w, int h, int interpolation );
 
-  struct CImgInstanceHolder
+//#ifdef _MSC_VER
+//  
+//#else
+  // __attribute__((__may_alias__)) __attribute__((aligned(sizeof(void*)))) // gcc magic?
+//#endif
+  struct alignas(sizeof(void*)) CImgInstanceHolder
   {
     uchar buffer[IMG_PRIVATE_DATA_SIZE];
-  } __attribute__((__may_alias__)) __attribute__ ((aligned (sizeof(void*)))) priv;
+  }  priv;
   
   uchar col[3];
   double opacity;
@@ -102,11 +107,11 @@ public:
   bool is_open() const;
   
 private:
-  struct Impl
+  struct alignas(sizeof(void*)) Impl
   {
     static constexpr int CIMG_DISPLAY_SIZE = 4096; // sufficiently large
     char buffer[CIMG_DISPLAY_SIZE];
-  } __attribute__((__may_alias__)) __attribute__ ((aligned (sizeof(void*)))) priv;
+  } priv;
   cimg_library::CImgDisplay* impl();
   const cimg_library::CImgDisplay* impl() const;
 };

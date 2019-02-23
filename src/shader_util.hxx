@@ -7,6 +7,7 @@
 #include "ray.hxx"
 #include "scene.hxx"
 
+#include <numeric> // for iota on Windows
 #include <boost/container/small_vector.hpp>
 
 

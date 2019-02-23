@@ -87,7 +87,7 @@ inline double EvalKernel(const K &k, const Double3 &a, const Double3 &b)
 
 
 //#define DEBUG_BUFFERS
-#define LOGGING
+//#define LOGGING
 
 struct Photon
 {
@@ -127,10 +127,11 @@ public:
   SpectralN max_throughput_weight{0};
   double max_bsdf_correction_weight{0};
   SpectralN max_uncorrected_bsdf_weight{0};
+#ifdef LOGGING
   bool should_log_path = false;
   static constexpr double log_path_weight_threshold = 1000.;
   Pathlogger logger;
-  
+#endif
   PhotonmappingWorker(PhotonmappingRenderingAlgo *master);
   void StartNewPass(const LambdaSelection &lambda_selection);
   void TracePhotons(int count);

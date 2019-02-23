@@ -7,6 +7,8 @@
 #include <cmath>
 #include <random>
 #include <array>
+#include <algorithm>
+#include <numeric>
 
 namespace SampleTrafo
 {
@@ -48,19 +50,26 @@ public:
   }
   
   static constexpr std::uint64_t default_seed = std::mt19937::default_seed;
+
+  auto& GetGenerator()
+  {
+	  return random_engine;
+  }
 };
 
 
 template<class Iter>
 void RandomShuffle(Iter &&begin, Iter &&end, Sampler &sampler)
 {
-  std::random_shuffle(
-    begin,
-    end,
-    [&sampler](int n) {
-      return sampler.UniformInt(0, n-1);
-    }
-  );
+	std::shuffle(begin, end, sampler.GetGenerator());
+  // Deprecated in c++14
+  //std::random_shuffle(
+  //  begin,
+  //  end,
+  //  [&sampler](int n) {
+  //    return sampler.UniformInt(0, n-1);
+  //  }
+  //);
 }
 
 

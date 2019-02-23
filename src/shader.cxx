@@ -494,7 +494,8 @@ Spectral3 GlossyTransmissiveDielectricShader::EvaluateBSDF(const Double3 &revers
   const double alpha = alpha_min + MaybeMultiplyTextureLookup(alpha_max-alpha_min, glossy_exponent_texture.get(), surface_hit);
   BeckmanDistribution ndf{alpha};
   
-  const double result = GlossyTransmissiveDielectricWrapper{wi, context, ndf, frame, eta_i_over_t}.Evaluate(wo, pdf);
+  GlossyTransmissiveDielectricWrapper shd{ wi, context, ndf, frame, eta_i_over_t };
+  const double result = shd.Evaluate(wo, pdf);
   return Spectral3{result};
 }
 
