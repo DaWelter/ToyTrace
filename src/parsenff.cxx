@@ -936,22 +936,23 @@ void NFFParser::ParseYaml(const std::string& yaml_section_str, Scope& scope)
   std::cout << "Parse YAML:\n--------\n" << yaml_section_str << "\n-------\n" << std::flush;
   YAML::Node doc = YAML::Load(yaml_section_str);
   /* Example: Transform
-   * - transform:
+   * transform:
    *   pos: [x, y, z]
    *   hpb: [ h, p, b ]
+   *   rotaxis: [ x, y, z]
    *   scale: [x, y, z]
    *   angle_in_degree
    * 
-   * - shader: myshader
+   * shader: myshader
    *   param1: ....
    *   param2: ....
    * 
-   * - medium: mymedium
+   * medium: mymedium
    *   priority: 1
    *   param1: ....
    *   param2: ....
    * 
-   * - material: ...
+   * material: ...
    *   shader: myshader
    *   medium: mymedium
    *   emissive: myarealight
@@ -971,6 +972,7 @@ void NFFParser::ParseYamlNode(const std::string &key, const YAML::Node &node, Sc
     auto pos_node   = node["pos"];
     auto hpb_node   = node["hpb"];
     auto scale_node = node["scale"];
+    auto rotaxis_node = node["rotaxis"];
     if (pos_node)
     {
       trafo = Eigen::Translation3d(pos_node.as<Double3>());
@@ -985,6 +987,13 @@ void NFFParser::ParseYamlNode(const std::string &key, const YAML::Node &node, Sc
         Eigen::AngleAxisd(r[0], Eigen::Vector3d::UnitY()) *
         Eigen::AngleAxisd(r[1], Eigen::Vector3d::UnitX()) *
         Eigen::AngleAxisd(r[2], Eigen::Vector3d::UnitZ());
+    }
+    if (rotaxis_node)
+    {
+      auto r = rotaxis_node.as<Double3>();
+      if (node["angle_in_degree"] && node["angle_in_degree"].as<bool>())
+        r *= Pi/180.;
+      trafo = trafo * Eigen::AngleAxisd(r.norm(), r.normalized());
     }
     if (scale_node)
     {
