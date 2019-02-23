@@ -27,7 +27,7 @@ public:
 
         const int item_count = items.size();
 
-        cell_count = item_count;
+        cell_count = item_count + 1;  // +1 Prevents taking modulo 0 in GetCellIndex if there are no items.
         std::vector<int> cell_counts(cell_count, 0);
         for (const auto &p : items)
         {
