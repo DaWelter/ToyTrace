@@ -774,7 +774,7 @@ void CameraRenderWorker::AddPhotonBeamContributions(const RaySegment &segment, c
   Spectral3 inscatter_estimator{0.}; // Integral over the query ray.
   int photon_idx[1024];
   float photon_distance[1024];
-  const int n = master->beampointaccel->Query(segment.ray, pct.End(), photon_idx, photon_distance, 1024);
+  const int n = master->beampointaccel->Query(segment.ray, std::min<double>(segment.length, pct.End()), photon_idx, photon_distance, 1024);
   for (int i=0; i<n; ++i)
   {
     const auto &photon = master->photons_volume[photon_idx[i]];
