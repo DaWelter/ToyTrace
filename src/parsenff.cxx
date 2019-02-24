@@ -29,7 +29,7 @@ namespace fs = boost::filesystem;
 
 inline Double3 TransformNormal(const Eigen::Transform<double,3,Eigen::Affine> &trafo, const Double3 &v)
 {
-  return trafo.linear().inverse().transpose() * v;
+  return Normalized(trafo.linear().inverse().transpose() * v);
 }
 
 
