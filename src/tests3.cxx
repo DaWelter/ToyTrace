@@ -402,4 +402,8 @@ TEST(Rendering,PiecewiseConstantTransmittance)
   ASSERT_NEAR(pct(2.1)[0], 4., 1.e-3);
   ASSERT_NEAR(pct(2.9)[0], 4., 1.e-3);
   ASSERT_NEAR(pct(3.1)[0], 0., 1.e-3);
+  
+  pct.PushBack(InfinityFloat, Spectral3{5.});
+  ASSERT_NEAR(pct(InfinityFloat)[0], 5., 1.e-3);
+  ASSERT_NEAR(pct(Infinity)[0], 5., 1.e-3);
 }

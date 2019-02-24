@@ -711,7 +711,7 @@ Spectral3 VacuumMedium::EvaluateTransmission(const RaySegment& segment, Sampler 
 
 void VacuumMedium::ConstructShortBeamTransmittance(const RaySegment& segment, Sampler& sampler, const PathContext& context, PiecewiseConstantTransmittance& pct) const
 {
-  pct.PushBack(LargeFloat, Spectral3::Ones());
+  pct.PushBack(InfinityFloat, Spectral3::Ones());
 }
 
 

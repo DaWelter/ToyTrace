@@ -184,7 +184,7 @@ public:
   // Lookup
   Spectral3 operator()(float t) const
   {
-    auto it = std::upper_bound(boundaries.begin(), boundaries.end(), t);
+    auto it = std::lower_bound(boundaries.begin(), boundaries.end(), t);
     if (it != boundaries.end())
     {
       assert (t <= boundaries.back());
