@@ -26,10 +26,12 @@ void Pathlogger::DoIo()
       rj::Value rjnode(rj::kObjectType);
       rjnode.AddMember("position", Array3ToJSON(n.position.array(), alloc), alloc);
       rjnode.AddMember("normal", Array3ToJSON(n.normal.array(), alloc), alloc);
+      rjnode.AddMember("geom_normal", Array3ToJSON(n.geom_normal.array(), alloc), alloc);
       rjnode.AddMember("incident_dir", Array3ToJSON(n.incident_dir.array(), alloc), alloc);
       rjnode.AddMember("exitant_dir", Array3ToJSON(n.exitant_dir.array(), alloc), alloc);
       rjnode.AddMember("weight_before", Array3ToJSON(n.weight_before, alloc), alloc);
       rjnode.AddMember("weight_after", Array3ToJSON(n.weight_after, alloc), alloc);
+      rjnode.AddMember("is_surface", n.is_surface, alloc);
       rjpath.PushBack(rjnode, alloc);
     }
 

@@ -25,8 +25,10 @@ public:
     Double3 incident_dir{0.};
     Double3 exitant_dir{0.};
     Double3 normal{0.};
+    Double3 geom_normal{0.};
     Spectral3 weight_before{0.}; // Scattering.
     Spectral3 weight_after{0.};
+    bool is_surface = true;
   };
 private:
   using Path = ToyVector<Node>;

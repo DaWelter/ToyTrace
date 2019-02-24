@@ -70,6 +70,8 @@ public:
   SpectralN max_throughput_weight{0};
   double max_bsdf_correction_weight{0};
   SpectralN max_uncorrected_bsdf_weight{0};
+  bool should_log_path = false;
+  static constexpr double log_path_weight_threshold = 200.;
   Pathlogger logger;
   
   PhotonmappingWorker(PhotonmappingRenderingAlgo *master);
@@ -436,6 +438,7 @@ void PhotonmappingWorker::TracePhotons(int count)
     Ray ray = GeneratePrimaryRay(current_emission);
 #ifdef LOGGING
     {
+      should_log_path = false;
       logger.NewPath();
       auto &l = logger.AddNode();
       l.position = ray.org;
@@ -450,10 +453,12 @@ void PhotonmappingWorker::TracePhotons(int count)
       keepgoing = TrackToNextInteractionAndScatter(ray, weight_accum);
     }
     while (keepgoing);
-    if (weight_accum.maxCoeff() > 1000.)
+#ifdef LOGGING
+    if (should_log_path)
     {
       logger.WritePath();
     }
+#endif
   }
 }
 
@@ -510,8 +515,10 @@ bool PhotonmappingWorker::ScatterAt(Ray& ray, const SurfaceInteraction& interact
   auto &l = logger.AddNode();
   l.position = interaction.pos;
   l.normal = interaction.shading_normal;
+  l.geom_normal = interaction.normal;
   l.incident_dir = ray.dir;
   l.weight_before = weight_accum;
+should_log_path |= weight_accum.maxCoeff() > log_path_weight_threshold;
 #endif
   auto smpl = GetShaderOf(interaction,master->scene).SampleBSDF(-ray.dir, interaction, sampler, context);
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, current_node_count, sampler))
@@ -534,6 +541,7 @@ bool PhotonmappingWorker::ScatterAt(Ray& ray, const SurfaceInteraction& interact
 #ifdef LOGGING
     l.exitant_dir = ray.dir;
     l.weight_after = weight_accum;
+    should_log_path |= weight_accum.maxCoeff() > log_path_weight_threshold;
 #endif
     return true;
   }
@@ -549,6 +557,8 @@ bool PhotonmappingWorker::ScatterAt(Ray& ray, const VolumeInteraction& interacti
   l.position = interaction.pos;
   l.incident_dir = ray.dir;
   l.weight_before = weight_accum;
+  l.is_surface = false;
+  should_log_path |= weight_accum.maxCoeff() > log_path_weight_threshold;
 #endif
   auto smpl = interaction.medium().SamplePhaseFunction(-ray.dir, interaction.pos, sampler, context);
   bool survive = ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, current_node_count, sampler);
@@ -558,6 +568,7 @@ bool PhotonmappingWorker::ScatterAt(Ray& ray, const VolumeInteraction& interacti
 #ifdef LOGGING
   l.exitant_dir = ray.dir;
   l.weight_after = weight_accum;
+  should_log_path |= weight_accum.maxCoeff() > log_path_weight_threshold;
 #endif
   return survive;
 }
