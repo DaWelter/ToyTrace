@@ -1032,7 +1032,9 @@ public:
   void Read(const char *filename)
   {
     std::printf("Reading Mesh: %s\n", filename);
-    this->aiscene = aiImportFile(filename, 0);
+    this->aiscene = aiImportFile(filename, 
+      aiProcess_JoinIdenticalVertices | aiProcess_Triangulate 
+    );
     
     if (!aiscene)
     {
@@ -1070,7 +1072,29 @@ private:
       ReadMesh(scope, mesh, ndref);
     }
   }
-    
+
+  
+  static bool CheckFace(const aiMesh* aimesh, const aiFace* face)
+  {
+    if (face->mNumIndices != 3)
+      throw std::runtime_error("Face has too many vertices. Assimp should have converted to triangle, though ...");    
+    int vidx[3] = {
+      (int)face->mIndices[0],
+      (int)face->mIndices[1],
+      (int)face->mIndices[2] 
+    };
+    Double3 verts[3];
+    for (int i=0; i<3; ++i)
+    {
+      if (vidx[i]<0 || vidx[i]>=aimesh->mNumVertices)
+        throw std::runtime_error("Invalid face. Vertex index beyond bounds.");
+      verts[i] = aiVector3_to_myvector(aimesh->mVertices[vidx[i]]);
+    }
+    double area = Length(Cross(verts[1]-verts[0], verts[2]-verts[0]));
+    return area > 0.;
+  }
+  
+  
   void ReadMesh(Scope &scope, const aiMesh* aimesh, const NodeRef &ndref)
   {
     auto m = ndref.local_to_world;
@@ -1082,12 +1106,12 @@ private:
     for (unsigned int face_idx = 0; face_idx < aimesh->mNumFaces; ++face_idx)
     {
       const aiFace* face = &aimesh->mFaces[face_idx];
-      for (int i=2; i<face->mNumIndices; i++)
+      if (CheckFace(aimesh, face))
       {
         vert_indices.push_back(
           UInt3(face->mIndices[0],
-                 face->mIndices[i-1],
-                 face->mIndices[i]));
+                face->mIndices[1],
+                face->mIndices[2]));
       }
     }
     
@@ -1139,24 +1163,32 @@ private:
     
     scene.Append(mesh);
     
-    // TODO: delete me!
-    for (int tri_index = 0; tri_index < mesh.NumTriangles(); ++tri_index)
-    {
-      int a = mesh.vert_indices(tri_index, 0);
-      int b = mesh.vert_indices(tri_index, 1);
-      int c = mesh.vert_indices(tri_index, 2);
-
-      Double2 uv[3];
-      Double3 no[3];
-
-      no[0] = mesh.normals.row(a).cast<double>();
-      no[1] = mesh.normals.row(b).cast<double>();
-      no[2] = mesh.normals.row(c).cast<double>();
-
-      uv[0] = mesh.uvs.row(a).cast<double>();
-      uv[1] = mesh.uvs.row(b).cast<double>();
-      uv[2] = mesh.uvs.row(c).cast<double>();
-    }
+//     // TODO: delete me!
+//     for (int tri_index = 0; tri_index < mesh.NumTriangles(); ++tri_index)
+//     {
+//       int a = mesh.vert_indices(tri_index, 0);
+//       int b = mesh.vert_indices(tri_index, 1);
+//       int c = mesh.vert_indices(tri_index, 2);
+// 
+//       Double2 uv[3];
+//       Double3 no[3];
+// 
+//       no[0] = mesh.normals.row(a).cast<double>();
+//       no[1] = mesh.normals.row(b).cast<double>();
+//       no[2] = mesh.normals.row(c).cast<double>();
+//       ASSERT_NORMALIZED(no[0]);
+//       ASSERT_NORMALIZED(no[1]);
+//       ASSERT_NORMALIZED(no[2]);
+//       
+//       uv[0] = mesh.uvs.row(a).cast<double>();
+//       uv[1] = mesh.uvs.row(b).cast<double>();
+//       uv[2] = mesh.uvs.row(c).cast<double>();
+//       
+//       const Float3 normal = Normalized(
+//         Cross(mesh.vertices.row(b)-mesh.vertices.row(a),
+//               mesh.vertices.row(c)-mesh.vertices.row(a)));
+//       ASSERT_NORMALIZED(normal);
+//     }
   }
   
   
@@ -1191,7 +1223,7 @@ private:
   NFFParser &parser;
   Scope &outer_scope;
 
-  inline Double3 aiVector3_to_myvector(const aiVector3D &v)
+  inline static Double3 aiVector3_to_myvector(const aiVector3D &v)
   {
     return Double3{v[0], v[1], v[2]};
   }

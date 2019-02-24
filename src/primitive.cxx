@@ -128,6 +128,8 @@ void Mesh::GetLocalGeometry(SurfaceInteraction& ia) const
   assert  (ia.pos.allFinite());
   assert  (ia.geometry_normal.allFinite());
   assert  (ia.smooth_normal.allFinite());
+  ASSERT_NORMALIZED(ia.geometry_normal);
+  ASSERT_NORMALIZED(ia.smooth_normal);
   FillPosBoundsTriangle(ia, vertices.row(a), vertices.row(b), vertices.row(c));
 }
 
