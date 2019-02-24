@@ -129,7 +129,7 @@ private:
   int num_photons_traced = 0;
   double current_surface_photon_radius = 0;
   double current_volume_photon_radius = 0;
-  double radius_reduction_alpha = 1./3.; // Less means faster reduction. 2/3 is suggested in the unified path sampling paper.
+  double radius_reduction_alpha = 2./3.; // Less means faster reduction. 2/3 is suggested in the unified path sampling paper.
   SamplesPerPixelScheduleConstant spp_schedule;
   tbb::atomic<int> shared_pixel_index = 0;
   tbb::task_group the_task_group;
