@@ -99,13 +99,10 @@ class LambdaSelectionStrategyShuffling
   
   void Shuffle(Sampler &sampler)
   {
-    std::random_shuffle(
+    RandomShuffle(
       current_selection_permutation.begin(),
       current_selection_permutation.end(),
-      [&sampler](int n) {
-        return sampler.UniformInt(0, n-1);
-      }
-    );
+      sampler);
   }
   
 public:
@@ -117,9 +114,17 @@ public:
   
   static constexpr int NUM_SAMPLES_REQUIRED = strata_size; // On average to make a full sweep across the spectrum, i.e. to have all wavelengths covered.
   
-  static Index3 MakeIndices(int main_idx)
+  static Index3 MakeIndices(int main_idx, Sampler &sampler)
   {
-    return Index3{main_idx, main_idx+strata_size, main_idx+2*strata_size};
+    Index3 ret{main_idx, main_idx+strata_size, main_idx+2*strata_size};
+    // Permutation does nothing except when doing spectral rendering. 
+    // In this case I can simply use the wavelength of the first index because
+    // it has equal chance of being in the R, G, or B stratum.
+    // To render a prism, for instance, the first wavelength would be taken to
+    // determine the index of refraction and the contribution of the other 
+    // two wavelengths would be zero'd out.
+    RandomShuffle(ret.data(), ret.data()+ret.size(), sampler);
+    return ret;
   }
   
   static int PrimaryIndex(const Index3 &idx)
@@ -135,7 +140,7 @@ public:
       current_idx = 0;
     }
     int lambda_idx = current_selection_permutation[current_idx];
-    auto idx     = MakeIndices(lambda_idx);
+    auto idx     = MakeIndices(lambda_idx, sampler);
     auto weights = Spectral3{strata_size};
     return LambdaSelection{idx, weights, LambdaSelectionStrategy::SampleWavelengthStrata(idx, sampler)};
   }

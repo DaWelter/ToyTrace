@@ -52,6 +52,19 @@ public:
 };
 
 
+template<class Iter>
+void RandomShuffle(Iter &&begin, Iter &&end, Sampler &sampler)
+{
+  std::random_shuffle(
+    begin,
+    end,
+    [&sampler](int n) {
+      return sampler.UniformInt(0, n-1);
+    }
+  );
+}
+
+
 class Stratified2DSamples
 {
     int nx, ny;
