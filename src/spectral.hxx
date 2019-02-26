@@ -28,17 +28,31 @@ static constexpr int NBINS = 36;
 
 // TODO: Use strong typedef to differentiate between RGB values and spectral triplel in a type safe way.
 // http://www.boost.org/doc/libs/1_61_0/libs/serialization/doc/strong_typedef.html
-using Spectral3 = Eigen::Array<Scalar, 3, 1>;
-using SpectralN = Eigen::Array<Scalar, NBINS, 1>;
-using RGB       = Eigen::Array<RGBScalar, 3, 1>;  // Alias of Spectral3 which is not ideal because they can be mixed.
+using Spectral3    = Eigen::Array<Scalar, 3, 1>;
+using SpectralN    = Eigen::Array<Scalar, NBINS, 1>;
+using RGB          = Eigen::Array<RGBScalar, 3, 1>;  // Alias of Spectral3 which is not ideal because they can be mixed.
+using Wavelengths3 = Eigen::Array<Scalar, 3, 1>; // The actual wavelengths
+
+
+inline auto GetWavelengths()
+{
+  static const Scalar wavelengths[NBINS] = {
+    375.00000, 385.00000, 395.00000, 405.00000, 415.00000, 425.00000, 435.00000, 445.00000, 455.00000, 465.00000, 475.00000, 485.00000, 495.00000, 505.00000, 515.00000, 525.00000, 535.00000, 545.00000, 555.00000, 565.00000, 575.00000, 585.00000, 595.00000, 605.00000, 615.00000, 625.00000, 635.00000, 645.00000, 655.00000, 665.00000, 675.00000, 685.00000, 695.00000, 705.00000, 715.00000, 725.00000
+  };
+  return Eigen::Map<const Eigen::Array<Scalar, NBINS, 1>, Eigen::Unaligned>(wavelengths, NBINS);
+}
 
 
 inline Scalar GetWavelength(int bin)
 {
-  static constexpr Scalar wavelengths[NBINS] = {
-    375.00000, 385.00000, 395.00000, 405.00000, 415.00000, 425.00000, 435.00000, 445.00000, 455.00000, 465.00000, 475.00000, 485.00000, 495.00000, 505.00000, 515.00000, 525.00000, 535.00000, 545.00000, 555.00000, 565.00000, 575.00000, 585.00000, 595.00000, 605.00000, 615.00000, 625.00000, 635.00000, 645.00000, 655.00000, 665.00000, 675.00000, 685.00000, 695.00000, 705.00000, 715.00000, 725.00000
-  };
-  return wavelengths[bin];
+  return GetWavelengths()[bin];
+}
+
+inline std::pair<Scalar,Scalar> GetWavelengthBinBounds(int bin) 
+{
+  const auto center = GetWavelength(bin);
+  static constexpr Scalar half_width = 0.5*(lambda_max-lambda_min)/NBINS;  // Evaluated at compile time!(?)
+  return std::make_pair(center-half_width, center+half_width);
 }
 
 // Obtained by comparing wavelengths of bins with the RGB primaries
@@ -68,6 +82,7 @@ using RGB = Color::RGB;
 using Spectral3 = Color::Spectral3;
 using SpectralN = Color::SpectralN;
 using RGBScalar = Color::RGBScalar;
+using Wavelengths3 = Color::Wavelengths3;
 
 using namespace Color::Literals;
 

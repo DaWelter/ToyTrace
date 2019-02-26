@@ -153,7 +153,7 @@ m testing/scenes/unitcube.dae
   const double total_length = 2; // Because 2 unit cubes.
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
-  Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
+  LambdaSelection wavelengths = SelectRgbPrimaryWavelengths();
   RadianceEstimatorBase rt(scene);
   MediumTracker medium_tracker(scene);
   double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
@@ -161,9 +161,9 @@ m testing/scenes/unitcube.dae
   medium_tracker.initializePosition(seg.ray.org);
   ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
   VolumePdfCoefficients volume_pdf_coeff{};
-  auto res = rt.TransmittanceEstimate(seg, medium_tracker, PathContext{lambda_idx}, &volume_pdf_coeff);
+  auto res = rt.TransmittanceEstimate(seg, medium_tracker, PathContext{wavelengths}, &volume_pdf_coeff);
   
-  auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, lambda_idx);
+  auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, wavelengths.indices);
   Spectral3 expected = (-total_length*sigma_e).exp();
   
   for (int i=0; i<static_size<Spectral3>(); ++i)
@@ -190,9 +190,9 @@ m testing/scenes/unitcube.dae
 )""";
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
-  Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
+  LambdaSelection wavelengths = SelectRgbPrimaryWavelengths();
   
-  Spectral3 sigma = Color::RGBToSpectralSelection(RGB{3._rgb,3._rgb,3._rgb}, lambda_idx);
+  Spectral3 sigma = Color::RGBToSpectralSelection(RGB{3._rgb,3._rgb,3._rgb}, wavelengths.indices);
   double cube1_start = -0.5;
   double cube2_start = 1.5;
   double camera_start = -10.;
@@ -233,7 +233,7 @@ m testing/scenes/unitcube.dae
     VolumePdfCoefficients volume_pdf_coeff{};
     //RadianceEstimatorBase::CollisionData collision(ray);
     medium_tracker.initializePosition(ray.org);
-    TrackToNextInteraction(scene, ray, PathContext{lambda_idx}, Spectral3::Ones(), sampler, medium_tracker, &volume_pdf_coeff,
+    TrackToNextInteraction(scene, ray, PathContext{wavelengths}, Spectral3::Ones(), sampler, medium_tracker, &volume_pdf_coeff,
       /*surface_visitor=*/[&](const SurfaceInteraction &intersection, double distance, const Spectral3 &weight)
       {
         FAIL();
@@ -256,7 +256,7 @@ m testing/scenes/unitcube.dae
   weight_sum_escaped *= 1./(NUM_SAMPLES);
   weight_sum_interacted *= 1./(NUM_SAMPLES);
   
-  auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, lambda_idx);
+  auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, wavelengths.indices);
   Spectral3 expected_transmissions = (-2.*sigma_e).exp();
   // No idea what the variance is. So I determine the acceptance threshold experimentally.
   for (int i=0; i<static_size<Spectral3>(); ++i)
@@ -282,8 +282,8 @@ m testing/scenes/unitcube.dae
 )""";
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
-  Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
-  Spectral3 sigma = Color::RGBToSpectralSelection(RGB{3._rgb,3._rgb,3._rgb}, lambda_idx);
+  LambdaSelection wavelengths = SelectRgbPrimaryWavelengths();
+  Spectral3 sigma = Color::RGBToSpectralSelection(RGB{3._rgb,3._rgb,3._rgb}, wavelengths.indices);
   double cube1_start = -0.5;
   double cube2_start = 1.5;
   double camera_start = -10.;
@@ -327,7 +327,7 @@ m testing/scenes/unitcube.dae
   for (int sample_num = 0; sample_num < NUM_SAMPLES; ++sample_num)
   {
     medium_tracker.initializePosition(ray.org);
-    TrackBeam(scene, ray, PathContext{lambda_idx}, sampler, medium_tracker,
+    TrackBeam(scene, ray, PathContext{wavelengths}, sampler, medium_tracker,
       /*surface_visitor=*/[&](const SurfaceInteraction &intersection, const Spectral3 &weight)
       {
         FAIL();
@@ -361,7 +361,7 @@ m testing/scenes/unitcube.dae
   }
 
   weight_sum_escaped *= 1./(NUM_SAMPLES);
-  auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, lambda_idx);
+  auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, wavelengths.indices);
   Spectral3 expected_transmissions = (-2.*sigma_e).exp();
   // No idea what the variance is. So I determine the acceptance threshold experimentally.
   for (int i=0; i<static_size<Spectral3>(); ++i)

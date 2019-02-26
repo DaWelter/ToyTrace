@@ -409,8 +409,8 @@ public:
     this->lambda_idx = lambda_selection.indices;
     const auto &lambda_weights = lambda_selection.weights;
 
-    eye_context = PathContext{this->lambda_idx, TransportType::RADIANCE};
-    light_context = PathContext{this->lambda_idx, TransportType::IMPORTANCE};
+    eye_context = PathContext{lambda_selection, TransportType::RADIANCE};
+    light_context = PathContext{lambda_selection, TransportType::IMPORTANCE};
 
     {
       Pdf eye_node_pdf;
@@ -733,7 +733,7 @@ public:
     sensor_connection_unit = -1;
     
     auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
-    PathContext context{lambda_selection.indices, TransportType::RADIANCE};
+    PathContext context{lambda_selection, TransportType::RADIANCE};
     std::tie(context.pixel_x, context.pixel_y) = scene.GetCamera().UnitToPixel(pixel_index);
     PathContext light_context{context}; light_context.transport = IMPORTANCE;
     MediumTracker medium_tracker{scene};

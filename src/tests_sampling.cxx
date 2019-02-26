@@ -1257,7 +1257,7 @@ public:
     AppendSingleTriangle(mesh, 
       {-1, -1, 0}, {1, -1, 0}, {0, 1, 0}, {0, 0, 1});
     SetShadingNormal({0,0,1});
-    context = PathContext{Color::LambdaIdxClosestToRGBPrimaries()};
+    context = PathContext{SelectRgbPrimaryWavelengths()};
     embree.Add(mesh);
     embree.Build();
   }
@@ -1937,7 +1937,7 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
   double cutoff_length = 5.; // Integrate transmission T(x) up to this x.
   double img_dx = img.width() / cutoff_length / 2.;
   img.DrawRect(0, 0, img_dx * cutoff_length, img.height()-1);
-  Index3 lambda_idx = Color::LambdaIdxClosestToRGBPrimaries();
+  LambdaSelection wavelengths = SelectRgbPrimaryWavelengths();
   SpectralN sigma_s = Color::RGBToSpectrum(1._rgb/length_scales);
   SpectralN sigma_a = Color::RGBToSpectrum(1._rgb/length_scales);
   SpectralN sigma_t = sigma_s + sigma_a;
@@ -1949,7 +1949,7 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
   Spectral3 integral{0.};
   for (int i=0; i<N; ++i)
   {
-    PathContext context{lambda_idx};
+    PathContext context{wavelengths};
     Medium::InteractionSample s = medium.SampleInteractionPoint(RaySegment{{{0.,0.,0.}, {0., 0., 1.,}}, cutoff_length}, Spectral3::Ones(), sampler, context);
     if (s.t  > cutoff_length)
       img.SetColor(255, 0, 0);
@@ -1960,13 +1960,13 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
       // Divide out sigma_s which is baked into the weight.
       // Multiply by sigma_e.
       SpectralN integrand = (sigma_a + sigma_s) / sigma_s;
-      integral += s.weight * s.sigma_s * Take(integrand, lambda_idx);
+      integral += s.weight * s.sigma_s * Take(integrand, wavelengths.indices);
     }
     int imgx = std::min<int>(img.width()-1, s.t * img_dx);
     img.DrawLine(imgx, 0, imgx, img.height()-1);
   }
   integral *= 1./N;
-  Spectral3 exact_solution = Take((1. - (-sigma_t*cutoff_length).exp()).eval(), lambda_idx);
+  Spectral3 exact_solution = Take((1. - (-sigma_t*cutoff_length).exp()).eval(), wavelengths.indices);
   for (int k=0; k<static_size<Spectral3>(); ++k)
     EXPECT_NEAR(integral[k], exact_solution[k], 0.1 * integral[k]);
   //display.show(img);

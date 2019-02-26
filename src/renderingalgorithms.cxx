@@ -64,7 +64,7 @@ public:
   
   RGB RenderPixel(int pixel_index) override
   {
-    auto context = PathContext{Color::LambdaIdxClosestToRGBPrimaries()};
+    auto context = PathContext{SelectRgbPrimaryWavelengths()};
     const auto &camera = scene.GetCamera();
     auto smpl_pos = camera.TakePositionSample(pixel_index, sampler, context);
     auto smpl_dir = camera.TakeDirectionSampleFrom(pixel_index, smpl_pos.coordinates, sampler, context);

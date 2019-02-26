@@ -550,7 +550,7 @@ public:
     {
       auto s = cam->TakeDirectionSampleFrom(
         cam->PixelToUnit({_pixel_x, _pixel_y}), pos, sampler,
-        PathContext{Color::LambdaIdxClosestToRGBPrimaries()});
+        PathContext{SelectRgbPrimaryWavelengths()});
       Double3 barry;
       double length = 100.;
       bool is_hit = imageplane.Intersect({pos, s.coordinates}, 0., length, barry);

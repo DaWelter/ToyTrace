@@ -409,7 +409,7 @@ PhotonmappingWorker::PhotonmappingWorker(PhotonmappingRenderingAlgo *master)
 void PhotonmappingWorker::StartNewPass(const LambdaSelection &lambda_selection)
 {
   this->lambda_selection = lambda_selection;
-  context = PathContext{lambda_selection.indices, TransportType::IMPORTANCE};
+  context = PathContext{lambda_selection, TransportType::IMPORTANCE};
 //   photon_volume_blur_weight = 1.0/(UnitSphereVolume*Cubed(master->current_volume_photon_radius));
 //   photon_surface_blur_weight = 1.0/(UnitDiscSurfaceArea*Sqr(master->current_surface_photon_radius));
   photons_surface.clear();
@@ -584,7 +584,7 @@ CameraRenderWorker::CameraRenderWorker(Photonmapping::PhotonmappingRenderingAlgo
 void CameraRenderWorker::StartNewPass(const LambdaSelection& lambda_selection)
 {
   this->lambda_selection = lambda_selection;
-  context = PathContext{lambda_selection.indices, TransportType::RADIANCE};
+  context = PathContext{lambda_selection, TransportType::RADIANCE};
   surface_photon_radius_2 = Sqr(master->current_surface_photon_radius);
   volume_photon_radius_2 = Sqr(master->current_volume_photon_radius);
   photon_volume_blur_weight = 1.0/(UnitSphereVolume*Cubed(master->current_volume_photon_radius));

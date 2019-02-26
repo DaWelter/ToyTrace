@@ -17,23 +17,28 @@ enum TransportType : char
   IMPORTANCE
 };
 
+
+struct LambdaSelection
+{
+  Index3 indices;  // Wavelength bin indices.
+  Spectral3 weights; // Monte-carlo weight comprising sensor sensitivity over selection probability.
+  Wavelengths3 wavelengths; // The actual wavelengths
+};
+
+
 struct PathContext
 {
   PathContext() = default;
-  explicit PathContext(const Index3 &_lambda_idx, TransportType _transport = RADIANCE )
-    : lambda_idx(_lambda_idx), transport(_transport)
+  explicit PathContext(const LambdaSelection &_lambdas, TransportType _transport = RADIANCE )
+    : lambda_idx(_lambdas.indices), wavelengths{_lambdas.wavelengths}, transport(_transport)
   {}
   Index3 lambda_idx {};
+  Wavelengths3 wavelengths {};
   TransportType transport { RADIANCE };
   int pixel_x = {-1};
   int pixel_y = {-1};
 };
 
-struct LambdaSelection
-{
-  Index3 indices;  // Wavelength bin indices.
-  Spectral3 weights; // Sensitivity to wavelength (which ist constant = 1) divided by one over selection probability.
-};
 
 
 struct LambdaSelectionStrategy
@@ -61,12 +66,23 @@ struct LambdaSelectionStrategy
     return idx[0];
   }
   
+  static Wavelengths3 SampleWavelengthStrata(const Index3 &bin_indices, Sampler &sampler)
+  {
+    Wavelengths3 wl;
+    for (int i=0; i<static_size<Spectral3>(); ++i)
+    {
+      auto bounds  = Color::GetWavelengthBinBounds(bin_indices[i]);
+      wl[i] = bounds.first + sampler.Uniform01()*(bounds.second-bounds.first);
+    }
+    return wl;
+  }
+  
   LambdaSelection WithWeights(Sampler &sampler) const
   {
     int main_idx = sampler.UniformInt(0, strata_size-1);
     auto idx     = MakeIndices(main_idx);
     auto weights = Take(lambda_weights, idx);
-    return LambdaSelection{idx, weights};
+    return LambdaSelection{idx, weights, SampleWavelengthStrata(idx, sampler)};
   }
 };
 
@@ -121,10 +137,20 @@ public:
     int lambda_idx = current_selection_permutation[current_idx];
     auto idx     = MakeIndices(lambda_idx);
     auto weights = Spectral3{strata_size};
-    return LambdaSelection{idx, weights};
+    return LambdaSelection{idx, weights, LambdaSelectionStrategy::SampleWavelengthStrata(idx, sampler)};
   }
 };
 
+
+inline LambdaSelection SelectRgbPrimaryWavelengths()
+{
+  Index3 idx = Color::LambdaIdxClosestToRGBPrimaries();
+  return {
+    idx,
+    Spectral3::Ones(),
+    Take(Color::GetWavelengths(),idx)
+  };
+}
 
 
 

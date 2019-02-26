@@ -284,11 +284,11 @@ inline OrthogonalSystemZAligned(const Eigen::MatrixBase<Derived> &_Z)
   return m;
 }
 
-
-template<class T, int N, int M>
-inline Eigen::Array<T,M,1> Take(const Eigen::Array<T,N,1>& u, const Eigen::Array<int, M, 1> &indices)
+template<class Derived, int M>
+inline auto Take(const Eigen::ArrayBase<Derived>& u, const Eigen::Array<int, M, 1> &indices)
 {
-  Eigen::Array<T,M,1> ret;
+  using Scalar = typename Eigen::internal::traits<Derived>::Scalar;
+  Eigen::Array<Scalar,M,1> ret;
   for (int i=0; i<indices.size(); ++i)
   {
     assert(indices[i] >= 0 && indices[i]<u.size());
