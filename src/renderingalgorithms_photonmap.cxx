@@ -30,14 +30,15 @@ using SimplePixelByPixelRenderingDetails::SamplesPerPixelScheduleConstant;
 class PhotonmappingRenderingAlgo;
 
 //#define DEBUG_BUFFERS
-#define LOGGING
+//#define LOGGING
 
 struct Photon
 {
   Double3 position;
   Spectral3 weight;
   Float3 direction;
-  int level;
+  short level;
+  bool monochromatic;
 };
 
 
@@ -53,6 +54,7 @@ class PhotonmappingWorker
   LambdaSelection lambda_selection;
   PathContext context;
   RayTermination ray_termination;
+  bool monochromatic = false;
 //   double photon_volume_blur_weight;
 //   double photon_surface_blur_weight;
 private:
@@ -90,6 +92,7 @@ class CameraRenderWorker
   PathContext context;
   RayTermination ray_termination;
   int current_node_count = 0;
+  bool monochromatic = false;
   int pixel_index = 0;
   double volume_photon_radius_2;
   double surface_photon_radius_2;
@@ -105,6 +108,7 @@ private:
   void MaybeAddEmission(Ray& ray, const SurfaceInteraction &interaction, Spectral3& weight_accum);
   void MaybeAddEmission(Ray& ray, const VolumeInteraction &interaction, Spectral3& weight_accum);
   void AddPhotonBeamContributions(const RaySegment &segment, const Medium &medium, const PiecewiseConstantTransmittance &pct, const Spectral3 &track_weight);
+  void AddToImageBuffer(const Spectral3 &measurement_estimate);
 public:
   CameraRenderWorker(PhotonmappingRenderingAlgo *master);
   void StartNewPass(const LambdaSelection &lambda_selection);
@@ -433,6 +437,7 @@ void PhotonmappingWorker::TracePhotons(int count)
   for (int photon_num = 0; photon_num < count; ++photon_num, ++num_photons_traced)
   {
     current_node_count = 2;
+    monochromatic = false;
     // Weights due to wavelength selection is accounted for in view subpath weights.
     current_emission.setConstant(1.);
     Ray ray = GeneratePrimaryRay(current_emission);
@@ -481,7 +486,8 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
         interaction.pos,
         /*photon_surface_blur_weight**/weight_accum*current_emission,
         ray.dir.cast<float>(),
-        current_node_count
+        (short)current_node_count,
+        monochromatic
       });
       current_node_count++;
       SpectralMaxInplace(max_throughput_weight, lambda_selection, weight_accum);
@@ -494,7 +500,8 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
         interaction.pos,
         /*photon_volume_blur_weight**/weight_accum*current_emission,
         ray.dir.cast<float>(),
-        current_node_count
+        (short)current_node_count,
+        monochromatic
       });
       current_node_count++;
       SpectralMaxInplace(max_throughput_weight, lambda_selection, weight_accum);
@@ -520,9 +527,11 @@ bool PhotonmappingWorker::ScatterAt(Ray& ray, const SurfaceInteraction& interact
   l.weight_before = weight_accum;
 should_log_path |= weight_accum.maxCoeff() > log_path_weight_threshold;
 #endif
-  auto smpl = GetShaderOf(interaction,master->scene).SampleBSDF(-ray.dir, interaction, sampler, context);
+  const auto &shader = GetShaderOf(interaction,master->scene);
+  auto smpl = shader.SampleBSDF(-ray.dir, interaction, sampler, context);
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, current_node_count, sampler))
   {
+    monochromatic |= shader.require_monochromatic;
     smpl.value *= DFactorOf(interaction, smpl.coordinates) / smpl.pdf_or_pmf;
     SpectralMaxInplace(max_uncorrected_bsdf_weight, lambda_selection, smpl.value);
     auto corr = BsdfCorrectionFactor(-ray.dir, interaction, smpl.coordinates, context.transport);
@@ -600,6 +609,7 @@ void CameraRenderWorker::Render(int pixel_index_, int batch_size, int samples_pe
     for (int i=0; i<samples_per_pixel; ++i)
     {
       current_node_count = 2;
+      monochromatic = false;
       Spectral3 weight_accum = lambda_selection.weights;
       Ray ray = GeneratePrimaryRay(weight_accum);
       bool keepgoing = true;
@@ -688,11 +698,13 @@ bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(Ray& ray, Spectral
 
 bool CameraRenderWorker::MaybeScatterAtSpecularLayer(Ray& ray, const SurfaceInteraction &interaction, Spectral3& weight_accum, const Spectral3 &track_weight)
 {
-  auto smpl = GetShaderOf(interaction,master->scene).SampleBSDF(-ray.dir, interaction, sampler, context);
+  const auto &shader = GetShaderOf(interaction,master->scene);
+  auto smpl = shader.SampleBSDF(-ray.dir, interaction, sampler, context);
   if (!smpl.pdf_or_pmf.IsFromDelta())
     return false;
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, current_node_count, sampler))
   {
+    monochromatic |= shader.require_monochromatic;
     weight_accum *= smpl.value * (BsdfCorrectionFactor(-ray.dir, interaction, smpl.coordinates, context.transport) *
                   DFactorOf(interaction, smpl.coordinates) / smpl.pdf_or_pmf);
     ray.dir = smpl.coordinates;
@@ -732,6 +744,12 @@ void CameraRenderWorker::MaybeAddEmission(Ray& , const VolumeInteraction &intera
 }
 
 
+inline Spectral3 MaybeReWeightToMonochromatic(const Spectral3 &w, bool monochromatic)
+{
+  return monochromatic ? Spectral3{w[0]*3._sp,0,0} : w;
+}
+
+
 void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& interaction, const Double3 &incident_dir, const Spectral3& path_weight)
 {
   Spectral3 reflect_estimator{0.};
@@ -741,19 +759,20 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
       return;
     Spectral3 bsdf_val = GetShaderOf(interaction,master->scene).EvaluateBSDF(-incident_dir, interaction, -photon.direction.cast<double>(), context, nullptr);
     bsdf_val *= BsdfCorrectionFactor(-incident_dir, interaction, -photon.direction.cast<double>(), context.transport);
-    //bsdf_val *= DFactorOf(interaction, -photon.direction.cast<double>());
-    reflect_estimator += photon.weight*bsdf_val;
+    // The cos-factor (d-factor) cancels with the conversion factor of the probability density when going from solid angle to area! (?)
+    // TODO: Do I need the correction factor?
+    Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight*bsdf_val, photon.monochromatic | monochromatic);
+    reflect_estimator += weight;
 #ifdef DEBUG_BUFFERS
     if (photon.level < master->debugbuffers.size()) {
-      Spectral3 w = path_weight*photon.weight*bsdf_val*photon_surface_blur_weight/master->num_photons_traced;
+      Spectral3 w = path_weight*weight*photon_surface_blur_weight/master->num_photons_traced;
       auto color = Color::SpectralSelectionToRGB(w, lambda_selection.indices);
       master->debugbuffers[photon.level].Insert(pixel_index, color);
     }
 #endif
   });
   Spectral3 weight = path_weight*reflect_estimator*(photon_surface_blur_weight/master->num_photons_traced);
-  auto color = Color::SpectralSelectionToRGB(weight, lambda_selection.indices);
-  master->buffer.Insert(pixel_index, color);
+  AddToImageBuffer(weight);
 }
 
 
@@ -765,18 +784,18 @@ void CameraRenderWorker::AddPhotonContributions(const VolumeInteraction& interac
     if ((photon.position - interaction.pos).squaredNorm() > volume_photon_radius_2)
       return;
     Spectral3 scatter_val = interaction.medium().EvaluatePhaseFunction(-incident_dir, interaction.pos, -photon.direction.cast<double>(), context, nullptr);
-    inscatter_estimator += photon.weight*scatter_val;
+    Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight*scatter_val, photon.monochromatic | monochromatic);
+    inscatter_estimator += weight;
 #ifdef DEBUG_BUFFERS
     if (photon.level < master->debugbuffers.size()) {
-      Spectral3 w = interaction.sigma_s*path_weight*photon.weight*scatter_val*photon_volume_blur_weight*master->num_photons_traced;
+      Spectral3 w = interaction.sigma_s*path_weight*weight*photon_volume_blur_weight*master->num_photons_traced;
       auto color = Color::SpectralSelectionToRGB(w, lambda_selection.indices);
       master->debugbuffers[photon.level].Insert(pixel_index, color);
     }
 #endif
   });
   Spectral3 weight = interaction.sigma_s*path_weight*inscatter_estimator*(photon_volume_blur_weight/master->num_photons_traced);
-  auto color = Color::SpectralSelectionToRGB(weight, lambda_selection.indices);
-  master->buffer.Insert(pixel_index, color);
+  AddToImageBuffer(weight);
 }
 
 
@@ -791,10 +810,17 @@ void CameraRenderWorker::AddPhotonBeamContributions(const RaySegment &segment, c
     const auto &photon = master->photons_volume[photon_idx[i]];
     Spectral3 scatter_val = medium.EvaluatePhaseFunction(-segment.ray.dir, photon.position, -photon.direction.cast<double>(), context, nullptr);
     auto [sigma_s, _] = medium.EvaluateCoeffs(photon.position, context);
-    inscatter_estimator += scatter_val*sigma_s*photon.weight*pct(photon_distance[i]);
+    Spectral3 weight = MaybeReWeightToMonochromatic(scatter_val*sigma_s*photon.weight*pct(photon_distance[i]), photon.monochromatic | monochromatic);
+    inscatter_estimator += weight;
   }
   inscatter_estimator *= path_weight*(photon_surface_blur_weight/master->num_photons_traced);
-  auto color = Color::SpectralSelectionToRGB(inscatter_estimator, lambda_selection.indices);
+  AddToImageBuffer(inscatter_estimator);
+}
+
+
+void CameraRenderWorker::AddToImageBuffer(const Spectral3& measurement_estimate)
+{
+  auto color = Color::SpectralSelectionToRGB(measurement_estimate, lambda_selection.indices);
   master->buffer.Insert(pixel_index, color);
 }
 

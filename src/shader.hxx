@@ -17,6 +17,7 @@ using ScatterSample = Sample<Double3, Spectral3, TagScatterSample>;
 class Shader
 {
 public:
+  bool require_monochromatic = false;
   Shader() {}
   virtual ~Shader() {}
   virtual ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const = 0;
@@ -66,8 +67,9 @@ public:
 class SpecularTransmissiveDielectricShader : public Shader
 {
   double ior_ratio; // Inside ior / Outside ior
+  double ior_lambda_coeff; // IOR gradient w.r.t. wavelength, taken at the center of the spectrum.
 public:
-  SpecularTransmissiveDielectricShader(double _ior_ratio);
+  SpecularTransmissiveDielectricShader(double _ior_ratio, double ior_lambda_coeff_ = 0.);
   ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
   Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };

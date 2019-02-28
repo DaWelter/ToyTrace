@@ -943,7 +943,9 @@ void NFFParser::ParseYaml(const std::string& yaml_section_str, Scope& scope)
    *   scale: [x, y, z]
    *   angle_in_degree
    * 
-   * shader: myshader
+   * shader:
+   *   class: ...
+   *   name: ...
    *   param1: ....
    *   param2: ....
    * 
@@ -1005,7 +1007,26 @@ void NFFParser::ParseYamlNode(const std::string &key, const YAML::Node &node, Sc
   }
   else if (key == "shader")
   {
-    
+    auto class_ = node["class"].as<std::string>();
+    auto name = node["name"].as<std::string>();
+    if (class_ == "speculartransmissivedielectric")
+    {
+      auto ior_ratio = node["ior_ratio"].as<double>();
+      auto abbe_node = node["abbe_number"];
+      double ior_coeff = 0.;
+      if (abbe_node)
+      {
+        double v = abbe_node.as<double>();
+        // https://en.wikipedia.org/wiki/Abbe_number
+        // v = (n(589)-1) / (n(486) - n(656))
+        // Assuming that ior_ratio is the number for lambda=589nm.
+        ior_coeff = (ior_ratio-1)/v/(656-486); 
+      }
+      InsertAndActivate(name.c_str(), scope,
+        std::make_unique<SpecularTransmissiveDielectricShader>(ior_ratio, ior_coeff));
+    }
+    else
+      throw MakeException(strconcat("Unkown shader class in yaml: ", class_));
   }
 }
 

@@ -174,10 +174,11 @@ inline double FresnelReflectivity(
 }
 
 
-SpecularTransmissiveDielectricShader::SpecularTransmissiveDielectricShader(double _ior_ratio) 
-  : Shader{}, ior_ratio{_ior_ratio}
+SpecularTransmissiveDielectricShader::SpecularTransmissiveDielectricShader(double _ior_ratio, double ior_lambda_coeff_) 
+  : Shader{}, ior_ratio{_ior_ratio}, ior_lambda_coeff{ior_lambda_coeff_}
 {
-  
+  if (ior_lambda_coeff != 0)
+    require_monochromatic = true;
 }
 
 
@@ -191,7 +192,16 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
   shn_dot_i = is_consistent_normal ? shn_dot_i : geomn_dot_i;
   // Continue with shader sampling ...
   bool entering = Dot(surface_hit.geometry_normal, reverse_incident_dir) > 0.;
-  double eta_i_over_t = entering ? 1./ior_ratio  : ior_ratio; // eta_i refers to ior on the side of the incomming random walk! 
+  double eta_i_over_t = [this,entering,&context]() {
+    if (ior_lambda_coeff == 0)
+      return entering ? 1./ior_ratio  : ior_ratio; // eta_i refers to ior on the side of the incomming random walk!
+    else
+    {
+      double ior = ior_ratio + ior_lambda_coeff*context.wavelengths[0];
+      return entering ? 1./ior  : ior;
+    }
+  }();
+  
   assert(shn_dot_i >=0); // Because we require geometry normal to point to the 
   // incident direction and because shading normal must have dot product with 
   // same sign as dot product with geometry normal.
@@ -254,6 +264,10 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
       double tmp = OneOverCosThetaLight(shn_dot_i, -Dot(*wt, shading_normal));
       smpl.value = Spectral3{(1.-fresnel_reflectivity)*tmp*radiance_weight};
     }
+  }
+  if (ior_lambda_coeff != 0)
+  {
+    smpl.value[1] = smpl.value[2] = 0;
   }
   return smpl;
 }
