@@ -25,7 +25,7 @@ struct RenderingParameters
   std::string pt_sample_mode = {};
   std::string algo_name = {};
   std::vector<std::string> search_paths = { "" };
-  double initial_photon_radius = 0.1;
+  double initial_photon_radius = 0.01;
 };
 
 
