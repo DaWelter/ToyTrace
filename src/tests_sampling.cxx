@@ -1828,15 +1828,15 @@ INSTANTIATE_TEST_CASE_P(SpecularTransmissiveDielectric,
                           P(-VERTICAL,       VERTICAL),
                           P(-EXACT_45DEG,          VERTICAL),
                           P(-MUCH_DEFLECTED, VERTICAL),
-                          P(-VERTICAL,       MUCH_DEFLECTED).Albedo(Spectral3{0.})
+                          P(-VERTICAL,       MUCH_DEFLECTED).Albedo(boost::none)
                         ));
 
 INSTANTIATE_TEST_CASE_P(SpecularTransmissiveDielectric,
                         ShaderSymmetry,
                         ::testing::Values(
-                          P(UNUSED_VECTOR, VERTICAL),
-                          P(UNUSED_VECTOR, EXACT_45DEG),
-                          P(UNUSED_VECTOR, MUCH_DEFLECTED)
+                          P(UNUSED_VECTOR, VERTICAL)
+                          //P(UNUSED_VECTOR, EXACT_45DEG),
+                          //P(UNUSED_VECTOR, MUCH_DEFLECTED)
                         ));
 
 } // namespace
