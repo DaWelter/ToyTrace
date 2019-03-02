@@ -30,7 +30,7 @@ using SimplePixelByPixelRenderingDetails::SamplesPerPixelScheduleConstant;
 class PhotonmappingRenderingAlgo;
 
 //#define DEBUG_BUFFERS
-//#define LOGGING
+#define LOGGING
 
 struct Photon
 {
@@ -73,7 +73,7 @@ public:
   double max_bsdf_correction_weight{0};
   SpectralN max_uncorrected_bsdf_weight{0};
   bool should_log_path = false;
-  static constexpr double log_path_weight_threshold = 200.;
+  static constexpr double log_path_weight_threshold = 2000.;
   Pathlogger logger;
   
   PhotonmappingWorker(PhotonmappingRenderingAlgo *master);
@@ -377,7 +377,7 @@ struct EmitterSampleVisitor
     auto dir_smpl = mat.emitter->TakeDirectionSampleFrom(area_smpl.coordinates, this_->sampler, this_->context);
     weight = dir_smpl.value / ((double)area_smpl.pdf_or_pmf*(double)dir_smpl.pdf_or_pmf*prob);
     SurfaceInteraction interaction{area_smpl.coordinates};
-    weight *= DFactorOf(interaction, dir_smpl.coordinates);
+    weight *= DFactorPBRT(interaction, dir_smpl.coordinates);
     out_ray = Ray{interaction.pos, dir_smpl.coordinates};
     out_ray.org += AntiSelfIntersectionOffset(interaction, out_ray.dir);
     this_->medium_tracker.initializePosition(out_ray.org);
@@ -532,9 +532,9 @@ should_log_path |= weight_accum.maxCoeff() > log_path_weight_threshold;
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, current_node_count, sampler))
   {
     monochromatic |= shader.require_monochromatic;
-    smpl.value *= DFactorOf(interaction, smpl.coordinates) / smpl.pdf_or_pmf;
+    smpl.value *= DFactorPBRT(interaction,smpl.coordinates) / smpl.pdf_or_pmf;
     SpectralMaxInplace(max_uncorrected_bsdf_weight, lambda_selection, smpl.value);
-    auto corr = BsdfCorrectionFactor(-ray.dir, interaction, smpl.coordinates, context.transport);
+    auto corr = BsdfCorrectionFactorPBRT(-ray.dir, interaction, smpl.coordinates, 2.);
     smpl.value *= corr;
     max_bsdf_correction_weight = std::max(max_bsdf_correction_weight, corr);
     weight_accum *= smpl.value;
@@ -705,8 +705,8 @@ bool CameraRenderWorker::MaybeScatterAtSpecularLayer(Ray& ray, const SurfaceInte
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, current_node_count, sampler))
   {
     monochromatic |= shader.require_monochromatic;
-    weight_accum *= smpl.value * (BsdfCorrectionFactor(-ray.dir, interaction, smpl.coordinates, context.transport) *
-                  DFactorOf(interaction, smpl.coordinates) / smpl.pdf_or_pmf);
+    weight_accum *= smpl.value * (BsdfCorrectionFactorPBRT(-ray.dir, interaction, smpl.coordinates, 2.0) *
+                  DFactorPBRT(interaction, smpl.coordinates) / smpl.pdf_or_pmf);
     ray.dir = smpl.coordinates;
     ray.org = interaction.pos + AntiSelfIntersectionOffset(interaction, ray.dir);
     if (Dot(ray.dir, interaction.normal) < 0.)
@@ -758,9 +758,14 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
     if ((photon.position - interaction.pos).squaredNorm() > surface_photon_radius_2)
       return;
     Spectral3 bsdf_val = GetShaderOf(interaction,master->scene).EvaluateBSDF(-incident_dir, interaction, -photon.direction.cast<double>(), context, nullptr);
-    bsdf_val *= BsdfCorrectionFactor(-incident_dir, interaction, -photon.direction.cast<double>(), context.transport);
-    // The cos-factor (d-factor) cancels with the conversion factor of the probability density when going from solid angle to area! (?)
-    // TODO: Do I need the correction factor?
+    {
+      //double f1 = std::abs(Dot(interaction.shading_normal, incident_dir))/std::abs(Dot(interaction.normal, incident_dir));
+      double f2 = std::abs(Dot(interaction.shading_normal, photon.direction.cast<double>()))/std::abs(Dot(interaction.normal, photon.direction.cast<double>()));
+             f2 = std::min(2., f2);
+      bsdf_val *= f2;
+    //bsdf_val *= BsdfCorrectionFactorPBRT(-photon.direction.cast<double>(), interaction, -incident_dir);
+    //bsdf_val *= DFactorPBRT(interaction, -photon.direction.cast<double>());
+    }
     Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight*bsdf_val, photon.monochromatic | monochromatic);
     reflect_estimator += weight;
 #ifdef DEBUG_BUFFERS
