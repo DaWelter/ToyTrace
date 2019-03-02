@@ -761,10 +761,6 @@ transform:
   pos: [ 1, 2, 3]
   hpb: [ 0, 90, 0]
   angle_in_degree : true
-shader: 
-  name: itsname
-  type: itstype
-  param: foo
 }yaml
 s 0 0 0 1.0
 )""";
