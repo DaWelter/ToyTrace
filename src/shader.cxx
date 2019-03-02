@@ -234,25 +234,15 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
     Double3 wr = Reflected(reverse_incident_dir, reflecting_normal);
     smpl.coordinates = wr;
     smpl.pdf_or_pmf = Pdf::MakeFromDelta(pr_sample_reflect);
-    if (OnSameSide(reverse_incident_dir, surface_hit, wr))
-    {
-      double tmp = 1.0/std::abs(Dot(wr, surface_hit.shading_normal));
-      smpl.value = Spectral3{fresnel_reflectivity*tmp};
-    }
-    else
-      smpl.value = Spectral3{0.};
+    double tmp = 1.0/std::abs(Dot(wr, surface_hit.shading_normal));
+    smpl.value = Spectral3{fresnel_reflectivity*tmp};
   }
   else // Transmission
   {
     smpl.coordinates = *wt;
     smpl.pdf_or_pmf = Pdf::MakeFromDelta(1.-pr_sample_reflect);
-    if (OnSameSide(reverse_incident_dir, surface_hit, *wt))
-      smpl.value = Spectral3{0.}; // Should be on other side of geometric surface, but we are not!
-    else
-    {
-      double tmp = 1.0/std::abs(Dot(*wt, surface_hit.shading_normal));
-      smpl.value = Spectral3{(1.-fresnel_reflectivity)*tmp*radiance_weight};
-    }
+    double tmp = 1.0/std::abs(Dot(*wt, surface_hit.shading_normal));
+    smpl.value = Spectral3{(1.-fresnel_reflectivity)*tmp*radiance_weight};
   }
   if (ior_lambda_coeff != 0)
   {
