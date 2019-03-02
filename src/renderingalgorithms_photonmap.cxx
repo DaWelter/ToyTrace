@@ -657,7 +657,7 @@ bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(Ray& ray, Spectral
     /*volume=*/[&](const VolumeInteraction &interaction, double distance, const Spectral3 &track_weight) -> bool
     {
       weight_accum *= track_weight;
-      //AddPhotonContributions(interaction, ray.dir, weight_accum);
+      AddPhotonContributions(interaction, ray.dir, weight_accum);
       MaybeAddEmission(ray, interaction, weight_accum);
       return false;
     },
