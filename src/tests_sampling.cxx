@@ -1820,7 +1820,8 @@ INSTANTIATE_TEST_CASE_P(SpecularTransmissiveDielectric,
                           P(VERTICAL,       VERTICAL),
                           P(EXACT_45DEG,          VERTICAL),
                           P(MUCH_DEFLECTED, VERTICAL),
-                          // Not checking the total scattered radiance here???
+                          // No check for energy conservation, since shading normals break it. See Veach pg. 158, Sec 5.3.5
+                                          
                           // If reflected, the exit direction is below the goemetrical surface, in case of which the contribution is canceled.
                           // However if transmitted, the exit direction is correctly below the geom. surface. So this makes a contribution to
                           // the integral check. But since the energy from reflection is missing, the total scattered radiance is hard to predict.
@@ -1835,6 +1836,8 @@ INSTANTIATE_TEST_CASE_P(SpecularTransmissiveDielectric,
                         ShaderSymmetry,
                         ::testing::Values(
                           P(UNUSED_VECTOR, VERTICAL)
+                          // Shading normals make the BSDF asymmetric and break energy conservation.
+                          // So I probably cannot expect this test to succeed.
                           //P(UNUSED_VECTOR, EXACT_45DEG),
                           //P(UNUSED_VECTOR, MUCH_DEFLECTED)
                         ));

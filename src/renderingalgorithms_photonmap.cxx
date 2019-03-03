@@ -759,12 +759,14 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
       return;
     Spectral3 bsdf_val = GetShaderOf(interaction,master->scene).EvaluateBSDF(-incident_dir, interaction, -photon.direction.cast<double>(), context, nullptr);
     {
-      //double f1 = std::abs(Dot(interaction.shading_normal, incident_dir))/std::abs(Dot(interaction.normal, incident_dir));
-      double f2 = std::abs(Dot(interaction.shading_normal, photon.direction.cast<double>()))/std::abs(Dot(interaction.normal, photon.direction.cast<double>()));
-             f2 = std::min(2., f2);
-      bsdf_val *= f2;
-    //bsdf_val *= BsdfCorrectionFactorPBRT(-photon.direction.cast<double>(), interaction, -incident_dir);
-    //bsdf_val *= DFactorPBRT(interaction, -photon.direction.cast<double>());
+      // This is Veach's shading correction for the normal (non-adjoint) BSDF, defined in Eq. 5.17, pg. 152.
+      // The reason it is added here and why there is no bare cos(Ng,wi), is that when the photon is cast to this point, the integral transform
+      // from area integration to solid angle "consumes" the cos(Ng,wi) factor, leaving only the following correction.
+      double shading_correction = std::abs(Dot(interaction.shading_normal, photon.direction.cast<double>()))/std::abs(Dot(interaction.normal, photon.direction.cast<double>()));
+             shading_correction = std::min(2., shading_correction);
+      // Or, seen as only in the path integration framework, the cos factor cancels with the cos factor of the PDF. 
+      // See also Eq. 19 in Jarosz (2008) "The Beam Radiance Estimate for Volumetric Photon Mapping"
+      bsdf_val *= shading_correction;
     }
     Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight*bsdf_val, photon.monochromatic | monochromatic);
     reflect_estimator += weight;

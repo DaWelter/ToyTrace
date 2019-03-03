@@ -334,6 +334,8 @@ inline double BsdfCorrectionFactorPBRT(const Double3 &reverse_incident_dir, cons
   //                                                                                          the corresponding 1/wr.ns term of specular BSDFs. (*)
   //  (*)  This is the important difference to my non-PBRT style correction. Here we cancel wr.ns of the specular BSDF exactly, whereas the other correction
   //  routine can let wr.ng / wr.ns grow a lot. Here we have  wr.ns / wr.ns * clamp(wr.ns * ....).
+  //
+  //  One more note: For photon mapping, Veach suggests to split particles. See pg. 160. 
   return std::min(nom/(denom + Epsilon), clamp);
 }
 
