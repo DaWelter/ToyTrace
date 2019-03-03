@@ -186,10 +186,7 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
 {
   double shn_dot_i = Dot(surface_hit.shading_normal, reverse_incident_dir);
   double geomn_dot_i = Dot(surface_hit.normal, reverse_incident_dir);
-  const bool is_consistent_normal = shn_dot_i * geomn_dot_i >= 0.;
-  // Use geometry normal if incident direction comes in below the shading ground plane.
-  Double3 reflecting_normal = is_consistent_normal ? surface_hit.shading_normal : surface_hit.normal;
-  shn_dot_i = is_consistent_normal ? shn_dot_i : geomn_dot_i;
+
   // Continue with shader sampling ...
   bool entering = Dot(surface_hit.geometry_normal, reverse_incident_dir) > 0.;
   double eta_i_over_t = [this,entering,&context]() {
@@ -213,37 +210,49 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
   there must be two different sampling procedures, or an explicit flag that specifies whether
   the direct or adjoint BSDF is being sampled."! */
 
+  // Shading normals cause violation of energy conservation?
+  // Well how about simply removing a little bit of energy every bounce.
+  // That should help convergence.
+  const double damping_factor = 0.95; 
   double radiance_weight = (context.transport==RADIANCE) ? Sqr(eta_i_over_t) : 1.;
   
   double fresnel_reflectivity = 1.;
-  boost::optional<Double3> wt = Refracted(reverse_incident_dir, reflecting_normal, eta_i_over_t);
+  boost::optional<Double3> wt = Refracted(reverse_incident_dir, surface_hit.shading_normal, eta_i_over_t);
   if (wt)
   {
-    double abs_shn_dot_r = std::abs(Dot(*wt, reflecting_normal));
-    fresnel_reflectivity = FresnelReflectivity(shn_dot_i,abs_shn_dot_r, eta_i_over_t);
+    double abs_shn_dot_r = std::abs(Dot(*wt, surface_hit.shading_normal));
+    fresnel_reflectivity = FresnelReflectivity(std::abs(shn_dot_i), abs_shn_dot_r, eta_i_over_t);
   }
   assert (fresnel_reflectivity >= -0.00001 && fresnel_reflectivity <= 1.000001);
   
-  const double pr_sample_reflect = fresnel_reflectivity;
-  bool do_sample_reflection = sampler.Uniform01() < pr_sample_reflect;
+  bool do_sample_reflection = sampler.Uniform01() < fresnel_reflectivity;
   assert (do_sample_reflection || (bool)(wt));
   
+  // First determine PDF and randomwalk direction.
   ScatterSample smpl;
   if (do_sample_reflection)
   {
-    Double3 wr = Reflected(reverse_incident_dir, reflecting_normal);
-    smpl.coordinates = wr;
-    smpl.pdf_or_pmf = Pdf::MakeFromDelta(pr_sample_reflect);
-    double tmp = 1.0/std::abs(Dot(wr, surface_hit.shading_normal));
-    smpl.value = Spectral3{fresnel_reflectivity*tmp};
+    smpl.coordinates = Reflected(reverse_incident_dir, surface_hit.shading_normal);
+    smpl.pdf_or_pmf = Pdf::MakeFromDelta(fresnel_reflectivity);
   }
-  else // Transmission
+  else
   {
     smpl.coordinates = *wt;
-    smpl.pdf_or_pmf = Pdf::MakeFromDelta(1.-pr_sample_reflect);
-    double tmp = 1.0/std::abs(Dot(*wt, surface_hit.shading_normal));
-    smpl.value = Spectral3{(1.-fresnel_reflectivity)*tmp*radiance_weight};
+    smpl.pdf_or_pmf = Pdf::MakeFromDelta(1.-fresnel_reflectivity);
   }
+  
+  // Veach style handling of shading normals. See  Veach Figure 5.8.
+  // In this case, the BRDF and the BTDF are almost equal.
+  smpl.value = damping_factor * (double)smpl.pdf_or_pmf / std::abs(Dot(smpl.coordinates, surface_hit.shading_normal));
+  // Must use the fresnel_reflectivity term like in the pdf to make it cancel.
+  // Then I must use the dot product with the shading normal to make it cancel with the 
+  // corresponding term in the reflection integration (outside of BSDF code).
+  if (Dot(smpl.coordinates, surface_hit.normal) < 0) 
+  {
+    // Evaluate BTDF
+    smpl.value *= radiance_weight;
+  }
+  
   if (ior_lambda_coeff != 0)
   {
     smpl.value[1] = smpl.value[2] = 0;
