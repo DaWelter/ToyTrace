@@ -29,6 +29,63 @@ using SimplePixelByPixelRenderingDetails::SamplesPerPixelSchedule;
 using SimplePixelByPixelRenderingDetails::SamplesPerPixelScheduleConstant;
 class PhotonmappingRenderingAlgo;
 
+
+class Kernel2d
+{
+  double radius_inv_2;
+
+public:  
+  Kernel2d(double radius = 1.0) : radius_inv_2{1.0/Sqr(radius)} 
+  {}
+  
+  // Returns negative number if input distance is larger than kernel radius.
+  double operator()(double rr) const
+  {
+    const double tmp = rr*radius_inv_2;
+    if (tmp >= 1.)
+      return 0.;
+    return radius_inv_2*CanonicalKernel2d(tmp);
+  }
+  
+private:
+  // The Kernel is normalized in the sense that int_S2 K(r) r dr dtheta = 1
+  // Note that this function takes r squared! For efficiency.
+  // It is Silverman’s two-dimensional biweight kernel as used by Jarosz et al. (2008)
+  static inline double CanonicalKernel2d(double rr)
+  {
+    return 3./Pi*Sqr(1.-rr);
+  }
+};
+
+
+// Constant Kernel.
+class Kernel3d
+{
+  double radius_inv_2;
+  double normalization;
+
+public:
+  Kernel3d(double radius = 1.0) : 
+    radius_inv_2{1.0/Sqr(radius)}, normalization{1.0/(Cubed(radius)*UnitSphereVolume)}
+    {}
+  
+  // Returns negative number if input distance is larger than kernel radius.
+  double operator()(double rr) const
+  {
+    const double indicator = Heaviside(1.0 - rr*radius_inv_2);
+    return normalization*indicator;
+  }
+};
+
+
+template<class K>
+inline double EvalKernel(const K &k, const Double3 &a, const Double3 &b)
+{
+  return k(LengthSqr(a - b));
+}
+
+
+
 //#define DEBUG_BUFFERS
 #define LOGGING
 
@@ -55,8 +112,6 @@ class PhotonmappingWorker
   PathContext context;
   RayTermination ray_termination;
   bool monochromatic = false;
-//   double photon_volume_blur_weight;
-//   double photon_surface_blur_weight;
 private:
   Ray GeneratePrimaryRay(Spectral3 &path_weight);
   bool TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &weight_accum);
@@ -94,10 +149,8 @@ class CameraRenderWorker
   int current_node_count = 0;
   bool monochromatic = false;
   int pixel_index = 0;
-  double volume_photon_radius_2;
-  double surface_photon_radius_2;
-  double photon_volume_blur_weight;
-  double photon_surface_blur_weight;
+  Kernel2d kernel2d;
+  Kernel3d kernel3d;
 private:
   Ray GeneratePrimaryRay(Spectral3 &path_weight);
   bool TrackToNextInteractionAndRecordPixel(Ray &ray, Spectral3 &weight_accum);
@@ -594,10 +647,8 @@ void CameraRenderWorker::StartNewPass(const LambdaSelection& lambda_selection)
 {
   this->lambda_selection = lambda_selection;
   context = PathContext{lambda_selection, TransportType::RADIANCE};
-  surface_photon_radius_2 = Sqr(master->current_surface_photon_radius);
-  volume_photon_radius_2 = Sqr(master->current_volume_photon_radius);
-  photon_volume_blur_weight = 1.0/(UnitSphereVolume*Cubed(master->current_volume_photon_radius));
-  photon_surface_blur_weight = 1.0/(UnitDiscSurfaceArea*Sqr(master->current_surface_photon_radius));
+  kernel2d = Kernel2d(master->current_surface_photon_radius);
+  kernel3d = Kernel3d(master->current_volume_photon_radius);
 }
 
 
@@ -755,7 +806,8 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
   Spectral3 reflect_estimator{0.};
     master->hashgrid_surface->Query(interaction.pos, [&](int photon_idx){
     const auto &photon = master->photons_surface[photon_idx];
-    if ((photon.position - interaction.pos).squaredNorm() > surface_photon_radius_2)
+    const double kernel_val = EvalKernel(kernel2d, photon.position, interaction.pos);
+    if (kernel_val <= 0.)
       return;
     Spectral3 bsdf_val = GetShaderOf(interaction,master->scene).EvaluateBSDF(-incident_dir, interaction, -photon.direction.cast<double>(), context, nullptr);
     {
@@ -766,11 +818,11 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
              shading_correction = std::min(2., shading_correction);
       // Or, seen as only in the path integration framework, the cos factor cancels with the cos factor of the PDF. 
       // See also Eq. 19 in Jarosz (2008) "The Beam Radiance Estimate for Volumetric Photon Mapping"
-      bsdf_val *= shading_correction;
+      bsdf_val *= shading_correction*kernel_val;
     }
     Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight*bsdf_val, photon.monochromatic | monochromatic);
     reflect_estimator += weight;
-#ifdef DEBUG_BUFFERS
+#ifdef DEBUG_BUFFERS 
     if (photon.level < master->debugbuffers.size()) {
       Spectral3 w = path_weight*weight*photon_surface_blur_weight/master->num_photons_traced;
       auto color = Color::SpectralSelectionToRGB(w, lambda_selection.indices);
@@ -778,7 +830,7 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
     }
 #endif
   });
-  Spectral3 weight = path_weight*reflect_estimator*(photon_surface_blur_weight/master->num_photons_traced);
+  Spectral3 weight = path_weight*reflect_estimator*(1.0/master->num_photons_traced);
   AddToImageBuffer(weight);
 }
 
@@ -788,10 +840,11 @@ void CameraRenderWorker::AddPhotonContributions(const VolumeInteraction& interac
   Spectral3 inscatter_estimator{0.};
   master->hashgrid_volume->Query(interaction.pos, [&](int photon_idx){
     const auto &photon = master->photons_volume[photon_idx];
-    if ((photon.position - interaction.pos).squaredNorm() > volume_photon_radius_2)
+    const double kernel_val = EvalKernel(kernel3d, photon.position, interaction.pos);
+    if (kernel_val <= 0.)
       return;
     Spectral3 scatter_val = interaction.medium().EvaluatePhaseFunction(-incident_dir, interaction.pos, -photon.direction.cast<double>(), context, nullptr);
-    Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight*scatter_val, photon.monochromatic | monochromatic);
+    Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight*scatter_val*kernel_val, photon.monochromatic | monochromatic);
     inscatter_estimator += weight;
 #ifdef DEBUG_BUFFERS
     if (photon.level < master->debugbuffers.size()) {
@@ -801,7 +854,7 @@ void CameraRenderWorker::AddPhotonContributions(const VolumeInteraction& interac
     }
 #endif
   });
-  Spectral3 weight = interaction.sigma_s*path_weight*inscatter_estimator*(photon_volume_blur_weight/master->num_photons_traced);
+  Spectral3 weight = interaction.sigma_s*path_weight*inscatter_estimator*(1.0/master->num_photons_traced);
   AddToImageBuffer(weight);
 }
 
@@ -817,10 +870,11 @@ void CameraRenderWorker::AddPhotonBeamContributions(const RaySegment &segment, c
     const auto &photon = master->photons_volume[photon_idx[i]];
     Spectral3 scatter_val = medium.EvaluatePhaseFunction(-segment.ray.dir, photon.position, -photon.direction.cast<double>(), context, nullptr);
     auto [sigma_s, _] = medium.EvaluateCoeffs(photon.position, context);
-    Spectral3 weight = MaybeReWeightToMonochromatic(scatter_val*sigma_s*photon.weight*pct(photon_distance[i]), photon.monochromatic | monochromatic);
+    const double kernel_value = EvalKernel(kernel2d, photon.position, segment.ray.PointAt(photon_distance[i]));
+    Spectral3 weight = MaybeReWeightToMonochromatic(kernel_value*scatter_val*sigma_s*photon.weight*pct(photon_distance[i]), photon.monochromatic | monochromatic);
     inscatter_estimator += weight;
   }
-  inscatter_estimator *= path_weight*(photon_surface_blur_weight/master->num_photons_traced);
+  inscatter_estimator *= path_weight*(1.0/master->num_photons_traced);
   AddToImageBuffer(inscatter_estimator);
 }
 
