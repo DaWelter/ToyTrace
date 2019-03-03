@@ -17,7 +17,6 @@ Double3 ToUniformSphereSection(double cos_opening_angle, Double2 r);
 Double3 ToUniformSphereSection(Double2 r, double phi0, double z0, double phi1, double z1);
 Double3 ToCosHemisphere(Double2 r);
 Double3 ToPhongHemisphere(Double2 r, double alpha);
-Double3 ToBeckmanHemisphere(Double2 r, double alpha);
 Double3 ToTriangleBarycentricCoords(Double2 r);
 Double3 ToUniformSphere3d(const Double3 &r);
 }

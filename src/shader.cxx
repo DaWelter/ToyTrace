@@ -3,8 +3,10 @@
 #include "scene.hxx"
 #include "shader_util.hxx"
 
-namespace
+namespace ShadingInternal
 {
+
+/* --- Textureing -------*/
 inline Spectral3 MaybeMultiplyTextureLookup(const Spectral3 &color, const Texture *tex, const SurfaceInteraction &surface_hit, const Index3 &lambda_idx)
 {
   Spectral3 ret{color};
@@ -26,8 +28,93 @@ inline double MaybeMultiplyTextureLookup(double _value, const Texture *tex, cons
   }
   return _value;
 }
+  
+
+/* --- Microfacet normal distributions -------*/
+struct BeckmanDistribution
+{
+  double alpha; // aka. roughness
+  
+  // This formula is using the normalized distribution D(cs) 
+  // such that Int_omega D(cs) cs dw = 1, using the differential solid angle dw, 
+  // integrated over the hemisphere.
+  double EvalByHalfVector(double ns_dot_wh)
+  {
+    const double cs = ns_dot_wh;
+    const double t1 = (cs*cs-1.)/(cs*cs*alpha*alpha);
+    const double t2 = alpha*alpha*cs*cs*cs*cs*Pi;
+    return std::exp(t1)/t2;
+  }
+  
+  /* Samples the Beckman microfacet distribution D(m) times |m . n|. 
+  * The surface normal n is assumed to be aligned with the z-axis.
+  * Returns the half-angle vector m. 
+  * Ref: Walter et al. (2007) "Microfacet Models for Refraction through Rough Surfaces" Eq. 28, 29. */
+  Double3 SampleHalfVector(Double2 r)
+  {
+    const double t1 = -alpha*alpha*std::log(r[0]);
+    const double t = 1/(t1+1);
+    const double z = std::sqrt(t);
+    const double rho = std::sqrt(1-t);
+    const double omega = 2*Pi*r[1];
+    const double sn = std::sin(omega);
+    const double cs = std::cos(omega);
+    return Double3{cs*rho, sn*rho, z};
+  }
+};
 
 
+/* ------------  Shadowing functions -----------*/
+double G1Beckmann(double cos_v_m, double cos_v_n, double alpha)
+{
+  // From Walter et al. 2007 "Microfacet Models for Refraction"
+  // Eq. 27 which pertains to the Beckman facet distribution.
+  // "... Instead we will use the Smith shadowing-masking approximation [Smi67]."
+  if (cos_v_m * cos_v_n < 0.) return 0.;
+  double a = cos_v_n/(alpha * std::sqrt(1 - cos_v_n * cos_v_n));
+  if (a >= 1.6)
+    return 1.;
+  else
+    return (3.535*a + 2.181*a*a)/(1.+2.276*a+2.577*a*a);
+}
+
+
+double G1VCavity(double cos_v_m, double cos_v_n, double cos_n_m)
+{
+  // From Heitz et. al 2014 "Importance Sampling Microfacet-Based BSDFs using the Distribution of Visible Normals"
+  // It is Eq (3).
+  if (cos_v_m * cos_v_n < 0.) return 0.;
+  return std::min(1., 2.*std::abs(cos_n_m*cos_v_n)/(std::abs(cos_v_m)+Epsilon));
+}
+
+
+/*------------ Utils ---------------------*/
+double HalfVectorPdfToExitantPdf(double pdf_wh, double wh_dot_in)
+{
+    double out_direction_pdf = pdf_wh*0.25/(wh_dot_in+Epsilon); // From density of h_r to density of out direction.
+    return out_direction_pdf;
+}
+
+
+Double3 HalfVectorToExitant(const Double3 &h_r, const Double3 &reverse_incident_dir)
+{
+  double hr_dot_in = Dot(reverse_incident_dir, h_r);
+  // See walter 2007, eq. 38. // Should I use the "reflection" formula with the abs in it instead?
+  // However, for that case I haven't found the correct pdf transform for the outgoing direction yet ...
+//   if (hr_dot_in < 0.)
+//   {
+//     hr_dot_in = -hr_dot_in;
+//     h_r = -h_r;
+//   }
+  Double3 out_direction = 2.*hr_dot_in*h_r - reverse_incident_dir;
+//   if (hr_dot_in < 0.) // Only needed when using the "reflection" variant with std::abs in it.
+//     out_direction = Normalized(out_direction);
+  return out_direction;
+}
+
+
+
+/* --- Fresnel terms -------*/
 template<class T>
 inline T SchlicksApproximation(const T &kspecular, double n_dot_dir)
 {
@@ -49,7 +136,42 @@ inline T AverageOfProjectedSchlicksApproximationOverHemisphere(const T &kspecula
 }
 
 
+inline double FresnelReflectivity(
+  double cs_i,  // cos theta of incident direction
+  double cs_t,  // cos theta of refracted(!) direction. Must be >0.
+  double eta_i_over_t
+)
+{
+  // https://en.wikipedia.org/wiki/Fresnel_equations
+  // I divide both nominator and denominator by eta_2
+  assert (cs_i >= 0.); 
+  assert (cs_t >= 0.); // Take std::abs(Dot(n,r), or flip normal.
+  assert (eta_i_over_t > 0.);
+  double rs_nom = eta_i_over_t * cs_i - cs_t;
+  double rs_den = eta_i_over_t * cs_i + cs_t;
+  double rp_nom = eta_i_over_t * cs_t - cs_i;
+  double rp_den = eta_i_over_t * cs_t + cs_i;
+  return 0.5*(Sqr(rs_nom/rs_den) + Sqr(rp_nom/rp_den));
 }
+
+
+inline double FresnelReflectivity(double cos_n_wi, double eta_i_over_t)
+{
+  // From Walter et al. (2007). Equivalent to the other formula but does not require the refracted direction.
+  double c = std::abs(cos_n_wi);
+  double tmp = Sqr(1.0/eta_i_over_t) - 1.0 + c*c;
+  if (tmp < 0)
+      return 1.; // Total reflection
+  double g = std::sqrt(tmp);
+  double nom = c*(g+c)-1.;
+  double denom = c*(g-c)+1.;
+  return 0.5*Sqr((g-c)/(g+c))*(1. + Sqr(nom/denom));
+}
+
+  
+}
+
+using namespace ShadingInternal;
 
 
 double Shader::Pdf(const Double3& incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext& context) const
@@ -154,24 +276,6 @@ inline bool OnSameSide(const Double3 &reverse_incident_dir, const SurfaceInterac
   return Dot(other_dir, surface_hit.normal) >= 0.;
 }
 
-
-inline double FresnelReflectivity(
-  double cs_i,  // cos theta of incident direction
-  double cs_t,  // cos theta of refracted(!) direction. Must be >0.
-  double eta_i_over_t
-)
-{
-  // https://en.wikipedia.org/wiki/Fresnel_equations
-  // I divide both nominator and denominator by eta_2
-  assert (cs_i >= 0.); 
-  assert (cs_t >= 0.); // Take std::abs(Dot(n,r), or flip normal.
-  assert (eta_i_over_t > 0.);
-  double rs_nom = eta_i_over_t * cs_i - cs_t;
-  double rs_den = eta_i_over_t * cs_i + cs_t;
-  double rp_nom = eta_i_over_t * cs_t - cs_i;
-  double rp_den = eta_i_over_t * cs_t + cs_i;
-  return 0.5*(Sqr(rs_nom/rs_den) + Sqr(rp_nom/rp_den));
-}
 
 
 SpecularTransmissiveDielectricShader::SpecularTransmissiveDielectricShader(double _ior_ratio, double ior_lambda_coeff_) 
@@ -315,23 +419,6 @@ Spectral3 SpecularPureRefractiveShader::EvaluateBSDF(const Double3& reverse_inci
 
 
 
-namespace MicrofacetDetail
-{
-double G1(double cos_v_m, double cos_v_n, double alpha)
-{
-  // From Walter et al. 2007 "Microfacet Models for Refraction"
-  // Eq. 27 which pertains to the Beckman facet distribution.
-  // "... Instead we will use the Smith shadowing-masking approximation [Smi67]."
-  if (cos_v_m * cos_v_n < 0.) return 0.;
-  double a = cos_v_n/(alpha * std::sqrt(1 - cos_v_n * cos_v_n));
-  if (a >= 1.6)
-    return 1.;
-  else
-    return (3.535*a + 2.181*a*a)/(1.+2.276*a+2.577*a*a);
-}
-}
-
-
 MicrofacetShader::MicrofacetShader(
   const SpectralN &_glossy_reflectance,
   double _glossy_exponent,
@@ -358,21 +445,13 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
   //assert(wh_dot_out >= 0.);
   //assert(wh_dot_in >= 0.);
   
-  double microfacet_distribution_val;
-  { // Beckman Distrib. This formula is using the normalized distribution D(cs) 
-    // such that Int_omega D(cs) cs dw = 1, using the differential solid angle dw, 
-    // integrated over the hemisphere.
-    double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
-    double cs = ns_dot_wh;
-    double t1 = (cs*cs-1.)/(cs*cs*alpha*alpha);
-    double t2 = alpha*alpha*cs*cs*cs*cs*Pi;
-    microfacet_distribution_val = std::exp(t1)/t2;
-  }
+  double microfacet_alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
+  double microfacet_distribution_val = BeckmanDistribution{microfacet_alpha}.EvalByHalfVector(ns_dot_wh);
   
   if (pdf)
   {    
     double half_angle_distribution_val = microfacet_distribution_val*std::abs(ns_dot_wh);
-    double out_distribution_val = half_angle_distribution_val*0.25/(wh_dot_in+Epsilon); // From density of h_r to density of out direction.
+    double out_distribution_val = HalfVectorPdfToExitantPdf(half_angle_distribution_val, wh_dot_in);
     *pdf = out_distribution_val;
   }
  
@@ -383,7 +462,7 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
 
   // Half vector is on positive side of shading surface, else zero contribution.
   // This is essential when shading normals are involved, since then, indeed the
-  // have vector can point below the surface. It can also happen by the random
+  // half vector can point below the surface. It can also happen by the random
   // sampling process of the outgoing direction.
   microfacet_distribution_val *= Heaviside(ns_dot_wh);
   
@@ -416,19 +495,9 @@ ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, 
 {
   auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
   double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
-  Double3 h_r_local = SampleTrafo::ToBeckmanHemisphere(sampler.UniformUnitSquare(), alpha);
+  Double3 h_r_local = BeckmanDistribution{alpha}.SampleHalfVector(sampler.UniformUnitSquare());
   Double3 h_r = m*h_r_local;
-  double hr_dot_in = Dot(reverse_incident_dir, h_r);
-  // See walter 2007, eq. 38. // Should I use the "reflection" formula with the abs in it instead?
-  // However, for that case I haven't found the correct pdf transform for the outgoing direction yet ...
-//   if (hr_dot_in < 0.)
-//   {
-//     hr_dot_in = -hr_dot_in;
-//     h_r = -h_r;
-//   }
-  Double3 out_direction = 2.*hr_dot_in*h_r - reverse_incident_dir;
-//   if (hr_dot_in < 0.) // Only neede dwhen using the "reflection" variant with std::abs in it.
-//     out_direction = Normalized(out_direction);
+  Double3 out_direction = HalfVectorToExitant(h_r, reverse_incident_dir);
   ScatterSample smpl; 
   smpl.coordinates = out_direction;
   ASSERT_NORMALIZED(out_direction);
