@@ -210,7 +210,7 @@ double Shader::Pdf(const Double3& incident_dir, const SurfaceInteraction& surfac
 }
 
 
-DiffuseShader::DiffuseShader(const SpectralN &_reflectance, std::unique_ptr<Texture> _diffuse_texture)
+DiffuseShader::DiffuseShader(const SpectralN &_reflectance, std::shared_ptr<Texture> _diffuse_texture)
   : Shader(),
     kr_d(_reflectance),
     diffuse_texture(std::move(_diffuse_texture))
@@ -447,7 +447,7 @@ Spectral3 SpecularPureRefractiveShader::EvaluateBSDF(const Double3& reverse_inci
 MicrofacetShader::MicrofacetShader(
   const SpectralN &_glossy_reflectance,
   double _glossy_exponent,
-  std::unique_ptr<Texture> _glossy_exponent_texture)
+  std::shared_ptr<Texture> _glossy_exponent_texture)
   : Shader(),
     kr_s(_glossy_reflectance), 
     alpha_max(_glossy_exponent),
@@ -543,7 +543,7 @@ ScatterSample InvisibleShader::SampleBSDF(const Double3 &incident_dir, const Sur
 
 
 
-SpecularDenseDielectricShader::SpecularDenseDielectricShader(const double _specular_reflectivity, const SpectralN& _diffuse_reflectivity, std::unique_ptr<Texture> _diffuse_texture): 
+SpecularDenseDielectricShader::SpecularDenseDielectricShader(const double _specular_reflectivity, const SpectralN& _diffuse_reflectivity, std::shared_ptr<Texture> _diffuse_texture): 
   Shader(), diffuse_part{_diffuse_reflectivity, std::move(_diffuse_texture)}, specular_reflectivity{_specular_reflectivity}
 {
   

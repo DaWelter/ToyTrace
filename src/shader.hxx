@@ -29,9 +29,9 @@ public:
 class DiffuseShader : public Shader
 {
   SpectralN kr_d; // between zero and 1/Pi.
-  std::unique_ptr<Texture> diffuse_texture; // TODO: Share textures among shaders?
+  std::shared_ptr<Texture> diffuse_texture; // TODO: Share textures among shaders?
 public:
-  DiffuseShader(const SpectralN &reflectance, std::unique_ptr<Texture> _diffuse_texture);
+  DiffuseShader(const SpectralN &reflectance, std::shared_ptr<Texture> _diffuse_texture);
   ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
   Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
@@ -52,12 +52,12 @@ class MicrofacetShader : public Shader
 {
   SpectralN kr_s;
   double alpha_max;
-  std::unique_ptr<Texture> glossy_exponent_texture;
+  std::shared_ptr<Texture> glossy_exponent_texture;
 public:
   MicrofacetShader(
     const SpectralN &_glossy_reflectance,
     double _glossy_exponent,
-    std::unique_ptr<Texture> _glossy_exponent_texture
+    std::shared_ptr<Texture> _glossy_exponent_texture
   );
   ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
   Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
@@ -95,7 +95,7 @@ public:
   SpecularDenseDielectricShader(
     const double _specular_reflectivity,
     const SpectralN &_diffuse_reflectivity,
-    std::unique_ptr<Texture> _diffuse_texture);
+    std::shared_ptr<Texture> _diffuse_texture);
   ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
   Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;    
 };

@@ -416,7 +416,7 @@ void NFFParser::Parse(Scope &scope)
     }
    
     
-    auto MaybeReadTexture = [this](const char *identifier) -> std::unique_ptr<Texture>
+    auto MaybeReadTexture = [this](const char *identifier) -> std::shared_ptr<Texture>
     {
       if (startswith(peek_line, identifier))
       {
@@ -433,7 +433,7 @@ void NFFParser::Parse(Scope &scope)
           throw MakeException("Error");
       }
       else
-        return std::unique_ptr<Texture>(nullptr);
+        return std::shared_ptr<Texture>(nullptr);
     };
     
     
@@ -445,7 +445,7 @@ void NFFParser::Parse(Scope &scope)
       int num = std::sscanf(line.c_str(),"diffuse %s %lg %lg %lg %lg\n",name, &rgb[0],&rgb[1],&rgb[2],&kd);
       if (num == 5)
       {
-        std::unique_ptr<Texture> diffuse_texture = MaybeReadTexture("diffusetexture");
+        std::shared_ptr<Texture> diffuse_texture = MaybeReadTexture("diffusetexture");
         InsertAndActivate(name, scope,
           std::make_unique<DiffuseShader>(
             Color::RGBToSpectrum(kd * rgb), std::move(diffuse_texture)));
@@ -508,7 +508,7 @@ void NFFParser::Parse(Scope &scope)
       int num = std::sscanf(line.c_str(), "speculardensedielectric %s %lg %lg %lg %lg\n", name, &diffuse_coeff[0], &diffuse_coeff[1], &diffuse_coeff[2], &specular_coeff);
       if (num == 5)
       {
-        std::unique_ptr<Texture> diffuse_texture = MaybeReadTexture("diffusetexture");
+        std::shared_ptr<Texture> diffuse_texture = MaybeReadTexture("diffusetexture");
         InsertAndActivate(name, scope,
           std::make_unique<SpecularDenseDielectricShader>(
             specular_coeff,
@@ -529,7 +529,7 @@ void NFFParser::Parse(Scope &scope)
       int num = std::sscanf(line.c_str(),"glossy %s %lg %lg %lg %lg %lg\n",name,&ks_rgb[0], &ks_rgb[1], &ks_rgb[2], &k, &phong_exponent);
       if(num == 6)
       {
-        std::unique_ptr<Texture> glossy_texture = MaybeReadTexture("exponenttexture");
+        std::shared_ptr<Texture> glossy_texture = MaybeReadTexture("exponenttexture");
         InsertAndActivate(name, scope, 
           std::make_unique<MicrofacetShader>(
             Color::RGBToSpectrum(k*ks_rgb),
@@ -1121,7 +1121,7 @@ private:
     auto m = ndref.local_to_world;
     auto m_linear = aiMatrix3x3(m);
     bool hasuv = aimesh->GetNumUVChannels()>0;
-    bool hasnormals = aimesh->HasNormals();
+    bool hasnormals = false; //aimesh->HasNormals();
     
     std::vector<UInt3> vert_indices; vert_indices.reserve(1024);
     for (unsigned int face_idx = 0; face_idx < aimesh->mNumFaces; ++face_idx)
