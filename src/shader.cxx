@@ -83,9 +83,29 @@ double G1VCavity(double cos_v_m, double cos_v_n, double cos_n_m)
 {
   // From Heitz et. al 2014 "Importance Sampling Microfacet-Based BSDFs using the Distribution of Visible Normals"
   // It is Eq (3).
+  // Part of the Cook-Torrance G2(VCavity) Function.
   if (cos_v_m * cos_v_n < 0.) return 0.;
   return std::min(1., 2.*std::abs(cos_n_m*cos_v_n)/(std::abs(cos_v_m)+Epsilon));
 }
+
+
+double G2VCavity(double wh_dot_in, double wh_dot_out, double ns_dot_in, double ns_dot_out, double ns_dot_wh)
+{
+    // All in one G2 Function for single sided materials. (No transmission)
+    // Cook & Torrance model. Seems to work good enough although Walter et al. has concerns about it's realism.
+    // Ref: Cook and Torrance (1982) "A reflectance model for computer graphics"
+    double t1 = 2.*std::abs(ns_dot_wh*ns_dot_out) / (std::abs(wh_dot_out) + Epsilon);
+    double t2 = 2.*std::abs(ns_dot_wh*ns_dot_in) / (std::abs(wh_dot_in) + Epsilon);
+    return std::min(1., std::min(t1, t2));
+}
+
+
+// double G2CavityDoubleSided(double)
+// {
+//     double g1_i = G1VCavity(wh_dot_in, ns_dot_in, ns_dot_wh);
+//     double g1_o = G1VCavity(wh_dot_out, ns_dot_out, ns_dot_wh);
+//     geometry_term = std::min(g1_i, g1_o);
+// }
 
 
 /*------------ Utils ---------------------*/
@@ -439,14 +459,14 @@ MicrofacetShader::MicrofacetShader(
 Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
   double n_dot_out = Dot(surface_hit.normal, out_direction);
-  double ns_dot_out = std::abs(Dot(surface_hit.shading_normal, out_direction));
-  double ns_dot_in  = std::abs(Dot(surface_hit.shading_normal, reverse_incident_dir));
+  double ns_dot_out = Dot(surface_hit.shading_normal, out_direction);
+  double ns_dot_in  = Dot(surface_hit.shading_normal, reverse_incident_dir);
   Double3 half_angle_vector = Normalized(reverse_incident_dir + out_direction);
   // Note: half_angle_vector is NaN whenever I evalute straight through transmission.
 
   double ns_dot_wh = Dot(surface_hit.shading_normal, half_angle_vector);
-  double wh_dot_out = std::abs(Dot(out_direction, half_angle_vector));
-  double wh_dot_in  = std::abs(Dot(reverse_incident_dir, half_angle_vector)); // Do I need this? It is the same as wh_dot_out, no?
+  double wh_dot_out = Dot(out_direction, half_angle_vector);
+  double wh_dot_in  = Dot(reverse_incident_dir, half_angle_vector); // Do I need this? It is the same as wh_dot_out, no?
   //assert(wh_dot_out >= 0.);
   //assert(wh_dot_in >= 0.);
   
@@ -471,26 +491,13 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
   // sampling process of the outgoing direction.
   microfacet_distribution_val *= Heaviside(ns_dot_wh);
   
-  double geometry_term;
-  {
-#if 1
-    // Cook & Torrance model. Seems to work good enough although Walter et al. has concerns about it's realism.
-    // Ref: Cook and Torrance (1982) "A reflectance model for computer graphics"
-    double t1 = 2.*ns_dot_wh*ns_dot_out / (wh_dot_out + Epsilon);
-    double t2 = 2.*ns_dot_wh*ns_dot_in / (wh_dot_out + Epsilon);
-    geometry_term = std::min(1., std::min(t1, t2));
-#else
-    // Overkill?
-    geometry_term = MicrofacetDetail::G1(wh_dot_in, ns_dot_in, alpha)*
-                    MicrofacetDetail::G1(wh_dot_out, ns_dot_out, alpha);
-#endif
-  }
+  const double geometry_term = G2VCavity(wh_dot_in, wh_dot_out, ns_dot_in, ns_dot_out, ns_dot_wh);
  
   
   Spectral3 kr_s_taken = Take(kr_s, context.lambda_idx);
-  Spectral3 fresnel_term = SchlicksApproximation(kr_s_taken, wh_dot_in);
+  Spectral3 fresnel_term = SchlicksApproximation(kr_s_taken, std::abs(wh_dot_in));
   assert (fresnel_term.allFinite());
-  double monochromatic_terms = geometry_term*microfacet_distribution_val*0.25/(ns_dot_in*ns_dot_out+Epsilon);
+  double monochromatic_terms = geometry_term*microfacet_distribution_val*0.25/(std::abs(ns_dot_in*ns_dot_out)+Epsilon);
   assert(std::isfinite(monochromatic_terms));
   return monochromatic_terms*fresnel_term;
 }
