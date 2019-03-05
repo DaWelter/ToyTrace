@@ -195,7 +195,7 @@ class PiecewiseConstantTransmittance
 public:
   void PushBack(float t, const Spectral3 &weight)
   {
-    assert(boundaries.empty() || t>boundaries.back());
+    assert(boundaries.empty() || t>=boundaries.back());
     boundaries.push_back(t);
     weights.push_back(weight);
   }
