@@ -209,6 +209,7 @@ Spectral3 DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const Surface
   Spectral3 ret{0.};
   assert (Dot(surface_hit.normal, incident_dir)>=0); // Because normal is aligned such that this conditions should be true.
   double n_dot_out = Dot(surface_hit.normal, out_direction);
+  double nsh_dot_out = Dot(surface_hit.shading_normal, out_direction);
   if (n_dot_out > 0.) // In/Out on same side of geometric surface?
   {
     Spectral3 kr_d_taken = Take(kr_d, context.lambda_idx);
@@ -216,7 +217,7 @@ Spectral3 DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const Surface
   }
   if (pdf)
   {
-    *pdf = n_dot_out>0. ? n_dot_out/Pi : 0.;
+    *pdf = std::max(0., nsh_dot_out)/Pi;
   }
   return ret;
 }
@@ -224,13 +225,20 @@ Spectral3 DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const Surface
 
 ScatterSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
 {
-  auto m = OrthogonalSystemZAligned(surface_hit.normal);
+  auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
   Double3 v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
   double pdf = v[2]/Pi;
   Double3 out_direction = m * v;
-  Spectral3 value = Take(kr_d, context.lambda_idx);
-  value = MaybeMultiplyTextureLookup(value, diffuse_texture.get(), surface_hit, context.lambda_idx);
-  return ScatterSample{out_direction, value, pdf};
+  if (Dot(surface_hit.normal, out_direction) > 0)
+  {
+    Spectral3 value = Take(kr_d, context.lambda_idx);
+    value = MaybeMultiplyTextureLookup(value, diffuse_texture.get(), surface_hit, context.lambda_idx);
+    return ScatterSample{out_direction, value, pdf};
+  }
+  else
+  {
+    return ScatterSample{out_direction, Spectral3::Zero(), pdf};
+  }
 }
 
 
@@ -351,6 +359,8 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
     // Evaluate BTDF
     smpl.value *= radiance_weight;
   }
+  
+  assert((smpl.value*std::abs(Dot(surface_hit.shading_normal, smpl.coordinates)) / smpl.pdf_or_pmf).maxCoeff() < 2.0);
   
   if (ior_lambda_coeff != 0)
   {
