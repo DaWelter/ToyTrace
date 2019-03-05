@@ -288,8 +288,7 @@ SpecularTransmissiveDielectricShader::SpecularTransmissiveDielectricShader(doubl
 
 ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
 {
-  double shn_dot_i = Dot(surface_hit.shading_normal, reverse_incident_dir);
-  double geomn_dot_i = Dot(surface_hit.normal, reverse_incident_dir);
+  double abs_shn_dot_i = std::abs(Dot(surface_hit.shading_normal, reverse_incident_dir));
 
   // Continue with shader sampling ...
   bool entering = Dot(surface_hit.geometry_normal, reverse_incident_dir) > 0.;
@@ -302,10 +301,6 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
       return entering ? 1./ior  : ior;
     }
   }();
-  
-  assert(shn_dot_i >=0); // Because we require geometry normal to point to the 
-  // incident direction and because shading normal must have dot product with 
-  // same sign as dot product with geometry normal.
   
   /* Citing Veach (pg. 147): "Specular BSDF’s contain Dirac distribu-
   tions, which means that the only allowable operation is sampling: there must be an explicit
@@ -325,7 +320,7 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
   if (wt)
   {
     double abs_shn_dot_r = std::abs(Dot(*wt, surface_hit.shading_normal));
-    fresnel_reflectivity = FresnelReflectivity(std::abs(shn_dot_i), abs_shn_dot_r, eta_i_over_t);
+    fresnel_reflectivity = FresnelReflectivity(abs_shn_dot_i, abs_shn_dot_r, eta_i_over_t);
   }
   assert (fresnel_reflectivity >= -0.00001 && fresnel_reflectivity <= 1.000001);
   
