@@ -38,7 +38,7 @@ struct BeckmanDistribution
   // This formula is using the normalized distribution D(cs) 
   // such that Int_omega D(cs) cs dw = 1, using the differential solid angle dw, 
   // integrated over the hemisphere.
-  double EvalByHalfVector(double ns_dot_wh)
+  double EvalByHalfVector(double ns_dot_wh) const
   {
     const double cs = ns_dot_wh;
     const double t1 = (cs*cs-1.)/(cs*cs*alpha*alpha);
@@ -50,7 +50,7 @@ struct BeckmanDistribution
   * The surface normal n is assumed to be aligned with the z-axis.
   * Returns the half-angle vector m. 
   * Ref: Walter et al. (2007) "Microfacet Models for Refraction through Rough Surfaces" Eq. 28, 29. */
-  Double3 SampleHalfVector(Double2 r)
+  Double3 SampleHalfVector(Double2 r) const
   {
     const double t1 = -alpha*alpha*std::log(r[0]);
     const double t = 1/(t1+1);
@@ -89,23 +89,23 @@ double G1VCavity(double cos_v_m, double cos_v_n, double cos_n_m)
 }
 
 
+// double G2VCavity(double wh_dot_in, double wh_dot_out, double ns_dot_in, double ns_dot_out, double ns_dot_wh)
+// {
+//     // All in one G2 Function for single sided materials. (No transmission)
+//     // Cook & Torrance model. Seems to work good enough although Walter et al. has concerns about it's realism.
+//     // Ref: Cook and Torrance (1982) "A reflectance model for computer graphics"
+//     double t1 = 2.*std::abs(ns_dot_wh*ns_dot_out) / (std::abs(wh_dot_out) + Epsilon);
+//     double t2 = 2.*std::abs(ns_dot_wh*ns_dot_in) / (std::abs(wh_dot_in) + Epsilon);
+//     return std::min(1., std::min(t1, t2));
+// }
+
+
 double G2VCavity(double wh_dot_in, double wh_dot_out, double ns_dot_in, double ns_dot_out, double ns_dot_wh)
 {
-    // All in one G2 Function for single sided materials. (No transmission)
-    // Cook & Torrance model. Seems to work good enough although Walter et al. has concerns about it's realism.
-    // Ref: Cook and Torrance (1982) "A reflectance model for computer graphics"
-    double t1 = 2.*std::abs(ns_dot_wh*ns_dot_out) / (std::abs(wh_dot_out) + Epsilon);
-    double t2 = 2.*std::abs(ns_dot_wh*ns_dot_in) / (std::abs(wh_dot_in) + Epsilon);
-    return std::min(1., std::min(t1, t2));
+    double g1_i = G1VCavity(wh_dot_in, ns_dot_in, ns_dot_wh);
+    double g1_o = G1VCavity(wh_dot_out, ns_dot_out, ns_dot_wh);
+    return std::min(g1_i, g1_o);
 }
-
-
-// double G2CavityDoubleSided(double)
-// {
-//     double g1_i = G1VCavity(wh_dot_in, ns_dot_in, ns_dot_wh);
-//     double g1_o = G1VCavity(wh_dot_out, ns_dot_out, ns_dot_wh);
-//     geometry_term = std::min(g1_i, g1_o);
-// }
 
 
 /*------------ Utils ---------------------*/
@@ -455,6 +455,7 @@ MicrofacetShader::MicrofacetShader(
 {
 }
 
+//#define SAMPLE_VNDF
 
 Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
@@ -475,7 +476,13 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
   
   if (pdf)
   {    
-    double half_angle_distribution_val = microfacet_distribution_val*std::abs(ns_dot_wh);
+#ifdef SAMPLE_VNDF
+    const double wh_prime_dot_in = Dot(reverse_incident_dir, Reflected(half_angle_vector, surface_hit.shading_normal));
+    const double prob = 2.*std::max(0., wh_dot_in)/(std::max(0., wh_dot_in) + std::max(0., wh_prime_dot_in) + Epsilon);
+    double half_angle_distribution_val = microfacet_distribution_val*prob;
+#else
+    double half_angle_distribution_val = microfacet_distribution_val*std::abs(ns_dot_wh);;
+#endif
     double out_distribution_val = HalfVectorPdfToExitantPdf(half_angle_distribution_val, wh_dot_in);
     *pdf = out_distribution_val;
   }
@@ -506,10 +513,18 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, co
 ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
 {
   auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
-  double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
-  Double3 h_r_local = BeckmanDistribution{alpha}.SampleHalfVector(sampler.UniformUnitSquare());
+  const double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
+  const Double3 h_r_local = BeckmanDistribution{alpha}.SampleHalfVector(sampler.UniformUnitSquare());
   Double3 h_r = m*h_r_local;
-  Double3 out_direction = HalfVectorToExitant(h_r, reverse_incident_dir);
+#ifdef SAMPLE_VNDF
+  // From "Importance Sampling Microfacet-Based BSDFs using the Distribution of Visible Normals" Heitz et al. (2014)
+  const Double3 h_prime = m * Double3{-h_r_local[0], -h_r_local[1], h_r_local[2]};
+  const double prob = std::max(0., Dot(reverse_incident_dir, h_prime))/(std::max(0.,Dot(reverse_incident_dir, h_r)) + std::max(0., Dot(reverse_incident_dir, h_prime)) + Epsilon);
+  assert(prob>-1.e-6 && prob < 1.00001);
+  if (sampler.Uniform01() < prob)
+    h_r = h_prime;
+#endif
+  const Double3 out_direction = HalfVectorToExitant(h_r, reverse_incident_dir);
   ScatterSample smpl; 
   smpl.coordinates = out_direction;
   ASSERT_NORMALIZED(out_direction);
