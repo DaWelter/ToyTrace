@@ -147,6 +147,59 @@ TEST(TestMath, Refracted)
 }
 
 
+TEST(TestMath, RefractedHalfVector)
+{
+  double eta_1_over_2 = 1.0/1.5;
+  Double3 w1{0., 1., 1.};
+  Double3 w2{0., -1., 0.};
+  Double3 h = HalfVectorRefracted(w1, w2, eta_1_over_2);
+  boost::optional<Double3> wr = Refracted(w1, h, eta_1_over_2);
+  ASSERT_TRUE((bool)wr);
+  ASSERT_NEAR((*wr)[0], w2[0], 1.e-3);
+  ASSERT_NEAR((*wr)[0], w2[0], 1.e-3);
+  ASSERT_NEAR((*wr)[0], w2[0], 1.e-3);
+}
+
+
+TEST(TestMath, RefractedHalfVectorDegenerate)
+{
+  double eta_1_over_2 = 1.0/1.5;
+  Double3 w1{0., 1., 0.};
+  Double3 w2{0., -1., 0.};
+  Double3 h = HalfVectorRefracted(w1, w2, eta_1_over_2);
+  boost::optional<Double3> wr = Refracted(w1, h, eta_1_over_2);
+  ASSERT_TRUE((bool)wr);
+  ASSERT_NEAR((*wr)[0], w2[0], 1.e-3);
+  ASSERT_NEAR((*wr)[0], w2[0], 1.e-3);
+  ASSERT_NEAR((*wr)[0], w2[0], 1.e-3);
+}
+
+
+TEST(TestMath, HalfVector)
+{
+  Double3 w1{0., 1., 1.};
+  Double3 w2{0., -1., 0.};
+  Double3 h = HalfVector(w1, w2);
+  Double3 wr = Reflected(w1, h);
+  ASSERT_NEAR(wr[0], w2[0], 1.e-3);
+  ASSERT_NEAR(wr[0], w2[0], 1.e-3);
+  ASSERT_NEAR(wr[0], w2[0], 1.e-3);
+}
+
+
+TEST(TestMath, HalfVectorDegenerate)
+{
+  Double3 w1{0., 1., 0.};
+  Double3 w2{0., -1., 0.};
+  Double3 h = HalfVector(w1, w2);
+  Double3 wr = Reflected(w1, h);
+  ASSERT_NEAR(wr[0], w2[0], 1.e-3);
+  ASSERT_NEAR(wr[0], w2[0], 1.e-3);
+  ASSERT_NEAR(wr[0], w2[0], 1.e-3);
+}
+
+
+
 TEST(TestMath, RaySphereClip)
 {
   { // Start ray outside of the sphere

@@ -440,6 +440,7 @@ MicrofacetShader::MicrofacetShader(
 {
 }
 
+#define SAMPLE_VNDF
 
 Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
@@ -470,6 +471,90 @@ ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, 
     color,
     pdf
   };
+
+
+class GlossyTransmissiveDielectricWrapper
+{
+  const PathContext &context;
+  BeckmanDistribution ndf;
+  Double3 ng;
+  double ior_ratio;
+  
+  GlossyTransmissiveDielectricWrapper(double alpha, double ior_ratio, const Double3 &ng, const PathContext &context)
+    : context{context}, ndf{alpha}, ng{ng}, ior_ratio{ior_ratio}
+    {}
+  
+  double EvaluateBSDF(const Double3 &wi, const Double3& half_vector, const Double3& wo, double *pdf) const
+  {
+    const double n_dot_out = Dot(ng, wo);
+    const double ns_dot_out = wo[2];
+    const double ns_dot_in  = wi[2];
+
+    const bool entering = Dot(ng, wi) > 0.;
+    const double eta_i_over_t = entering ? 1./ior_ratio  : ior_ratio; // eta_i refers to ior on the side of the incomming random walk!
+    
+    const double ns_dot_wh = half_vector[2];
+    const double wh_dot_out = Dot(wo, half_vector);
+    const double wh_dot_in  = Dot(wi, half_vector);
+
+    const double half_angle_distribution_val = ndf.EvalByHalfVector(ns_dot_wh);
+    
+    const double fresnel_reflectivity = FresnelReflectivity(std::abs(ns_dot_in), eta_i_over_t);
+    assert (fresnel_reflectivity >= -0.00001 && fresnel_reflectivity <= 1.000001);
+  
+    const double geometry_term = G2VCavity(wh_dot_in, wh_dot_out, ns_dot_in, ns_dot_out, ns_dot_wh);
+    
+    if (n_dot_out >= 0) // Evaluate BRDF
+    {
+      double result = fresnel_reflectivity*geometry_term*half_angle_distribution_val*0.25/(std::abs(ns_dot_in*ns_dot_out)+Epsilon);
+      return result;
+    }
+    else // Evaluate BTDF
+    {
+      return 0;
+    }
+  }
+};
+
+
+
+} // anonymous GlossyHelperNS
+
+GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_)
+  : ior_ratio{_ior_ratio}, alpha{alpha_}
+{
+}
+
+
+
+Spectral3 GlossyTransmissiveDielectricShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
+{
+
+}
+
+
+ScatterSample GlossyTransmissiveDielectricShader::SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
+{
+//   auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
+//   const double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
+//   const Double3 h_r_local = BeckmanDistribution{alpha}.SampleHalfVector(sampler.UniformUnitSquare());
+  Double3 h_r = m*h_r_local;
+// #ifdef SAMPLE_VNDF
+//   // From "Importance Sampling Microfacet-Based BSDFs using the Distribution of Visible Normals" Heitz et al. (2014)
+//   const Double3 h_prime = m * Double3{-h_r_local[0], -h_r_local[1], h_r_local[2]};
+//   const double prob = std::max(0., Dot(reverse_incident_dir, h_prime))/(std::max(0.,Dot(reverse_incident_dir, h_r)) + std::max(0., Dot(reverse_incident_dir, h_prime)) + Epsilon);
+//   assert(prob>-1.e-6 && prob < 1.00001);
+//   if (sampler.Uniform01() < prob)
+//     h_r = h_prime;
+// #endif
+  Double3 out_direction = HalfVectorToExitant(h_r, reverse_incident_dir);
+  ScatterSample smpl; 
+  smpl.coordinates = out_direction;
+  ASSERT_NORMALIZED(out_direction);
+  double pdf = NaN;
+  smpl.value = this->EvaluateBSDF(reverse_incident_dir, surface_hit, out_direction, context, &pdf);
+  smpl.pdf_or_pmf = pdf;
+  return smpl;
 }
 
 

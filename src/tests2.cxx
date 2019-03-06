@@ -469,11 +469,11 @@ TEST(BasicAssumptions, ExpressionTemplates7)
 }
 
 
-TEST(BasicAssumptions, ExpressionTemplates8)
-{
-  UGLY_EXPR_TEST_BINARY_VEC_RETURN(Reflected, 1, 1, 1, 0)
-  ASSERT_NEAR(result[1], 0., 1.e-3); // Would be -1 but since the return is an expression type, we expect 0.
-}
+// TEST(BasicAssumptions, ExpressionTemplates8)
+// {
+//   UGLY_EXPR_TEST_BINARY_VEC_RETURN(Reflected, 1, 1, 1, 0)
+//   ASSERT_NEAR(result[1], 0., 1.e-3); // Would be -1 but since the return is an expression type, we expect 0.
+// }
 
 
 namespace StrongTypedefDetail

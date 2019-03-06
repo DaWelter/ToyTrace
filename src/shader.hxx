@@ -75,6 +75,17 @@ public:
 };
 
 
+class GlossyTransmissiveDielectricShader : public Shader
+{
+  double ior_ratio; // Inside ior / Outside ior
+  double alpha;
+public:
+  GlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_);
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+};
+
+
 // Purely refracting shader. Unphysical but useful for testing.
 class SpecularPureRefractiveShader : public Shader
 {
