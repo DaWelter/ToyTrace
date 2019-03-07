@@ -1,5 +1,21 @@
-#include "tests_sampling.hxx"
+#include "gtest/gtest.h"
+#include <cstdio>
+#include <chrono>
+#include <algorithm>
+#include <iostream>
+#include <fstream>
 
+
+#include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/prettywriter.h>
+
+#include "cubature_wrapper.hxx"
+#include "cubemap.hxx"
+#include "tests_stats.hxx"
+
+#include "spectral.hxx"
+#include "sampler.hxx"
 #include "ray.hxx"
 #include "sampler.hxx"
 #include "primitive.hxx"
@@ -8,6 +24,15 @@
 #include "sampler.hxx"
 #include "embreeaccelerator.hxx"
 #include "cubature.h"
+
+
+inline void ExpectNear(const Spectral3 &a, const Spectral3 &b, double tol)
+{
+  EXPECT_NEAR(a[0], b[0], 1.e-6);
+  EXPECT_NEAR(a[1], b[1], 1.e-6);
+  EXPECT_NEAR(a[2], b[2], 1.e-6);
+}
+
 
 
 #ifdef HAVE_JSON

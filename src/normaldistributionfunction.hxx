@@ -5,7 +5,7 @@
 /* --- Microfacet normal distributions -------*/
 struct BeckmanDistribution
 {
-  double alpha; // aka. roughness
+  const double alpha; // aka. roughness
   
   // This formula is using the normalized distribution D(cs) 
   // such that Int_omega D(cs) cs dw = 1, using the differential solid angle dw, 
@@ -37,7 +37,7 @@ struct BeckmanDistribution
 
 
 /* ------------  Shadowing functions -----------*/
-double G1Beckmann(double cos_v_m, double cos_v_n, double alpha)
+inline double G1Beckmann(double cos_v_m, double cos_v_n, double alpha)
 {
   // From Walter et al. 2007 "Microfacet Models for Refraction"
   // Eq. 27 which pertains to the Beckman facet distribution.
@@ -51,7 +51,7 @@ double G1Beckmann(double cos_v_m, double cos_v_n, double alpha)
 }
 
 
-double G1VCavity(double cos_v_m, double cos_v_n, double cos_n_m)
+inline double G1VCavity(double cos_v_m, double cos_v_n, double cos_n_m)
 {
   // From Heitz et. al 2014 "Importance Sampling Microfacet-Based BSDFs using the Distribution of Visible Normals"
   // It is Eq (3).
@@ -72,7 +72,7 @@ double G1VCavity(double cos_v_m, double cos_v_n, double cos_n_m)
 // }
 
 
-double G2VCavity(double wh_dot_in, double wh_dot_out, double ns_dot_in, double ns_dot_out, double ns_dot_wh)
+inline double G2VCavity(double wh_dot_in, double wh_dot_out, double ns_dot_in, double ns_dot_out, double ns_dot_wh)
 {
     double g1_i = G1VCavity(wh_dot_in, ns_dot_in, ns_dot_wh);
     double g1_o = G1VCavity(wh_dot_out, ns_dot_out, ns_dot_wh);
@@ -81,14 +81,14 @@ double G2VCavity(double wh_dot_in, double wh_dot_out, double ns_dot_in, double n
 
 
 /*------------ Utils ---------------------*/
-double HalfVectorPdfToExitantPdf(double pdf_wh, double wh_dot_in)
+inline double HalfVectorPdfToExitantPdf(double pdf_wh, double wh_dot_in)
 {
     double out_direction_pdf = pdf_wh*0.25/(wh_dot_in+Epsilon); // From density of h_r to density of out direction.
     return out_direction_pdf;
 }
 
 
-Double3 HalfVectorToExitant(const Double3 &h_r, const Double3 &reverse_incident_dir)
+inline Double3 HalfVectorToExitant(const Double3 &h_r, const Double3 &reverse_incident_dir)
 {
   double hr_dot_in = Dot(reverse_incident_dir, h_r);
   // See walter 2007, eq. 38. // Should I use the "reflection" formula with the abs in it instead?
