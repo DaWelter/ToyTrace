@@ -64,7 +64,7 @@ void MergeBinsToGetAboveMinNumSamplesCutoff(Bin *bins, int &num_bins, double low
 {
   //http://en.cppreference.com/w/cpp/algorithm/make_heap
   // ... and so on.
-  auto cmp = [](const Bin &a, const Bin &b) -> bool { return a.count > b.count; }; // Using > instead of < makes it a min-heap.
+  auto cmp = [](const Bin &a, const Bin &b) -> bool { return a.expected > b.expected; }; // Using > instead of < makes it a min-heap.
   std::make_heap(bins, bins+num_bins, cmp);
   while (num_bins > 1)
   {
@@ -108,9 +108,11 @@ double ChiSquaredProbability(const int *counts, const double *weights, int num_b
   int original_num_bins = num_bins;
   MergeBinsToGetAboveMinNumSamplesCutoff(bins.get(), num_bins, low_expected_num_samples_cutoff);
   
+  //std::cout << "Chi Sqr bins: " << num_bins << std::endl;
   double chi_sqr = 0.;
   for (int i=0; i<num_bins; ++i)
   {
+    //std::cout << strconcat(i, ": e=", bins[i].expected, ", cnt=",bins[i].count) << std::endl;
     chi_sqr += Sqr(bins[i].count - bins[i].expected)/bins[i].expected;
   }
 
