@@ -12,6 +12,8 @@ struct BeckmanDistribution
   // integrated over the hemisphere.
   double EvalByHalfVector(double ns_dot_wh) const
   {
+    if (ns_dot_wh <= 0.)
+      return 0.;
     const double cs = ns_dot_wh;
     const double t1 = (cs*cs-1.)/(cs*cs*alpha*alpha);
     const double t2 = alpha*alpha*cs*cs*cs*cs*Pi;
