@@ -398,30 +398,28 @@ int fnd(unsigned ndim, const double *x, void *fdata_,
 
 namespace 
 {
+  
 
 template<class Func>
-auto Integral2D(Func func, Double2 start, Double2 end, double absError, double relError, int max_eval = 0, double *error_estimate = nullptr)
+auto Integral2D(Func func, Double2 start, Double2 end, double absError, double relError, int max_eval = 0, decltype(func(Double2{})) *error_estimate = nullptr)
 {
-  double result, error;
-  int status = hcubature(1, cubature_wrapper::f1d<Func>, &func, 2, start.data(), end.data(), max_eval, absError, relError, ERROR_L2, &result, &error);
-  if (status != 0)
-    throw std::runtime_error("Cubature failed!");
-  if (error_estimate)
-    *error_estimate = error;
-  return result;
-}
-
-template<class Func>
-auto MultivariateIntegral2D(Func func, Double2 start, Double2 end, double absError, double relError, int max_eval = 0, decltype(func(Double2{})) *error_estimate = nullptr)
-{
-  using R  = decltype(func(Double2{}));
+  using R = decltype(func(Double2{}));
+  int status = -1;
   R result, error;
-  int status = hcubature(result.size(), cubature_wrapper::fnd<Func>, &func, 2, start.data(), end.data(), max_eval, absError, relError, ERROR_L2, result.data(), error.data());
+  if constexpr (std::is_floating_point<R>::value)
+  {
+    status = hcubature(1, cubature_wrapper::f1d<Func>, &func, 2, start.data(), end.data(), max_eval, absError, relError, ERROR_L2, &result, &error);
+  }
+  else
+  {
+    status = hcubature(result.size(), cubature_wrapper::fnd<Func>, &func, 2, start.data(), end.data(), max_eval, absError, relError, ERROR_L2, result.data(), error.data());
+  }
   if (status != 0)
     throw std::runtime_error("Cubature failed!");
   if (error_estimate)
     *error_estimate = error;
   return result;
 }
+
 
 } // namespace

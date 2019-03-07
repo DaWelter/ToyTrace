@@ -359,7 +359,7 @@ TEST(Cubature, MultivariateIntegral)
     return a;
   };
   
-  Eigen::Array2d result = MultivariateIntegral2D(
+  Eigen::Array2d result = Integral2D(
     func, Double2(-1,-1), Double2(1,1), 0.01, 0.01);
   
   double exact1 = 8./3.;
@@ -619,7 +619,7 @@ public:
       Double2 start, end;
       std::tie(start, end) = cubemap.CellToUVBounds(i, j);       
       Eigen::Array3d err{NaN};
-      Eigen::Array3d cell_integral = MultivariateIntegral2D(functionValueTimesJ, start, end, 1.e-3, 1.e-2, MAX_NUM_FUNC_EVALS, &err);
+      Eigen::Array3d cell_integral = Integral2D(functionValueTimesJ, start, end, 1.e-3, 1.e-2, MAX_NUM_FUNC_EVALS, &err);
       this->integral_cubature += cell_integral;
       this->integral_cubature_error += err;
     }
@@ -980,7 +980,7 @@ public:
           };
           try 
           {
-            Eigen::Array<double, 5, 1> integral = MultivariateIntegral2D(integrand, std::get<0>(bounds), std::get<1>(bounds), 1.e-3, 1.e-2, 1000);
+            Eigen::Array<double, 5, 1> integral = Integral2D(integrand, std::get<0>(bounds), std::get<1>(bounds), 1.e-3, 1.e-2, 1000);
             double area = integral[4];
             Eigen::Array3d val_avg = integral.head<3>() / area;
             double pdf_avg = integral[3] / area;
