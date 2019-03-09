@@ -1,5 +1,7 @@
 #include "gtest/gtest.h"
 
+#include <rapidjson/document.h>
+
 #include "cubature_wrapper.hxx"
 #include "cubemap.hxx"
 #include "tests_stats.hxx"
@@ -7,6 +9,15 @@
 #include "normaldistributionfunction.hxx"
 #include "util.hxx"
 #include "sampler.hxx"
+
+
+namespace {
+static const Double3 VERTICAL = Double3{0,0,1};
+static const Double3 EXACT_45DEG    = Normalized(Double3{0,1,1});
+static const Double3 ALMOST_45DEG    = Normalized(Double3{0,1,1.1});
+static const Double3 MUCH_DEFLECTED = Normalized(Double3{0,10,1});
+static const Double3 BELOW          = Normalized(Double3{0,1,-1});
+}
 
 
 template<class Func>
@@ -59,6 +70,50 @@ auto Map(const std::vector<T> &v, Func &&f)
     ret.emplace_back(f(x));
   return ret;
 }
+
+
+
+#ifdef HAVE_JSON
+namespace rj
+{
+using namespace rapidjson;
+
+using Alloc = rapidjson::Document::AllocatorType; // For some reason I must supply an "allocator" almost everywhere. Why? Who knows?!
+
+rapidjson::Value Array3ToJSON(const Eigen::Array<double, 3, 1> &v, Alloc &alloc);
+void Write(rj::Document &doc, const std::string &filename);
+
+rj::Value CubemapToJSON(const CubeMap &cubemap, const int Nbins, std::vector<double> bin_values, rj::Alloc& alloc)
+{
+  rj::Value json_side;
+  json_side.SetArray();
+  for (int side = 0; side < 6; ++side)
+  {
+    rj::Value json_i(rj::kArrayType);
+    for (int i = 0; i < Nbins; ++i)
+    {
+      rj::Value json_j(rj::kArrayType);
+      for (int j = 0; j < Nbins; ++j)
+      {
+        rj::Value json_bin(rj::kObjectType);
+        int idx = cubemap.CellToIndex(side, i, j);
+        auto uv_bounds = cubemap.CellToUVBounds(i, j);
+        json_bin.AddMember("value", bin_values[idx], alloc);
+        json_bin.AddMember("pos", rj::Array3ToJSON(cubemap.UVToOmega(side, (std::get<0>(uv_bounds) + std::get<1>(uv_bounds))*0.5).array(), alloc), alloc);
+        json_j.PushBack(json_bin, alloc);
+      }
+      json_i.PushBack(json_j, alloc);
+    }
+    json_side.PushBack(json_i, alloc);
+  }
+  return json_side;
+}
+
+
+}
+
+#endif
+
 
 
 
@@ -119,7 +174,7 @@ TEST_P(NDFTest, Outdirection)
   CubeMap cubemap(8); 
   NDF ndf{alpha};
 
-  auto density_func = [wi=wi, this, &ndf](const Double3 &wo)
+  auto density_func = [wi=wi, &ndf](const Double3 &wo)
   {
     Double3 wh = Normalized(wo + wi);
     // The abs(...) in the argument to the NDF is required for
@@ -147,18 +202,80 @@ TEST_P(NDFTest, Outdirection)
   EXPECT_NEAR(total_prob, 1., 1.e-2);
 }
 
-namespace {
-static const Double3 VERTICAL = Double3{0,0,1};
-static const Double3 EXACT_45DEG    = Normalized(Double3{0,1,1});
-static const Double3 ALMOST_45DEG    = Normalized(Double3{0,1,1.1});
-static const Double3 MUCH_DEFLECTED = Normalized(Double3{0,10,1});
-static const Double3 BELOW          = Normalized(Double3{0,1,-1});
+
+TEST_P(NDFTest, VNDFSampling)
+{
+  const auto [alpha, wi] = this->GetParam();
+  CubeMap cubemap(8); 
+  NDF ndf{alpha};
+  
+  auto density_func = [wi=wi, &ndf](const Double3 &wh)
+  {
+    double ndf_val = ndf.EvalByHalfVector(wh[2]);
+    return VisibleNdfVCavity::Pdf(ndf_val, wh, wi);
+  };
+  
+  auto sample_gen = [wi = wi, this, &ndf]() 
+  {
+    // The method by Heitz et. al (2014), Algorithm 3, for VCavity model.
+    Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
+    VisibleNdfVCavity::Sample(wh, wi, sampler.Uniform01());
+    return wh;
+  };
+  
+  std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);
+  std::vector<int> sample_counts = SampleOverCubemap(sample_gen, cubemap, 1000);
+  double chi_sqr_probability = ChiSquaredProbability(&sample_counts[0], &probs[0], probs.size());
+  EXPECT_GE(chi_sqr_probability, 0.05);
+  double total_prob = std::accumulate(probs.begin(), probs.end(), 0.);
+  EXPECT_NEAR(total_prob, 1., 1.e-2);
 }
+
+
+
+TEST(NDFTest, VNDFViz)
+{
+  using NDF = BeckmanDistribution;
+  CubeMap cubemap(32); 
+  NDF ndf{0.5};
+  const Double3 wi = BELOW; //Normalized(Double3{10, 0, -1});
+  Sampler sampler;
+  
+  auto density_func = [&](const Double3 &wh)
+  {
+    double ndf_val = ndf.EvalByHalfVector(wh[2]);
+    return VisibleNdfVCavity::Pdf(ndf_val, wh, wi);
+  };
+  
+  auto sample_gen = [&]() 
+  {
+    // The method by Heitz et. al (2014), Algorithm 3, for VCavity model.
+    Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
+    VisibleNdfVCavity::Sample(wh, wi, sampler.Uniform01());
+    return wh;
+  };
+  
+  std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);
+  std::vector<int> sample_counts = SampleOverCubemap(sample_gen, cubemap, 100000);
+  std::vector<double> double_counts;
+  for (auto x : sample_counts) double_counts.push_back((double)x);
+  
+  rj::Document doc;
+  auto &alloc = doc.GetAllocator();
+  doc.SetObject();
+  
+  auto node1 = rj::CubemapToJSON(cubemap, 32, probs, alloc);
+  doc.AddMember("probs", node1, alloc);
+  auto node2 = rj::CubemapToJSON(cubemap, 32, double_counts, alloc);
+  doc.AddMember("counts", node2, alloc);
+  rj::Write(doc, "/tmp/cubemap.json");
+}
+
+
 
 namespace NDFTestNS
 {
 
-// TODO: Fix for shading normals!
 INSTANTIATE_TEST_CASE_P(NDFTestNS, NDFTest, ::testing::Values(
   NDF_Params(0.05, VERTICAL),
   NDF_Params(0.05, MUCH_DEFLECTED),
@@ -167,5 +284,6 @@ INSTANTIATE_TEST_CASE_P(NDFTestNS, NDFTest, ::testing::Values(
   NDF_Params(0.5, MUCH_DEFLECTED),
   NDF_Params(0.5, BELOW)
 ));
+
 
 }

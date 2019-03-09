@@ -82,6 +82,44 @@ inline double G2VCavity(double wh_dot_in, double wh_dot_out, double ns_dot_in, d
 }
 
 
+struct VisibleNdfVCavity
+{
+// Transform wh so that it samples the VNDF distribution for the VCavity shadowing function.
+// wh : Half-vector sampled from NDF*|wh.n|
+// wi : Viewing direction
+// wh and wi must be defined in a local frame where the normal n is aligned with the z-axis!
+static void Sample(Double3 &wh, const Double3 &wi, double r)
+{
+  Double3 wh_prime{-wh[0], -wh[1], wh[2]};
+  if (wi[2] < 0)
+  {
+    wh[2] = -wh[2];
+    wh_prime[2] = -wh_prime[2];
+  }  
+  double prob = ClampDot(wi, wh_prime)/(ClampDot(wi, wh) + ClampDot(wi, wh_prime));
+  if (wi[2] < 0)
+    prob = 1.0-prob;
+  if (r < prob)
+  {
+    wh = wh_prime;
+  }
+  if (wi[2] < 0)
+    wh[2] = -wh[2];
+}
+
+// Get the PDF corresponding to the sample function.
+// wh : Half-vector
+// wi : Viewing direction
+// wh and wi must be defined in a local frame where the normal n is aligned with the z-axis!
+static double Pdf(double ndf_val, const Double3 &wh, const Double3 &wi)
+{
+  double g1 = G1VCavity(Dot(wi, wh), wi[2], wh[2]);
+  return g1*ndf_val*std::abs(Dot(wi,wh))/(std::abs(wi[2]) + Epsilon);
+}
+
+
+};
+
 /*------------ Utils ---------------------*/
 inline double HalfVectorPdfToExitantPdf(double pdf_wh, double wh_dot_in)
 {

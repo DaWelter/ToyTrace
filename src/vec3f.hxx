@@ -247,6 +247,20 @@ inline boost::optional<Double3> Refracted(const Double3 &wi, const Double3 &n, d
     return Double3{-eta * wi + n_prefactor * n};
 }
 
+template<class Derived1, class Derived2>
+inline auto AbsDot(const Eigen::MatrixBase<Derived1> &u, const Eigen::MatrixBase<Derived2> &v )
+{
+  return std::abs(u.dot(v));
+}
+
+
+template<class Derived1, class Derived2>
+inline auto ClampDot(const Eigen::MatrixBase<Derived1> &u, const Eigen::MatrixBase<Derived2> &v )
+{
+  using Scalar = decltype(u.dot(v));
+  return std::max(Scalar(0), u.dot(v));
+}
+
 
 #ifndef NDEBUG
 #define ASSERT_NORMALIZED(v) assert(std::abs(LengthSqr(v) - 1.) < 1.e-5)
