@@ -342,6 +342,93 @@ Spectral3 SpecularPureRefractiveShader::EvaluateBSDF(const Double3& reverse_inci
 
 
 
+
+namespace {
+struct LocalFrame // Helper
+{
+  Eigen::Matrix3d m_local;
+  Eigen::Matrix3d m_local_inv;
+  Double3 ng; // In local frame
+
+  LocalFrame(const SurfaceInteraction &surface_hit);
+};
+
+
+LocalFrame::LocalFrame(const SurfaceInteraction& surface_hit)
+{
+  m_local = OrthogonalSystemZAligned(surface_hit.shading_normal);
+  m_local_inv = m_local.transpose();
+  ng = m_local_inv * surface_hit.normal;
+}
+
+
+#define SAMPLE_VNDF
+//--gtest_break_on_failure
+
+struct MicrofacetShaderWrapper
+{
+  const PathContext &context;
+  const BeckmanDistribution &ndf;
+  const LocalFrame &frame;
+  const Spectral3 &color;
+  
+  Spectral3 Evaluate(const Double3 &wi, const Double3 &wh, const Double3& wo, double *pdf) const
+  {
+    const double n_dot_out = Dot(frame.ng, wo);
+    const double ns_dot_out = wo[2];
+    const double ns_dot_in  = wi[2];
+
+    const double ns_dot_wh = wh[2];
+    const double wh_dot_out = Dot(wo, wh);
+    const double wh_dot_in  = Dot(wi, wh);
+    
+    double microfacet_distribution_val = ndf.EvalByHalfVector(std::abs(ns_dot_wh));
+    const double geometry_term = G2VCavity(wh_dot_in, wh_dot_out, ns_dot_in, ns_dot_out, ns_dot_wh);
+    
+    if (pdf)
+    {    
+  #ifdef SAMPLE_VNDF
+      Double3 wh_flip = wh[2]<0 ? -wh : wh;
+      double sample_pdf = VisibleNdfVCavity::Pdf(microfacet_distribution_val, wh_flip, wi);
+  #else
+      double sample_pdf = microfacet_distribution_val * std::abs(ns_dot_wh);
+  #endif
+      sample_pdf = HalfVectorPdfToExitantPdf(sample_pdf, Dot(wh_flip, wi));
+      *pdf = sample_pdf;
+    }
+  
+    if (n_dot_out <= 0.) // Not on same side of geometric surface?
+    {
+      return Spectral3{0.};
+    }
+
+    //microfacet_distribution_val *= Heaviside(ns_dot_wh);
+    
+    Spectral3 fresnel_term = SchlicksApproximation(color, std::abs(wh_dot_in));
+    assert (fresnel_term.allFinite());
+    double monochromatic_terms = geometry_term*microfacet_distribution_val*0.25/(std::abs(ns_dot_in*ns_dot_out)+Epsilon);
+    assert(std::isfinite(monochromatic_terms));
+    return monochromatic_terms*fresnel_term;
+  }
+  
+  
+  std::pair<Double3, Double3> Sample(const Double3 &wi, Sampler& sampler) const
+  {
+    Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
+  #ifdef SAMPLE_VNDF
+    VisibleNdfVCavity::Sample(wh, wi, sampler.Uniform01());
+  #endif
+    const Double3 out_direction = HalfVectorToExitant(wh, wi);
+    return std::make_pair(wh, out_direction);
+  }
+};
+
+
+
+}
+
+
+
 MicrofacetShader::MicrofacetShader(
   const SpectralN &_glossy_reflectance,
   double _glossy_exponent,
@@ -353,83 +440,36 @@ MicrofacetShader::MicrofacetShader(
 {
 }
 
-//#define SAMPLE_VNDF
 
 Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
-  double n_dot_out = Dot(surface_hit.normal, out_direction);
-  double ns_dot_out = Dot(surface_hit.shading_normal, out_direction);
-  double ns_dot_in  = Dot(surface_hit.shading_normal, reverse_incident_dir);
-  Double3 half_angle_vector = Normalized(reverse_incident_dir + out_direction);
-  // Note: half_angle_vector is NaN whenever I evalute straight through transmission.
-
-  double ns_dot_wh = Dot(surface_hit.shading_normal, half_angle_vector);
-  double wh_dot_out = Dot(out_direction, half_angle_vector);
-  double wh_dot_in  = Dot(reverse_incident_dir, half_angle_vector); // Do I need this? It is the same as wh_dot_out, no?
-  //assert(wh_dot_out >= 0.);
-  //assert(wh_dot_in >= 0.);
-  
-  double microfacet_alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
-  double microfacet_distribution_val = BeckmanDistribution{microfacet_alpha}.EvalByHalfVector(ns_dot_wh);
-  
-  if (pdf)
-  {    
-#ifdef SAMPLE_VNDF
-    const double wh_prime_dot_in = Dot(reverse_incident_dir, Reflected(half_angle_vector, surface_hit.shading_normal));
-    const double prob = 2.*std::max(0., wh_dot_in)/(std::max(0., wh_dot_in) + std::max(0., wh_prime_dot_in) + Epsilon);
-    double half_angle_distribution_val = microfacet_distribution_val*prob;
-#else
-    double half_angle_distribution_val = microfacet_distribution_val*std::abs(ns_dot_wh);;
-#endif
-    double out_distribution_val = HalfVectorPdfToExitantPdf(half_angle_distribution_val, wh_dot_in);
-    *pdf = out_distribution_val;
-  }
- 
-  if (n_dot_out <= 0.) // Not on same side of geometric surface?
-  {
-    return Spectral3{0.};
-  }
-
-  // Half vector is on positive side of shading surface, else zero contribution.
-  // This is essential when shading normals are involved, since then, indeed the
-  // half vector can point below the surface. It can also happen by the random
-  // sampling process of the outgoing direction.
-  microfacet_distribution_val *= Heaviside(ns_dot_wh);
-  
-  const double geometry_term = G2VCavity(wh_dot_in, wh_dot_out, ns_dot_in, ns_dot_out, ns_dot_wh);
- 
-  
+  LocalFrame frame{surface_hit};
+  double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
+  BeckmanDistribution ndf{alpha};
   Spectral3 kr_s_taken = Take(kr_s, context.lambda_idx);
-  Spectral3 fresnel_term = SchlicksApproximation(kr_s_taken, std::abs(wh_dot_in));
-  assert (fresnel_term.allFinite());
-  double monochromatic_terms = geometry_term*microfacet_distribution_val*0.25/(std::abs(ns_dot_in*ns_dot_out)+Epsilon);
-  assert(std::isfinite(monochromatic_terms));
-  return monochromatic_terms*fresnel_term;
+  const Double3 wi = frame.m_local_inv * reverse_incident_dir;
+  const Double3 wo = frame.m_local_inv * out_direction;
+  const Double3 wh = Normalized(wi+wo);
+  return MicrofacetShaderWrapper{context, ndf, frame, kr_s_taken}.Evaluate(wi, wh, wo, pdf);
 }
 
 
 ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
 {
-  auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
-  const double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
-  const Double3 h_r_local = BeckmanDistribution{alpha}.SampleHalfVector(sampler.UniformUnitSquare());
-  Double3 h_r = m*h_r_local;
-#ifdef SAMPLE_VNDF
-  // From "Importance Sampling Microfacet-Based BSDFs using the Distribution of Visible Normals" Heitz et al. (2014)
-  const Double3 h_prime = m * Double3{-h_r_local[0], -h_r_local[1], h_r_local[2]};
-  const double prob = std::max(0., Dot(reverse_incident_dir, h_prime))/(std::max(0.,Dot(reverse_incident_dir, h_r)) + std::max(0., Dot(reverse_incident_dir, h_prime)) + Epsilon);
-  assert(prob>-1.e-6 && prob < 1.00001);
-  if (sampler.Uniform01() < prob)
-    h_r = h_prime;
-#endif
-  const Double3 out_direction = HalfVectorToExitant(h_r, reverse_incident_dir);
-  ScatterSample smpl; 
-  smpl.coordinates = out_direction;
-  ASSERT_NORMALIZED(out_direction);
+  LocalFrame frame{surface_hit};
+  double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
+  BeckmanDistribution ndf{alpha};
+  Spectral3 kr_s_taken = Take(kr_s, context.lambda_idx);
+  MicrofacetShaderWrapper brdf{context, ndf, frame, kr_s_taken};
+  const Double3 wi = frame.m_local_inv * reverse_incident_dir;
+  auto [wh, wo] = brdf.Sample(wi, sampler);
   double pdf = NaN;
-  smpl.value = this->EvaluateBSDF(reverse_incident_dir, surface_hit, out_direction, context, &pdf);
-  smpl.pdf_or_pmf = pdf;
-  return smpl;
+  Spectral3 color = brdf.Evaluate(wi, wh, wo, &pdf);
+  return ScatterSample {
+    frame.m_local * wo,
+    color,
+    pdf
+  };
 }
 
 

@@ -1399,16 +1399,16 @@ INSTANTIATE_TEST_CASE_P(Microfacet,
                         ::testing::Values(
                           P(VERTICAL,       VERTICAL),
                           P(ALMOST_45DEG,            VERTICAL),
-                          //P(VERTICAL,       MUCH_DEFLECTED)
-                          //P(MUCH_DEFLECTED, EXACT_45DEG),
+                          P(VERTICAL,       MUCH_DEFLECTED),
+                          P(MUCH_DEFLECTED, EXACT_45DEG),
                           P(MUCH_DEFLECTED, VERTICAL)
                         ));
 
 INSTANTIATE_TEST_CASE_P(Microfacet,
                         ShaderSymmetry,
                         ::testing::Values(
-                          P(UNUSED_VECTOR, VERTICAL)
-                          //P(UNUSED_VECTOR, EXACT_45DEG),
+                          P(UNUSED_VECTOR, VERTICAL),
+                          P(UNUSED_VECTOR, EXACT_45DEG)
                           //P(UNUSED_VECTOR, MUCH_DEFLECTED)
                         ));
 
