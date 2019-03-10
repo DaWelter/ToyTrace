@@ -84,6 +84,8 @@ inline double G2VCavity(double wh_dot_in, double wh_dot_out, double ns_dot_in, d
 
 struct VisibleNdfVCavity
 {
+  
+inline static constexpr double WI_BELOW_HORIZON_FIX_FACTOR = 1.e-6;
 // Transform wh so that it samples the VNDF distribution for the VCavity shadowing function.
 // wh : Half-vector sampled from NDF*|wh.n|
 // wi : Viewing direction
@@ -91,20 +93,11 @@ struct VisibleNdfVCavity
 static void Sample(Double3 &wh, const Double3 &wi, double r)
 {
   Double3 wh_prime{-wh[0], -wh[1], wh[2]};
-  if (wi[2] < 0)
-  {
-    wh[2] = -wh[2];
-    wh_prime[2] = -wh_prime[2];
-  }  
-  double prob = ClampDot(wi, wh_prime)/(ClampDot(wi, wh) + ClampDot(wi, wh_prime));
-  if (wi[2] < 0)
-    prob = 1.0-prob;
+  double prob = ClampDot(wi, wh_prime)/(ClampDot(wi, wh) + ClampDot(wi, wh_prime) + WI_BELOW_HORIZON_FIX_FACTOR);
   if (r < prob)
   {
     wh = wh_prime;
   }
-  if (wi[2] < 0)
-    wh[2] = -wh[2];
 }
 
 // Get the PDF corresponding to the sample function.
@@ -113,8 +106,15 @@ static void Sample(Double3 &wh, const Double3 &wi, double r)
 // wh and wi must be defined in a local frame where the normal n is aligned with the z-axis!
 static double Pdf(double ndf_val, const Double3 &wh, const Double3 &wi)
 {
-  double g1 = G1VCavity(Dot(wi, wh), wi[2], wh[2]);
-  return g1*ndf_val*std::abs(Dot(wi,wh))/(std::abs(wi[2]) + Epsilon);
+//   double g1 = G1VCavity(Dot(wi, wh), wi[2], wh[2]);
+//   return ndf_val*std::abs(wh[2])*g1;
+  
+  const Double3 wh_prime{-wh[0],-wh[1],wh[2]};
+  const double wh_prime_dot_in = ClampDot(wi, wh_prime);
+  const double wh_dot_in = ClampDot(wh, wi);
+  const double prob = (2.*wh_dot_in + WI_BELOW_HORIZON_FIX_FACTOR)/(wh_dot_in + wh_prime_dot_in + WI_BELOW_HORIZON_FIX_FACTOR);
+  return ndf_val*std::abs(wh[2])*prob;
+  
 }
 
 
@@ -123,7 +123,9 @@ static double Pdf(double ndf_val, const Double3 &wh, const Double3 &wi)
 /*------------ Utils ---------------------*/
 inline double HalfVectorPdfToExitantPdf(double pdf_wh, double wh_dot_in)
 {
-    double out_direction_pdf = pdf_wh*0.25/(wh_dot_in+Epsilon); // From density of h_r to density of out direction.
+    //assert(wh_dot_in >= 0); 
+    // Because half-vector for reflection. Forming the half-vector from wi+wo, the condition wh_dot_in>=0 should always be true.
+    double out_direction_pdf = pdf_wh*0.25/(std::abs(wh_dot_in)+Epsilon); // From density of h_r to density of out direction.
     return out_direction_pdf;
 }
 

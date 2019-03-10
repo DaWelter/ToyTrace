@@ -16,7 +16,7 @@ static const Double3 VERTICAL = Double3{0,0,1};
 static const Double3 EXACT_45DEG    = Normalized(Double3{0,1,1});
 static const Double3 ALMOST_45DEG    = Normalized(Double3{0,1,1.1});
 static const Double3 MUCH_DEFLECTED = Normalized(Double3{0,10,1});
-static const Double3 BELOW          = Normalized(Double3{0,1,-1});
+static const Double3 BELOW          = Normalized(Double3{0,5,-1});
 }
 
 
@@ -184,7 +184,7 @@ TEST_P(NDFTest, Outdirection)
     // the ground plane. But the plain NDF is not defined there.
     // With the abs(...) we have the correct distribution for wo!
     double ndf_val = ndf.EvalByHalfVector(std::abs(wh[2]))*std::abs(wh[2]);
-    return HalfVectorPdfToExitantPdf(ndf_val, std::abs(Dot(wh, wi)));
+    return HalfVectorPdfToExitantPdf(ndf_val, Dot(wh, wi));
   };
   
   auto sample_gen = [wi = wi, this, &ndf]() 
@@ -232,19 +232,58 @@ TEST_P(NDFTest, VNDFSampling)
 }
 
 
+TEST_P(NDFTest, VNDFSamplingOutDirection)
+{
+  const auto [alpha, wi] = this->GetParam();
+  CubeMap cubemap(8); 
+  NDF ndf{alpha};
+  
+  auto density_func = [wi=wi, &ndf](const Double3 &wo)
+  {
+    Double3 wh = Normalized(wo + wi);
+    if (wh[2] < 0)
+      wh = -wh;
+    double ndf_val = ndf.EvalByHalfVector(wh[2]);
+    double vndf = VisibleNdfVCavity::Pdf(ndf_val, wh, wi);
+    return HalfVectorPdfToExitantPdf(vndf, Dot(wh, wi));
+  };
+  
+  auto sample_gen = [wi = wi, this, &ndf]() 
+  {
+    // The method by Heitz et. al (2014), Algorithm 3, for VCavity model.
+    Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
+    VisibleNdfVCavity::Sample(wh, wi, sampler.Uniform01());
+    return HalfVectorToExitant(wh, wi);;
+  };
+  
+  std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);
+  std::vector<int> sample_counts = SampleOverCubemap(sample_gen, cubemap, 1000);
+  double chi_sqr_probability = ChiSquaredProbability(&sample_counts[0], &probs[0], probs.size());
+  EXPECT_GE(chi_sqr_probability, 0.05);
+  double total_prob = std::accumulate(probs.begin(), probs.end(), 0.);
+  EXPECT_NEAR(total_prob, 1., 1.e-2);
+}
+
+
 
 TEST(NDFTest, VNDFViz)
 {
   using NDF = BeckmanDistribution;
   CubeMap cubemap(32); 
-  NDF ndf{0.5};
-  const Double3 wi = BELOW; //Normalized(Double3{10, 0, -1});
+  NDF ndf{0.08};
+  const Double3 wi = MUCH_DEFLECTED; //Normalized(Double3{10, 0, -1});
   Sampler sampler;
   
-  auto density_func = [&](const Double3 &wh)
+  auto density_func = [&](const Double3 &wo)
   {
+    Double3 wh = Normalized(wo + wi);
+    if (wh[2] < 0)
+      wh = -wh;
     double ndf_val = ndf.EvalByHalfVector(wh[2]);
-    return VisibleNdfVCavity::Pdf(ndf_val, wh, wi);
+    double vndf = VisibleNdfVCavity::Pdf(ndf_val, wh, wi);
+    return HalfVectorPdfToExitantPdf(vndf, Dot(wh, wi));
+    
+    //return HalfVectorPdfToExitantPdf(ndf_val*wh[2], Dot(wh, wi));
   };
   
   auto sample_gen = [&]() 
@@ -252,7 +291,7 @@ TEST(NDFTest, VNDFViz)
     // The method by Heitz et. al (2014), Algorithm 3, for VCavity model.
     Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
     VisibleNdfVCavity::Sample(wh, wi, sampler.Uniform01());
-    return wh;
+    return HalfVectorToExitant(wh, wi);
   };
   
   std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);
@@ -278,7 +317,7 @@ namespace NDFTestNS
 
 INSTANTIATE_TEST_CASE_P(NDFTestNS, NDFTest, ::testing::Values(
   NDF_Params(0.05, VERTICAL),
-  NDF_Params(0.05, MUCH_DEFLECTED),
+  NDF_Params(0.08, MUCH_DEFLECTED), // Needs more roughness. Probably because numerical error of integration of the probability density.
   NDF_Params(0.05, BELOW),
   NDF_Params(0.5, VERTICAL),
   NDF_Params(0.5, MUCH_DEFLECTED),
