@@ -29,6 +29,11 @@ public:
     return bins_per_axis*bins_per_axis*6;
   }
   
+  int BinsPerAxis() const
+  {
+    return bins_per_axis;
+  }
+  
   // i,j indices of the grid vertices.
   Double2 VertexToUV(int i, int j) const
   {

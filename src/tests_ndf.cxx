@@ -83,23 +83,30 @@ using Alloc = rapidjson::Document::AllocatorType; // For some reason I must supp
 rapidjson::Value Array3ToJSON(const Eigen::Array<double, 3, 1> &v, Alloc &alloc);
 void Write(rj::Document &doc, const std::string &filename);
 
-rj::Value CubemapToJSON(const CubeMap &cubemap, const int Nbins, std::vector<double> bin_values, rj::Alloc& alloc)
+rj::Value CubemapToJSON(const CubeMap &cubemap, rj::Alloc& alloc)
 {
   rj::Value json_side;
   json_side.SetArray();
   for (int side = 0; side < 6; ++side)
   {
     rj::Value json_i(rj::kArrayType);
-    for (int i = 0; i < Nbins; ++i)
+    for (int i = 0; i < cubemap.BinsPerAxis(); ++i)
     {
       rj::Value json_j(rj::kArrayType);
-      for (int j = 0; j < Nbins; ++j)
+      for (int j = 0; j < cubemap.BinsPerAxis(); ++j)
       {
         rj::Value json_bin(rj::kObjectType);
+        // Store index by which to look up data for current cell.
         int idx = cubemap.CellToIndex(side, i, j);
-        auto uv_bounds = cubemap.CellToUVBounds(i, j);
-        json_bin.AddMember("value", bin_values[idx], alloc);
-        json_bin.AddMember("pos", rj::Array3ToJSON(cubemap.UVToOmega(side, (std::get<0>(uv_bounds) + std::get<1>(uv_bounds))*0.5).array(), alloc), alloc);
+        json_bin.AddMember("index", idx, alloc);
+        // Store coordinates of cell center. As direction on the unit sphere.
+        auto [uv_min, uv_max] = cubemap.CellToUVBounds(i, j);
+        json_bin.AddMember("center", rj::Array3ToJSON(cubemap.UVToOmega(side, (uv_min+uv_max)*0.5).array(), alloc), alloc);
+        // Store coordinates of the corners
+        Double3 w00 = cubemap.UVToOmega(side, uv_min);
+        Double3 w11 = cubemap.UVToOmega(side, uv_max);
+        json_bin.AddMember("w00", rj::Array3ToJSON(w00.array(), alloc), alloc);
+        json_bin.AddMember("w11", rj::Array3ToJSON(w11.array(), alloc), alloc);
         json_j.PushBack(json_bin, alloc);
       }
       json_i.PushBack(json_j, alloc);
@@ -107,6 +114,31 @@ rj::Value CubemapToJSON(const CubeMap &cubemap, const int Nbins, std::vector<dou
     json_side.PushBack(json_i, alloc);
   }
   return json_side;
+}
+
+
+template<class T>
+rapidjson::Value ToJSON(const T &v, Alloc &alloc)
+{
+  return rj::Value(v);
+}
+
+template<>
+rapidjson::Value ToJSON<Eigen::Array<double, 3, 1>>(const Eigen::Array<double, 3, 1> &v, Alloc &alloc)
+{
+  return Array3ToJSON(v, alloc);
+}
+
+
+template<class Container>
+rj::Value ContainerToJSON(const Container &c, rj::Alloc &alloc)
+{
+  rj::Value json_container(rj::kArrayType);
+  for (const auto &x : c)
+  {
+    json_container.PushBack(ToJSON(x, alloc), alloc);
+  }
+  return json_container;
 }
 
 
@@ -362,17 +394,16 @@ TEST(NDFTest, VNDFViz)
   
   std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);
   std::vector<int> sample_counts = SampleOverCubemap(sample_gen, cubemap, 100000);
-  std::vector<double> double_counts;
-  for (auto x : sample_counts) double_counts.push_back((double)x);
   
   rj::Document doc;
   auto &alloc = doc.GetAllocator();
   doc.SetObject();
-  
-  auto node1 = rj::CubemapToJSON(cubemap, 32, probs, alloc);
-  doc.AddMember("probs", node1, alloc);
-  auto node2 = rj::CubemapToJSON(cubemap, 32, double_counts, alloc);
-  doc.AddMember("counts", node2, alloc);
+  rj::Value node = rj::CubemapToJSON(cubemap, alloc);
+  doc.AddMember("cubemap", node, alloc);
+  node = rj::ContainerToJSON(probs, alloc);
+  doc.AddMember("probs", node, alloc);
+  node = rj::ContainerToJSON(sample_counts, alloc);
+  doc.AddMember("counts", node, alloc);
   rj::Write(doc, "/tmp/cubemap.json");
 }
 
