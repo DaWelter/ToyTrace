@@ -9,7 +9,7 @@
 #include "normaldistributionfunction.hxx"
 #include "util.hxx"
 #include "sampler.hxx"
-
+#include "shader_util.hxx"
 
 namespace {
 static const Double3 VERTICAL = Double3{0,0,1};
@@ -184,13 +184,13 @@ TEST_P(NDFTest, Outdirection)
     // the ground plane. But the plain NDF is not defined there.
     // With the abs(...) we have the correct distribution for wo!
     double ndf_val = ndf.EvalByHalfVector(std::abs(wh[2]))*std::abs(wh[2]);
-    return HalfVectorPdfToExitantPdf(ndf_val, Dot(wh, wi));
+    return HalfVectorPdfToReflectedPdf(ndf_val, Dot(wh, wi));
   };
   
-  auto sample_gen = [wi = wi, this, &ndf]() 
+  auto sample_gen = [wi = wi, this, &ndf]()
   {
     Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
-    return HalfVectorToExitant(wh, wi);
+    return Reflected(wi,wh);
   };
   
   std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);
@@ -245,7 +245,7 @@ TEST_P(NDFTest, VNDFSamplingOutDirection)
       wh = -wh;
     double ndf_val = ndf.EvalByHalfVector(wh[2]);
     double vndf = VisibleNdfVCavity::Pdf(ndf_val, wh, wi);
-    return HalfVectorPdfToExitantPdf(vndf, Dot(wh, wi));
+    return HalfVectorPdfToReflectedPdf(vndf, Dot(wh, wi));
   };
   
   auto sample_gen = [wi = wi, this, &ndf]() 
@@ -253,7 +253,7 @@ TEST_P(NDFTest, VNDFSamplingOutDirection)
     // The method by Heitz et. al (2014), Algorithm 3, for VCavity model.
     Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
     VisibleNdfVCavity::Sample(wh, wi, sampler.Uniform01());
-    return HalfVectorToExitant(wh, wi);;
+    return Reflected(wi,wh);
   };
   
   std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);

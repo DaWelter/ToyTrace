@@ -121,29 +121,4 @@ static double Pdf(double ndf_val, const Double3 &wh, const Double3 &wi)
 };
 
 /*------------ Utils ---------------------*/
-inline double HalfVectorPdfToExitantPdf(double pdf_wh, double wh_dot_in)
-{
-    //assert(wh_dot_in >= 0); 
-    // Because half-vector for reflection. Forming the half-vector from wi+wo, the condition wh_dot_in>=0 should always be true.
-    double out_direction_pdf = pdf_wh*0.25/(std::abs(wh_dot_in)+Epsilon); // From density of h_r to density of out direction.
-    return out_direction_pdf;
-}
-
-
-inline Double3 HalfVectorToExitant(const Double3 &h_r, const Double3 &reverse_incident_dir)
-{
-  double hr_dot_in = Dot(reverse_incident_dir, h_r);
-  // See walter 2007, eq. 38. // Should I use the "reflection" formula with the abs in it instead?
-  // However, for that case I haven't found the correct pdf transform for the outgoing direction yet ...
-//   if (hr_dot_in < 0.)
-//   {
-//     hr_dot_in = -hr_dot_in;
-//     h_r = -h_r;
-//   }
-  Double3 out_direction = 2.*hr_dot_in*h_r - reverse_incident_dir;
-//   if (hr_dot_in < 0.) // Only needed when using the "reflection" variant with std::abs in it.
-//     out_direction = Normalized(out_direction);
-  return out_direction;
-}
-
 

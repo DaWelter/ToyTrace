@@ -22,6 +22,7 @@
 #include "util.hxx"
 #include "hashgrid.hxx"
 #include "photonintersector.hxx"
+#include "shader_util.hxx"
 
 
 TEST(TestRaySegment, ExprTemplates)

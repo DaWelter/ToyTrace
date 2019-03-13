@@ -10,63 +10,6 @@
 #include <boost/container/small_vector.hpp>
 
 
-template<class Derived>
-inline auto Reflected(const Eigen::MatrixBase<Derived>& reverse_incident_dir, const Eigen::MatrixBase<Derived>& normal)
-{
-  return (2.*reverse_incident_dir.dot(normal)*normal - reverse_incident_dir);
-}
-
-// Return n if the vector component of dir in the direction of n is positive, else -n.
-template<class Derived>
-inline auto AlignedNormal(const Eigen::MatrixBase<Derived>&n, const Eigen::MatrixBase<Derived>&dir)
-{
-  using Scalar = typename Derived::Scalar;
-  return Dot(n, dir)>0 ? Scalar{1}*n : Scalar{-1}*n;
-}
-
-
-// Adapted from pbrt. eta is the ratio of refractive indices eta_i / eta_t
-inline boost::optional<Double3> Refracted(const Double3 &wi, const Double3 &n, double eta_i_over_t) 
-{
-    const double eta = eta_i_over_t;
-    double cosThetaI = Dot(n, wi);
-    double sin2ThetaI = std::max(double(0), double(1 - cosThetaI * cosThetaI));
-    double sin2ThetaT = eta * eta * sin2ThetaI;
-
-    // Handle total internal reflection for transmission
-    if (sin2ThetaT >= 1) return boost::none;
-    double cosThetaT = std::sqrt(1 - sin2ThetaT);
-    double n_prefactor = (eta * std::abs(cosThetaI) - cosThetaT);
-           n_prefactor = cosThetaI>=0. ? n_prefactor : -n_prefactor; // Invariance to normal flip.
-    return Double3{-eta * wi + n_prefactor * n};
-}
-
-
-
-inline Double3 HalfVector(const Double3 &wi, const Double3 &wo)
-{
-  Double3 ret = wo + wi;
-  double norm = Length(ret);
-  if (norm > 0)
-    return ret/norm;
-  else // Added by me.
-    // Pick a direction perpendicular to wi and wo.
-    return OrthogonalSystemZAligned(wi).col(0);
-}
-
-
-inline Double3 HalfVectorRefracted(const Double3 &wi, const Double3 &wo, double eta_i_over_t)
-{
-  // From Walter et al. (2007) "Microfacet Models for Refraction through Rough Surfaces" Eq. 16
-  Double3 ret = -(eta_i_over_t*wi + wo);
-  double norm = Length(ret);
-  if (norm > 0)
-    return ret/norm;
-  else // Added by me.
-    // Pick a direction perpendicular to wi and wo. 
-    return OrthogonalSystemZAligned(wi).col(0);
-}
-
 
 
 struct LambdaSelection
