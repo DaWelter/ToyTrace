@@ -203,6 +203,56 @@ TEST_P(NDFTest, Outdirection)
 }
 
 
+
+TEST_P(NDFTest, RefractedDirection)
+{ 
+  const auto [alpha, wi] = this->GetParam();
+  CubeMap cubemap(8); 
+  NDF ndf{alpha};
+  double eta_ground = 1.5;
+
+  auto density_func = [wi=wi, &ndf,eta_ground](const Double3 &wo) -> double
+  {
+    double eta_i_over_t = wi[2]>=0 ? 1.0/eta_ground : eta_ground;
+    Double3 wht = HalfVectorRefracted(wi, wo, eta_i_over_t);
+    Double3 whr = HalfVector(wi, wo);
+    bool total_reflection = (bool)Refracted(wi, whr, eta_i_over_t) == false;
+    double prob_reflect = total_reflection ? 1.0 : 0.5;
+    double prob_transmit = 0.5;
+    double ndf_reflect = ndf.EvalByHalfVector(std::abs(whr[2]))*std::abs(whr[2]);
+    double ndf_transm = ndf.EvalByHalfVector(std::abs(wht[2]))*std::abs(wht[2]);
+    double pdf_wor = HalfVectorPdfToTransmittedPdf(ndf_reflect, eta_i_over_t, Dot(whr, wi), Dot(whr, wo));
+    double pdf_wot = HalfVectorPdfToTransmittedPdf(ndf_reflect, eta_i_over_t, Dot(wht, wi), Dot(wht, wo));
+    return pdf_wor + pdf_wot;
+  };
+  
+  auto sample_gen = [wi = wi, this, &ndf,eta_ground]() -> Double3
+  {
+    double eta_i_over_t = wi[2]>=0 ? 1.0/eta_ground : eta_ground;
+    Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
+    double prob_reflect = 0.5;
+    boost::optional<Double3> wt = Refracted(wi, wh, eta_i_over_t);
+    if (!wt)
+      prob_reflect = 1.0;
+    if (sampler.Uniform01() < prob_reflect)
+    {
+      return Reflected(wi, wh);
+    }
+    else
+      return *wt;
+  };
+  
+  std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);
+  std::vector<int> sample_counts = SampleOverCubemap(sample_gen, cubemap, 1000);
+  double chi_sqr_probability = ChiSquaredProbability(&sample_counts[0], &probs[0], probs.size());
+  EXPECT_GE(chi_sqr_probability, 0.05);
+  // Integral of the density over all solid angles should be normalized to 1.
+  double total_prob = std::accumulate(probs.begin(), probs.end(), 0.);
+  EXPECT_NEAR(total_prob, 1., 1.e-2);
+}
+
+
+
 TEST_P(NDFTest, VNDFSampling)
 {
   const auto [alpha, wi] = this->GetParam();
@@ -270,28 +320,44 @@ TEST(NDFTest, VNDFViz)
 {
   using NDF = BeckmanDistribution;
   CubeMap cubemap(32); 
-  NDF ndf{0.08};
-  const Double3 wi = MUCH_DEFLECTED; //Normalized(Double3{10, 0, -1});
+  NDF ndf{0.5};
+  const Double3 wi = BELOW; //Normalized(Double3{10, 0, -1});
   Sampler sampler;
+  double eta_ground = 1.5;
   
   auto density_func = [&](const Double3 &wo)
   {
-    Double3 wh = Normalized(wo + wi);
-    if (wh[2] < 0)
-      wh = -wh;
-    double ndf_val = ndf.EvalByHalfVector(wh[2]);
-    double vndf = VisibleNdfVCavity::Pdf(ndf_val, wh, wi);
-    return HalfVectorPdfToExitantPdf(vndf, Dot(wh, wi));
-    
-    //return HalfVectorPdfToExitantPdf(ndf_val*wh[2], Dot(wh, wi));
+    //double eta_i_over_t = wi[2]>=0 ? 1.0/eta_ground : eta_ground;
+    double eta_i_over_t = 1.0/eta_ground;
+    Double3 wht = HalfVectorRefracted(wi, wo, eta_i_over_t);
+    Double3 whr = HalfVector(wi, wo);
+    EXPECT_NEAR(AbsDot(wht,whr), 1., 1.e-1);
+    bool total_reflection = !Refracted(wi, whr, eta_i_over_t).is_initialized();
+    double prob_reflect = total_reflection ? 1.0 : 0.5;
+    double prob_transmit = 0.5;
+    double ndf_reflect = ndf.EvalByHalfVector(std::abs(whr[2]))*std::abs(whr[2]);
+    double ndf_transm = ndf.EvalByHalfVector(wht[2])*std::abs(wht[2]);
+    double pdf_wor = HalfVectorPdfToReflectedPdf(ndf_reflect, Dot(whr, wi));
+    double pdf_wot = HalfVectorPdfToTransmittedPdf(ndf_transm, eta_i_over_t, Dot(wht, wi), Dot(wht, wo));
+    return prob_reflect*pdf_wor + prob_transmit*pdf_wot;
   };
   
-  auto sample_gen = [&]() 
+  auto sample_gen = [&]()  -> Double3
   {
-    // The method by Heitz et. al (2014), Algorithm 3, for VCavity model.
+    //double eta_i_over_t = wi[2]>=0 ? 1.0/eta_ground : eta_ground;
+    double eta_i_over_t = 1.0/eta_ground;
     Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
-    VisibleNdfVCavity::Sample(wh, wi, sampler.Uniform01());
-    return HalfVectorToExitant(wh, wi);
+    double prob_reflect = 0.5;
+    boost::optional<Double3> wt = Refracted(wi, wh, eta_i_over_t);
+    if (!wt)
+      prob_reflect = 1.0;
+    if (sampler.Uniform01() < prob_reflect)
+    {
+      //return SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
+      return Reflected(wi, wh);
+    }
+    else
+      return *wt;
   };
   
   std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);
