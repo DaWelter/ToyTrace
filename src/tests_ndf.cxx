@@ -101,12 +101,14 @@ rj::Value CubemapToJSON(const CubeMap &cubemap, rj::Alloc& alloc)
         json_bin.AddMember("index", idx, alloc);
         // Store coordinates of cell center. As direction on the unit sphere.
         auto [uv_min, uv_max] = cubemap.CellToUVBounds(i, j);
-        json_bin.AddMember("center", rj::Array3ToJSON(cubemap.UVToOmega(side, (uv_min+uv_max)*0.5).array(), alloc), alloc);
+        Double2 centeruv = (uv_min+uv_max)*0.5;
+        json_bin.AddMember("center", rj::Array3ToJSON(cubemap.UVToOmega(side, centeruv).array(), alloc), alloc);
         // Store coordinates of the corners
         Double3 w00 = cubemap.UVToOmega(side, uv_min);
         Double3 w11 = cubemap.UVToOmega(side, uv_max);
         json_bin.AddMember("w00", rj::Array3ToJSON(w00.array(), alloc), alloc);
         json_bin.AddMember("w11", rj::Array3ToJSON(w11.array(), alloc), alloc);
+        json_bin.AddMember("J", cubemap.UVtoJ(centeruv), alloc);
         json_j.PushBack(json_bin, alloc);
       }
       json_i.PushBack(json_j, alloc);
