@@ -14,7 +14,7 @@
 namespace {
 static const Double3 VERTICAL = Double3{0,0,1};
 static const Double3 EXACT_45DEG    = Normalized(Double3{0,1,1});
-static const Double3 ALMOST_45DEG    = Normalized(Double3{0,1,1.1});
+static const Double3 ALMOST_45DEG    = Normalized(Double3{0,1,2});
 static const Double3 MUCH_DEFLECTED = Normalized(Double3{0,10,1});
 static const Double3 BELOW          = Normalized(Double3{0,5,-1});
 }
@@ -349,53 +349,65 @@ TEST_P(NDFTest, VNDFSamplingOutDirection)
 }
 
 
-
-TEST(NDFTest, VNDFViz)
+void RunVisualization(const Double3 &wi, double alpha, double eta_ground, const std::string &output_filename)
 {
+  std::cout << output_filename << std::endl;
   using NDF = BeckmanDistribution;
   CubeMap cubemap(32); 
-  NDF ndf{0.5};
-  const Double3 wi = BELOW; //Normalized(Double3{10, 0, -1});
+  NDF ndf{alpha};
   Sampler sampler;
-  double eta_ground = 1.5;
   
   auto density_func = [&](const Double3 &wo)
   {
-    //double eta_i_over_t = wi[2]>=0 ? 1.0/eta_ground : eta_ground;
     double eta_i_over_t = 1.0/eta_ground;
     Double3 wht = HalfVectorRefracted(wi, wo, eta_i_over_t);
     Double3 whr = HalfVector(wi, wo);
-    EXPECT_NEAR(AbsDot(wht,whr), 1., 1.e-1);
-    bool total_reflection = !Refracted(wi, whr, eta_i_over_t).is_initialized();
-    double prob_reflect = total_reflection ? 1.0 : 0.5;
-    double prob_transmit = 0.5;
+    bool is_refracted_physically_possible = Dot(wht, wi) * Dot(wht, wo) < 0.;   // On opposing side of normal.
+    bool reflect_is_total = (bool)Refracted(wi, whr, eta_i_over_t) == false;
+    double prob_reflect = reflect_is_total ? 1.0 : 0.0;
+    double prob_transmit = is_refracted_physically_possible ? 1.0 : 0.0;
     double ndf_reflect = ndf.EvalByHalfVector(std::abs(whr[2]))*std::abs(whr[2]);
-    double ndf_transm = ndf.EvalByHalfVector(wht[2])*std::abs(wht[2]);
+    double ndf_transm = ndf.EvalByHalfVector(std::abs(wht[2]))*std::abs(wht[2]);
     double pdf_wor = HalfVectorPdfToReflectedPdf(ndf_reflect, Dot(whr, wi));
     double pdf_wot = HalfVectorPdfToTransmittedPdf(ndf_transm, eta_i_over_t, Dot(wht, wi), Dot(wht, wo));
+    
     return prob_reflect*pdf_wor + prob_transmit*pdf_wot;
+    
+    //return is_refracted_physically_possible ? pdf_wot : 0.;
+    
+    //return pdf_wor;
   };
   
   auto sample_gen = [&]()  -> Double3
   {
-    //double eta_i_over_t = wi[2]>=0 ? 1.0/eta_ground : eta_ground;
     double eta_i_over_t = 1.0/eta_ground;
     Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
-    double prob_reflect = 0.5;
+
+    double prob_reflect = 0.;
     boost::optional<Double3> wt = Refracted(wi, wh, eta_i_over_t);
     if (!wt)
       prob_reflect = 1.0;
     if (sampler.Uniform01() < prob_reflect)
     {
-      //return SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
       return Reflected(wi, wh);
     }
     else
       return *wt;
+    
+//     boost::optional<Double3> wt = Refracted(wi, wh, eta_i_over_t);
+//     if (!wt)
+//       return SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
+//     else
+//       return *wt;
+    
+//    return Reflected(wi, wh);
   };
   
   std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);
-  std::vector<int> sample_counts = SampleOverCubemap(sample_gen, cubemap, 100000);
+  std::vector<int> sample_counts = SampleOverCubemap(sample_gen, cubemap, 1000000);
+  
+  double total_prob = std::accumulate(probs.begin(), probs.end(), 0.);
+  std::cout << "Prob computed = " << total_prob << std::endl;
   
   rj::Document doc;
   auto &alloc = doc.GetAllocator();
@@ -406,7 +418,33 @@ TEST(NDFTest, VNDFViz)
   doc.AddMember("probs", node, alloc);
   node = rj::ContainerToJSON(sample_counts, alloc);
   doc.AddMember("counts", node, alloc);
-  rj::Write(doc, "/tmp/cubemap.json");
+  rj::Write(doc, output_filename);
+}
+
+
+TEST(NDFTest, VNDFViz)
+{
+  const char* prefix = "";
+  double ior = 1.5; // 1.0/1.5;
+  char* ior_str = "D-L"; // Dense->light transmission
+  RunVisualization(BELOW, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_below_sharp_", ior_str,".json"));
+  RunVisualization(VERTICAL, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_vertical_sharp_", ior_str,".json"));
+  RunVisualization(MUCH_DEFLECTED, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_deflected_sharp_", ior_str,".json"));
+  RunVisualization(ALMOST_45DEG, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_45_sharp_", ior_str,".json"));
+  RunVisualization(BELOW, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_below_rough_",ior_str,".json"));
+  RunVisualization(VERTICAL, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_vertical_rough_",ior_str,".json"));
+  RunVisualization(MUCH_DEFLECTED, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_deflected_rough_",ior_str,".json"));
+  RunVisualization(ALMOST_45DEG, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_45_rough_",ior_str,".json"));
+  ior = 1.0/1.5;
+  ior_str = "L-D"; // Light -> dense transmission
+  RunVisualization(BELOW, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_below_sharp_", ior_str,".json"));
+  RunVisualization(VERTICAL, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_vertical_sharp_", ior_str,".json"));
+  RunVisualization(MUCH_DEFLECTED, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_deflected_sharp_", ior_str,".json"));
+  RunVisualization(ALMOST_45DEG, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_45_sharp_", ior_str,".json"));
+  RunVisualization(BELOW, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_below_rough_",ior_str,".json"));
+  RunVisualization(VERTICAL, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_vertical_rough_",ior_str,".json"));
+  RunVisualization(MUCH_DEFLECTED, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_deflected_rough_",ior_str,".json"));
+  RunVisualization(ALMOST_45DEG, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_45_rough_",ior_str,".json"));
 }
 
 
