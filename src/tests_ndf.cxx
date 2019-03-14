@@ -362,10 +362,12 @@ void RunVisualization(const Double3 &wi, double alpha, double eta_ground, const 
     double eta_i_over_t = 1.0/eta_ground;
     Double3 wht = HalfVectorRefracted(wi, wo, eta_i_over_t);
     Double3 whr = HalfVector(wi, wo);
+    double fr_whr = FresnelReflectivity(AbsDot(whr,wi), eta_i_over_t);
+    double fr_wht = FresnelReflectivity(AbsDot(wht,wi), eta_i_over_t);
     bool is_refracted_physically_possible = Dot(wht, wi) * Dot(wht, wo) < 0.;   // On opposing side of normal.
-    bool reflect_is_total = (bool)Refracted(wi, whr, eta_i_over_t) == false;
-    double prob_reflect = reflect_is_total ? 1.0 : 0.0;
-    double prob_transmit = is_refracted_physically_possible ? 1.0 : 0.0;
+    //bool reflect_is_total = (bool)Refracted(wi, whr, eta_i_over_t) == false;
+    double prob_reflect = fr_whr;
+    double prob_transmit = is_refracted_physically_possible ? 1.0-fr_wht : 0.0;
     double ndf_reflect = ndf.EvalByHalfVector(std::abs(whr[2]))*std::abs(whr[2]);
     double ndf_transm = ndf.EvalByHalfVector(std::abs(wht[2]))*std::abs(wht[2]);
     double pdf_wor = HalfVectorPdfToReflectedPdf(ndf_reflect, Dot(whr, wi));
@@ -383,11 +385,11 @@ void RunVisualization(const Double3 &wi, double alpha, double eta_ground, const 
     double eta_i_over_t = 1.0/eta_ground;
     Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
 
-    double prob_reflect = 0.;
+    double fr = FresnelReflectivity(AbsDot(wh,wi), eta_i_over_t);
     boost::optional<Double3> wt = Refracted(wi, wh, eta_i_over_t);
     if (!wt)
-      prob_reflect = 1.0;
-    if (sampler.Uniform01() < prob_reflect)
+      fr = 1.0;
+    if (sampler.Uniform01() < fr)
     {
       return Reflected(wi, wh);
     }
