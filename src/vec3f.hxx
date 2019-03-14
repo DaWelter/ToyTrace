@@ -379,9 +379,9 @@ inline boost::optional<Double3> Refracted(const Double3 &wi, const Double3 &m, d
     // Handle total internal reflection for transmission
     if (t2 < 0.) 
       return boost::none;
-    const double s = 1.0; //Dot(wi, m)>=0. ? 1.0 : -1.0;
-    const double t3 = s*std::sqrt(t2);
-    return Double3{(eta*c - t3)*m - eta*wi};
+    const double s = Dot(wi, m)>=0. ? 1.0 : -1.0;
+    const double t3 = std::sqrt(t2);
+    return Double3{(eta*c - s*t3)*m - eta*wi};
 }
 
 
