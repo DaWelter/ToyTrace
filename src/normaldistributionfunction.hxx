@@ -121,17 +121,3 @@ static double Pdf(double ndf_val, const Double3 &wh, const Double3 &wi)
 
 };
 
-/*------------ Physics ---------------------*/
-
-inline double FresnelReflectivity(double cos_n_wi, double eta_i_over_t)
-{
-  // From Walter et al. (2007). Equivalent to the other formula but does not require the refracted direction.
-  double c = std::abs(cos_n_wi);
-  double tmp = Sqr(1.0/eta_i_over_t) - 1.0 + c*c;
-  if (tmp < 0)
-      return 1.; // Total reflection
-  double g = std::sqrt(tmp);
-  double nom = c*(g+c)-1.;
-  double denom = c*(g-c)+1.;
-  return 0.5*Sqr((g-c)/(g+c))*(1. + Sqr(nom/denom));
-}

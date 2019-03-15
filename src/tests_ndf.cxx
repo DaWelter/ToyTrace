@@ -9,7 +9,7 @@
 #include "normaldistributionfunction.hxx"
 #include "util.hxx"
 #include "sampler.hxx"
-#include "shader_util.hxx"
+#include "shader_physics.hxx"
 
 namespace {
 static const Double3 VERTICAL = Double3{0,0,1};
