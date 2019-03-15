@@ -124,6 +124,10 @@ TEST(TestMath, Reflected)
   Double3 out = Reflected(in, n);
   auto out_expected = Normalized(Double3{0., 1., -2.});
   ASSERT_GE(Dot(out, out_expected), 0.99);
+  // Test normal flip
+  n = Double3{0.,-1.,0.};
+  out = Reflected(in, n);
+  ASSERT_GE(Dot(out, out_expected), 0.99);
 }
 
 
@@ -140,6 +144,12 @@ TEST(TestMath, Refracted)
   EXPECT_NEAR((*w3)[0], w1[0], 1.e-3);
   EXPECT_NEAR((*w3)[1], w1[1], 1.e-3);
   EXPECT_NEAR((*w3)[2], w1[2], 1.e-3);
+  // Test normal flip
+  n = Double3{0.,-1.,0.};
+  Double3 w4 = *Refracted(w1, n, eta1/eta2);
+  EXPECT_NEAR(w4[0], (*w2)[0], 1.e-3);
+  EXPECT_NEAR(w4[1], (*w2)[1], 1.e-3);
+  EXPECT_NEAR(w4[2], (*w2)[2], 1.e-3);  
   // Test total reflection.
   w1 = Normalized(Double3{0., 1., 100.});
   eta1 = 1.2;
