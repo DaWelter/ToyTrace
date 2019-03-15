@@ -84,7 +84,7 @@ set(SOURCES src/image.cxx  src/parsenff.cxx  src/shader.cxx src/ray.cxx src/samp
 add_executable(toytrace src/toytrace.cxx ${SOURCES})
 target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE} ${Boost_FILESYSTEM_LIBRARY_RELEASE} tbb)
 
-add_executable(tests src/tests.cxx src/tests3.cxx src/tests_sampling.cxx src/tests_ndf.cxx src/tests_stats.cxx ${Cubature_DIR}/hcubature.c ${SOURCES})
+add_executable(tests src/tests.cxx src/tests3.cxx src/tests_sampling.cxx src/tests_microfacet.cxx src/tests_stats.cxx ${Cubature_DIR}/hcubature.c ${SOURCES})
 add_executable(tests2 src/tests2.cxx)
 add_executable(tests_tbb src/tests_tbb.cxx)
 
