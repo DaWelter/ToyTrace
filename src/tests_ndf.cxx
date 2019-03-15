@@ -149,9 +149,66 @@ rj::Value ContainerToJSON(const Container &c, rj::Alloc &alloc)
 #endif
 
 
+struct TransmissiveMicrofacetDensity
+{
+  const Double3 wi;
+  const double eta_i_over_t;
+  using NDF = BeckmanDistribution;
+  const NDF &ndf;
+  
+  double Pdf(const Double3 &wo) const
+  {
+    //double eta_i_over_t = 1.0/eta_ground;
+    Double3 wht = HalfVectorRefracted(wi, wo, eta_i_over_t);
+    Double3 whr = HalfVector(wi, wo);
+    double fr_whr = FresnelReflectivity(AbsDot(whr,wi), eta_i_over_t);
+    double fr_wht = FresnelReflectivity(AbsDot(wht,wi), eta_i_over_t);
+    bool is_refracted_physically_possible = Dot(wht, wi) * Dot(wht, wo) < 0.;   // On opposing side of normal.
+    //bool reflect_is_total = (bool)Refracted(wi, whr, eta_i_over_t) == false;
+    double prob_reflect = fr_whr;
+    double prob_transmit = is_refracted_physically_possible ? 1.0-fr_wht : 0.0;
+    double ndf_reflect = ndf.EvalByHalfVector(std::abs(whr[2]))*std::abs(whr[2]);
+    double ndf_transm = ndf.EvalByHalfVector(std::abs(wht[2]))*std::abs(wht[2]);
+    double pdf_wor = HalfVectorPdfToReflectedPdf(ndf_reflect, Dot(whr, wi));
+    double pdf_wot = HalfVectorPdfToTransmittedPdf(ndf_transm, eta_i_over_t, Dot(wht, wi), Dot(wht, wo));
+    
+    return prob_reflect*pdf_wor + prob_transmit*pdf_wot;
+    
+    //return is_refracted_physically_possible ? pdf_wot : 0.;
+    
+    //return pdf_wor;
+  }
+  
+  Double3 Sample(Sampler &sampler)
+  {
+    Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
+
+    double fr = FresnelReflectivity(AbsDot(wh,wi), eta_i_over_t);
+    boost::optional<Double3> wt = Refracted(wi, wh, eta_i_over_t);
+    if (!wt)
+      fr = 1.0;
+    if (sampler.Uniform01() < fr)
+    {
+      return Reflected(wi, wh);
+    }
+    else
+      return *wt;
+    
+//     boost::optional<Double3> wt = Refracted(wi, wh, eta_i_over_t);
+//     if (!wt)
+//       return SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
+//     else
+//       return *wt;
+    
+//    return Reflected(wi, wh);
+  }
+};
 
 
-TEST(NDF, Beckmann)
+
+
+
+TEST(Microfacet, Beckmann)
 {
   using NDF = BeckmanDistribution;
   CubeMap cubemap(8);
@@ -187,8 +244,16 @@ TEST(NDF, Beckmann)
 
 
 using NDF_Params = std::tuple<double, Double3>;
+using RefractParams = std::tuple<double, Double3, double>;
 
-class NDFTest : public testing::TestWithParam<NDF_Params>
+class ReflectTest : public testing::TestWithParam<NDF_Params>
+{
+public:
+  using NDF = BeckmanDistribution;
+  Sampler sampler;
+};
+
+class RefractTest : public testing::TestWithParam<RefractParams>
 {
 public:
   using NDF = BeckmanDistribution;
@@ -196,7 +261,7 @@ public:
 };
 
 
-TEST_P(NDFTest, Outdirection)
+TEST_P(ReflectTest, Outdirection)
 {
   /* Test the mapping from microfacet normal distribution to outgoing direction.
    * The incident ray is reflected specularly at the microfacet normal.
@@ -238,46 +303,21 @@ TEST_P(NDFTest, Outdirection)
 
 
 
-TEST_P(NDFTest, RefractedDirection)
+TEST_P(RefractTest, OutDirection)
 { 
-  const auto [alpha, wi] = this->GetParam();
+  const auto [alpha, wi, eta_ground] = this->GetParam();
   CubeMap cubemap(8); 
   NDF ndf{alpha};
-  double eta_ground = 1.5;
+  double eta_i_over_t = 1.0/eta_ground;
+  TransmissiveMicrofacetDensity density{wi, eta_i_over_t, ndf};
+  
+  std::vector<double> probs = IntegralOverCubemap(
+    [&](const Double3 &wo) { return density.Pdf(wo); },
+    cubemap, 1.e-3, 1.e-2, 100000);
+  std::vector<int> sample_counts = SampleOverCubemap(
+    [&]() { return density.Sample(sampler); }, 
+    cubemap, 10000);
 
-  auto density_func = [wi=wi, &ndf,eta_ground](const Double3 &wo) -> double
-  {
-    double eta_i_over_t = wi[2]>=0 ? 1.0/eta_ground : eta_ground;
-    Double3 wht = HalfVectorRefracted(wi, wo, eta_i_over_t);
-    Double3 whr = HalfVector(wi, wo);
-    bool total_reflection = (bool)Refracted(wi, whr, eta_i_over_t) == false;
-    double prob_reflect = total_reflection ? 1.0 : 0.5;
-    double prob_transmit = 0.5;
-    double ndf_reflect = ndf.EvalByHalfVector(std::abs(whr[2]))*std::abs(whr[2]);
-    double ndf_transm = ndf.EvalByHalfVector(std::abs(wht[2]))*std::abs(wht[2]);
-    double pdf_wor = HalfVectorPdfToTransmittedPdf(ndf_reflect, eta_i_over_t, Dot(whr, wi), Dot(whr, wo));
-    double pdf_wot = HalfVectorPdfToTransmittedPdf(ndf_reflect, eta_i_over_t, Dot(wht, wi), Dot(wht, wo));
-    return pdf_wor + pdf_wot;
-  };
-  
-  auto sample_gen = [wi = wi, this, &ndf,eta_ground]() -> Double3
-  {
-    double eta_i_over_t = wi[2]>=0 ? 1.0/eta_ground : eta_ground;
-    Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
-    double prob_reflect = 0.5;
-    boost::optional<Double3> wt = Refracted(wi, wh, eta_i_over_t);
-    if (!wt)
-      prob_reflect = 1.0;
-    if (sampler.Uniform01() < prob_reflect)
-    {
-      return Reflected(wi, wh);
-    }
-    else
-      return *wt;
-  };
-  
-  std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);
-  std::vector<int> sample_counts = SampleOverCubemap(sample_gen, cubemap, 1000);
   double chi_sqr_probability = ChiSquaredProbability(&sample_counts[0], &probs[0], probs.size());
   EXPECT_GE(chi_sqr_probability, 0.05);
   // Integral of the density over all solid angles should be normalized to 1.
@@ -287,7 +327,7 @@ TEST_P(NDFTest, RefractedDirection)
 
 
 
-TEST_P(NDFTest, VNDFSampling)
+TEST_P(ReflectTest, VNDFSampling)
 {
   const auto [alpha, wi] = this->GetParam();
   CubeMap cubemap(8); 
@@ -316,7 +356,7 @@ TEST_P(NDFTest, VNDFSampling)
 }
 
 
-TEST_P(NDFTest, VNDFSamplingOutDirection)
+TEST_P(ReflectTest, VNDFSamplingOutDirection)
 {
   const auto [alpha, wi] = this->GetParam();
   CubeMap cubemap(8); 
@@ -349,112 +389,72 @@ TEST_P(NDFTest, VNDFSamplingOutDirection)
 }
 
 
-void RunVisualization(const Double3 &wi, double alpha, double eta_ground, const std::string &output_filename)
-{
-  std::cout << output_filename << std::endl;
-  using NDF = BeckmanDistribution;
-  CubeMap cubemap(32); 
-  NDF ndf{alpha};
-  Sampler sampler;
-  
-  auto density_func = [&](const Double3 &wo)
-  {
-    double eta_i_over_t = 1.0/eta_ground;
-    Double3 wht = HalfVectorRefracted(wi, wo, eta_i_over_t);
-    Double3 whr = HalfVector(wi, wo);
-    double fr_whr = FresnelReflectivity(AbsDot(whr,wi), eta_i_over_t);
-    double fr_wht = FresnelReflectivity(AbsDot(wht,wi), eta_i_over_t);
-    bool is_refracted_physically_possible = Dot(wht, wi) * Dot(wht, wo) < 0.;   // On opposing side of normal.
-    //bool reflect_is_total = (bool)Refracted(wi, whr, eta_i_over_t) == false;
-    double prob_reflect = fr_whr;
-    double prob_transmit = is_refracted_physically_possible ? 1.0-fr_wht : 0.0;
-    double ndf_reflect = ndf.EvalByHalfVector(std::abs(whr[2]))*std::abs(whr[2]);
-    double ndf_transm = ndf.EvalByHalfVector(std::abs(wht[2]))*std::abs(wht[2]);
-    double pdf_wor = HalfVectorPdfToReflectedPdf(ndf_reflect, Dot(whr, wi));
-    double pdf_wot = HalfVectorPdfToTransmittedPdf(ndf_transm, eta_i_over_t, Dot(wht, wi), Dot(wht, wo));
-    
-    return prob_reflect*pdf_wor + prob_transmit*pdf_wot;
-    
-    //return is_refracted_physically_possible ? pdf_wot : 0.;
-    
-    //return pdf_wor;
-  };
-  
-  auto sample_gen = [&]()  -> Double3
-  {
-    double eta_i_over_t = 1.0/eta_ground;
-    Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
+// // Only use when desparate.
 
-    double fr = FresnelReflectivity(AbsDot(wh,wi), eta_i_over_t);
-    boost::optional<Double3> wt = Refracted(wi, wh, eta_i_over_t);
-    if (!wt)
-      fr = 1.0;
-    if (sampler.Uniform01() < fr)
-    {
-      return Reflected(wi, wh);
-    }
-    else
-      return *wt;
-    
-//     boost::optional<Double3> wt = Refracted(wi, wh, eta_i_over_t);
-//     if (!wt)
-//       return SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
-//     else
-//       return *wt;
-    
-//    return Reflected(wi, wh);
-  };
-  
-  std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);
-  std::vector<int> sample_counts = SampleOverCubemap(sample_gen, cubemap, 1000000);
-  
-  double total_prob = std::accumulate(probs.begin(), probs.end(), 0.);
-  std::cout << "Prob computed = " << total_prob << std::endl;
-  
-  rj::Document doc;
-  auto &alloc = doc.GetAllocator();
-  doc.SetObject();
-  rj::Value node = rj::CubemapToJSON(cubemap, alloc);
-  doc.AddMember("cubemap", node, alloc);
-  node = rj::ContainerToJSON(probs, alloc);
-  doc.AddMember("probs", node, alloc);
-  node = rj::ContainerToJSON(sample_counts, alloc);
-  doc.AddMember("counts", node, alloc);
-  rj::Write(doc, output_filename);
-}
-
-
-TEST(NDFTest, VNDFViz)
-{
-  const char* prefix = "";
-  double ior = 1.5; // 1.0/1.5;
-  char* ior_str = "D-L"; // Dense->light transmission
-  RunVisualization(BELOW, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_below_sharp_", ior_str,".json"));
-  RunVisualization(VERTICAL, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_vertical_sharp_", ior_str,".json"));
-  RunVisualization(MUCH_DEFLECTED, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_deflected_sharp_", ior_str,".json"));
-  RunVisualization(ALMOST_45DEG, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_45_sharp_", ior_str,".json"));
-  RunVisualization(BELOW, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_below_rough_",ior_str,".json"));
-  RunVisualization(VERTICAL, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_vertical_rough_",ior_str,".json"));
-  RunVisualization(MUCH_DEFLECTED, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_deflected_rough_",ior_str,".json"));
-  RunVisualization(ALMOST_45DEG, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_45_rough_",ior_str,".json"));
-  ior = 1.0/1.5;
-  ior_str = "L-D"; // Light -> dense transmission
-  RunVisualization(BELOW, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_below_sharp_", ior_str,".json"));
-  RunVisualization(VERTICAL, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_vertical_sharp_", ior_str,".json"));
-  RunVisualization(MUCH_DEFLECTED, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_deflected_sharp_", ior_str,".json"));
-  RunVisualization(ALMOST_45DEG, 0.05, ior, strconcat("/tmp/",prefix,"cubemap_45_sharp_", ior_str,".json"));
-  RunVisualization(BELOW, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_below_rough_",ior_str,".json"));
-  RunVisualization(VERTICAL, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_vertical_rough_",ior_str,".json"));
-  RunVisualization(MUCH_DEFLECTED, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_deflected_rough_",ior_str,".json"));
-  RunVisualization(ALMOST_45DEG, 0.5, ior, strconcat("/tmp/",prefix,"cubemap_45_rough_",ior_str,".json"));
-}
+// void RunVisualization(const Double3 &wi, double alpha, double eta_ground, const std::string &output_filename)
+// {
+//   std::cout << output_filename << std::endl;
+//   using NDF = BeckmanDistribution;
+//   CubeMap cubemap(32); 
+//   NDF ndf{alpha};
+//   Sampler sampler;
+//   double eta_i_over_t = 1.0/eta_ground;
+//   TransmissiveMicrofacetDensity density{wi, eta_i_over_t, ndf};
+//   
+//   std::vector<double> probs = IntegralOverCubemap(
+//     [&](const Double3 &wo) { return density.Pdf(wo); },
+//     cubemap, 1.e-3, 1.e-2, 100000);
+//   std::vector<int> sample_counts = SampleOverCubemap(
+//     [&]() { return density.Sample(sampler); }, 
+//     cubemap, 1000000);
+//   
+//   double total_prob = std::accumulate(probs.begin(), probs.end(), 0.);
+//   std::cout << "Prob computed = " << total_prob << std::endl;
+//   
+//   rj::Document doc;
+//   auto &alloc = doc.GetAllocator();
+//   doc.SetObject();
+//   rj::Value node = rj::CubemapToJSON(cubemap, alloc);
+//   doc.AddMember("cubemap", node, alloc);
+//   node = rj::ContainerToJSON(probs, alloc);
+//   doc.AddMember("probs", node, alloc);
+//   node = rj::ContainerToJSON(sample_counts, alloc);
+//   doc.AddMember("counts", node, alloc);
+//   rj::Write(doc, output_filename);
+// }
+// 
+// 
+// TEST(Microfacet, VNDFViz)
+// {
+//   const char* prefix = "";
+//   double ior_ground = 1.0/1.5;
+//   char* ior_str = "D-L"; // Dense->light transmission
+//   RunVisualization(BELOW, 0.05, ior_ground, strconcat("/tmp/",prefix,"cubemap_below_sharp_", ior_str,".json"));
+//   RunVisualization(VERTICAL, 0.05, ior_ground, strconcat("/tmp/",prefix,"cubemap_vertical_sharp_", ior_str,".json"));
+//   RunVisualization(MUCH_DEFLECTED, 0.05, ior_ground, strconcat("/tmp/",prefix,"cubemap_deflected_sharp_", ior_str,".json"));
+//   RunVisualization(ALMOST_45DEG, 0.05, ior_ground, strconcat("/tmp/",prefix,"cubemap_45_sharp_", ior_str,".json"));
+//   RunVisualization(BELOW, 0.5, ior_ground, strconcat("/tmp/",prefix,"cubemap_below_rough_",ior_str,".json"));
+//   RunVisualization(VERTICAL, 0.5, ior_ground, strconcat("/tmp/",prefix,"cubemap_vertical_rough_",ior_str,".json"));
+//   RunVisualization(MUCH_DEFLECTED, 0.5, ior_ground, strconcat("/tmp/",prefix,"cubemap_deflected_rough_",ior_str,".json"));
+//   RunVisualization(ALMOST_45DEG, 0.5, ior_ground, strconcat("/tmp/",prefix,"cubemap_45_rough_",ior_str,".json"));
+//   ior_ground = 1.5;
+//   ior_str = "L-D"; // Light -> dense transmission
+//   RunVisualization(BELOW, 0.05, ior_ground, strconcat("/tmp/",prefix,"cubemap_below_sharp_", ior_str,".json"));
+//   RunVisualization(VERTICAL, 0.05, ior_ground, strconcat("/tmp/",prefix,"cubemap_vertical_sharp_", ior_str,".json"));
+//   RunVisualization(MUCH_DEFLECTED, 0.05, ior_ground, strconcat("/tmp/",prefix,"cubemap_deflected_sharp_", ior_str,".json"));
+//   RunVisualization(ALMOST_45DEG, 0.05, ior_ground, strconcat("/tmp/",prefix,"cubemap_45_sharp_", ior_str,".json"));
+//   RunVisualization(BELOW, 0.5, ior_ground, strconcat("/tmp/",prefix,"cubemap_below_rough_",ior_str,".json"));
+//   RunVisualization(VERTICAL, 0.5, ior_ground, strconcat("/tmp/",prefix,"cubemap_vertical_rough_",ior_str,".json"));
+//   RunVisualization(MUCH_DEFLECTED, 0.5, ior_ground, strconcat("/tmp/",prefix,"cubemap_deflected_rough_",ior_str,".json"));
+//   RunVisualization(ALMOST_45DEG, 0.5, ior_ground, strconcat("/tmp/",prefix,"cubemap_45_rough_",ior_str,".json"));
+// }
 
 
 
-namespace NDFTestNS
+namespace Microfacet
 {
 
-INSTANTIATE_TEST_CASE_P(NDFTestNS, NDFTest, ::testing::Values(
+INSTANTIATE_TEST_CASE_P(Microfacet, ReflectTest, ::testing::Values(
   NDF_Params(0.05, VERTICAL),
   NDF_Params(0.08, MUCH_DEFLECTED), // Needs more roughness. Probably because numerical error of integration of the probability density.
   NDF_Params(0.05, BELOW),
@@ -462,6 +462,14 @@ INSTANTIATE_TEST_CASE_P(NDFTestNS, NDFTest, ::testing::Values(
   NDF_Params(0.5, MUCH_DEFLECTED),
   NDF_Params(0.5, BELOW)
 ));
+
+
+INSTANTIATE_TEST_CASE_P(Microfacet, RefractTest, 
+  ::testing::Combine(
+    ::testing::Values(0.08, 0.5),  // Roughness
+    ::testing::Values(VERTICAL, MUCH_DEFLECTED, BELOW, ALMOST_45DEG),  // Wi
+    ::testing::Values(1.5, 1./1.5)  // IOR
+  ));
 
 
 }
