@@ -118,7 +118,7 @@ double ChiSquaredProbability(const int *counts, const double *weights, int num_b
 
   if (original_num_bins > num_bins*3)
   {
-    std::cout << "Chi-Sqr Test merged " << (original_num_bins-num_bins) << " bins because their sample count was below " << low_expected_num_samples_cutoff << std::endl;
+    std::cout << "Chi-Sqr Test merged " << (original_num_bins-num_bins) << " of " << original_num_bins << " bins because their sample count was below " << low_expected_num_samples_cutoff << std::endl;
   }
   
   // https://www.boost.org/doc/libs/1_66_0/libs/math/doc/html/math_toolkit/dist_ref/dists/chi_squared_dist.html
