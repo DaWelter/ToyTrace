@@ -2,6 +2,7 @@
 
 #include "vec3f.hxx"
 #include "util.hxx"
+#include "shader_physics.hxx"
 
 /* --- Microfacet normal distributions -------*/
 struct BeckmanDistribution
@@ -83,41 +84,95 @@ inline double G2VCavity(double wh_dot_in, double wh_dot_out, double ns_dot_in, d
 }
 
 
+inline double G2VCavityTransmissive(double wh_dot_in, double wh_dot_out, double ns_dot_in, double ns_dot_out, double ns_dot_wh)
+{
+  //double g1_i = std::min(1., 2.*std::abs(ns_dot_wh*ns_dot_in)/(std::abs(wh_dot_in)+Epsilon));
+  //double g1_o = std::min(1., 2.*std::abs(ns_dot_wh*ns_dot_out)/(std::abs(wh_dot_out)+Epsilon));
+  double g1_i = G1VCavity(wh_dot_in, ns_dot_in, ns_dot_wh);
+  double g1_o = G1VCavity(wh_dot_out, ns_dot_out, ns_dot_wh);
+  return std::max(g1_i + g1_o - 1., 0.);
+}
+
+
 struct VisibleNdfVCavity
 {
-  
-inline static constexpr double WI_BELOW_HORIZON_FIX_FACTOR = 1.e-6;
-// Transform wh so that it samples the VNDF distribution for the VCavity shadowing function.
-// wh : Half-vector sampled from NDF*|wh.n|
-// wi : Viewing direction
-// wh and wi must be defined in a local frame where the normal n is aligned with the z-axis!
-static void Sample(Double3 &wh, const Double3 &wi, double r)
-{
-  Double3 wh_prime{-wh[0], -wh[1], wh[2]};
-  double prob = ClampDot(wi, wh_prime)/(ClampDot(wi, wh) + ClampDot(wi, wh_prime) + WI_BELOW_HORIZON_FIX_FACTOR);
-  if (r < prob)
+  inline static constexpr double WI_BELOW_HORIZON_FIX_FACTOR = 1.e-6;
+  // Transform wh so that it samples the VNDF distribution for the VCavity shadowing function.
+  // wh : Half-vector sampled from NDF*|wh.n|
+  // wi : Viewing direction
+  // wh and wi must be defined in a local frame where the normal n is aligned with the z-axis!
+  static void Sample(Double3 &wh, const Double3 &wi, double r)
   {
-    wh = wh_prime;
+    Double3 wh_prime{-wh[0], -wh[1], wh[2]};
+    double prob = ClampDot(wi, wh_prime)/(ClampDot(wi, wh) + ClampDot(wi, wh_prime) + WI_BELOW_HORIZON_FIX_FACTOR);
+    if (r < prob)
+    {
+      wh = wh_prime;
+    }
   }
-}
 
-// Get the PDF corresponding to the sample function.
-// wh : Half-vector
-// wi : Viewing direction
-// wh and wi must be defined in a local frame where the normal n is aligned with the z-axis!
-static double Pdf(double ndf_val, const Double3 &wh, const Double3 &wi)
-{
-//   double g1 = G1VCavity(Dot(wi, wh), wi[2], wh[2]);
-//   return ndf_val*std::abs(wh[2])*g1;
-  
-  const Double3 wh_prime{-wh[0],-wh[1],wh[2]};
-  const double wh_prime_dot_in = ClampDot(wi, wh_prime);
-  const double wh_dot_in = ClampDot(wh, wi);
-  const double prob = (2.*wh_dot_in + WI_BELOW_HORIZON_FIX_FACTOR)/(wh_dot_in + wh_prime_dot_in + WI_BELOW_HORIZON_FIX_FACTOR);
-  return ndf_val*std::abs(wh[2])*prob;
-  
-}
-
-
+  // Get the PDF corresponding to the sample function.
+  // wh : Half-vector
+  // wi : Viewing direction
+  // wh and wi must be defined in a local frame where the normal n is aligned with the z-axis!
+  static double Pdf(double ndf_val, const Double3 &wh, const Double3 &wi)
+  {
+    const Double3 wh_prime{-wh[0],-wh[1],wh[2]};
+    const double wh_prime_dot_in = ClampDot(wi, wh_prime);
+    const double wh_dot_in = ClampDot(wh, wi);
+    const double prob = (2.*wh_dot_in + WI_BELOW_HORIZON_FIX_FACTOR)/(wh_dot_in + wh_prime_dot_in + WI_BELOW_HORIZON_FIX_FACTOR);
+    return ndf_val*std::abs(wh[2])*prob;
+    
+  }
 };
+
+
+
+struct TransmissiveMicrofacetDensity
+{
+  const Double3 wi;
+  const double eta_i_over_t;
+  using NDF = BeckmanDistribution;
+  const NDF &ndf;
+  
+  double Pdf(const Double3 &wo) const
+  {
+    double pdf_wot = 0.;
+    boost::optional<Double3> wht = HalfVectorRefracted(wi, wo, eta_i_over_t);
+    if (wht)
+    {
+      const double fr_wht = FresnelReflectivity(AbsDot(*wht,wi), eta_i_over_t);
+      const double ndf_transm = ndf.EvalByHalfVector(std::abs((*wht)[2]))*std::abs((*wht)[2]);
+      pdf_wot = HalfVectorPdfToTransmittedPdf(ndf_transm, eta_i_over_t, Dot(*wht, wi), Dot(*wht, wo));
+      pdf_wot *= 1.0-fr_wht;
+      assert(std::isfinite(pdf_wot));
+    }
+    
+    const Double3 whr = HalfVector(wi, wo);
+    const double fr_whr = FresnelReflectivity(AbsDot(whr,wi), eta_i_over_t);  
+    const double ndf_reflect = ndf.EvalByHalfVector(std::abs(whr[2]))*std::abs(whr[2]);
+    double pdf_wor = HalfVectorPdfToReflectedPdf(ndf_reflect, Dot(whr, wi));
+    pdf_wor *= fr_whr;
+    
+    assert(std::isfinite(pdf_wor));
+    return pdf_wor + pdf_wot;
+  }
+  
+  Double3 Sample(const Double2 &r1, double r2)
+  {
+    Double3 wh = ndf.SampleHalfVector(r1);
+
+    double fr = FresnelReflectivity(AbsDot(wh,wi), eta_i_over_t);
+    boost::optional<Double3> wt = Refracted(wi, wh, eta_i_over_t);
+    if (!wt)
+      fr = 1.0;
+    if (r2 < fr)
+    {
+      return Reflected(wi, wh);
+    }
+    else
+      return *wt;
+  }
+};
+
 

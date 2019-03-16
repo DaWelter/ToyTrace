@@ -149,53 +149,6 @@ rj::Value ContainerToJSON(const Container &c, rj::Alloc &alloc)
 #endif
 
 
-struct TransmissiveMicrofacetDensity
-{
-  const Double3 wi;
-  const double eta_i_over_t;
-  using NDF = BeckmanDistribution;
-  const NDF &ndf;
-  
-  double Pdf(const Double3 &wo) const
-  {
-    double pdf_wot = 0.;
-    boost::optional<Double3> wht = HalfVectorRefracted(wi, wo, eta_i_over_t);
-    if (wht)
-    {
-      const double fr_wht = FresnelReflectivity(AbsDot(*wht,wi), eta_i_over_t);
-      const double ndf_transm = ndf.EvalByHalfVector(std::abs((*wht)[2]))*std::abs((*wht)[2]);
-      pdf_wot = HalfVectorPdfToTransmittedPdf(ndf_transm, eta_i_over_t, Dot(*wht, wi), Dot(*wht, wo));
-      pdf_wot *= 1.0-fr_wht;
-    }
-    
-    const Double3 whr = HalfVector(wi, wo);
-    const double fr_whr = FresnelReflectivity(AbsDot(whr,wi), eta_i_over_t);  
-    const double ndf_reflect = ndf.EvalByHalfVector(std::abs(whr[2]))*std::abs(whr[2]);
-    double pdf_wor = HalfVectorPdfToReflectedPdf(ndf_reflect, Dot(whr, wi));
-    pdf_wor *= fr_whr;
-    
-    return pdf_wor + pdf_wot;
-  }
-  
-  Double3 Sample(Sampler &sampler)
-  {
-    Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
-
-    double fr = FresnelReflectivity(AbsDot(wh,wi), eta_i_over_t);
-    boost::optional<Double3> wt = Refracted(wi, wh, eta_i_over_t);
-    if (!wt)
-      fr = 1.0;
-    if (sampler.Uniform01() < fr)
-    {
-      return Reflected(wi, wh);
-    }
-    else
-      return *wt;
-  }
-};
-
-
-
 
 
 TEST(Microfacet, Beckmann)
@@ -305,7 +258,7 @@ TEST_P(RefractTest, OutDirection)
     [&](const Double3 &wo) { return density.Pdf(wo); },
     cubemap, 1.e-3, 1.e-2, 100000);
   std::vector<int> sample_counts = SampleOverCubemap(
-    [&]() { return density.Sample(sampler); }, 
+    [&]() { return density.Sample(sampler.UniformUnitSquare(), sampler.Uniform01()); }, 
     cubemap, 10000);
 
   double chi_sqr_probability = ChiSquaredProbability(&sample_counts[0], &probs[0], probs.size());

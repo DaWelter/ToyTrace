@@ -416,81 +416,115 @@ ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, 
   
   
 
-// class GlossyTransmissiveDielectricWrapper
-// {
-//   const PathContext &context;
-//   const BeckmanDistribution &ndf;
-//   const LocalFrame &frame; 
-//   const double ior_ratio;
-//   
-//   double EvaluateBSDF(const Double3 &wi, const Double3& wh, const Double3& wo, double *pdf) const
-//   {
-//     const double n_dot_out = Dot(frame.ng, wo);
-//     const double ns_dot_out = wo[2];
-//     const double ns_dot_in  = wi[2];
-// 
-//     const bool entering = Dot(frame.ng, wi) > 0.;
-//     const double eta_i_over_t = entering ? 1./ior_ratio  : ior_ratio; // eta_i refers to ior on the side of the incomming random walk!
-//     
-//     const double ns_dot_wh = wh[2];
-//     const double wh_dot_out = Dot(wo, wh);
-//     const double wh_dot_in  = Dot(wi, wh);
-// 
-//     double microfacet_distribution_val = ndf.EvalByHalfVector(std::abs(ns_dot_wh));
-//     const double geometry_term = G2VCavity(wh_dot_in, wh_dot_out, ns_dot_in, ns_dot_out, ns_dot_wh);
-//     
-//     
-//     const double fresnel_reflectivity = FresnelReflectivity(std::abs(ns_dot_in), eta_i_over_t);
-//     assert (fresnel_reflectivity >= -0.00001 && fresnel_reflectivity <= 1.000001);
-//   
-//     if (pdf)
-//     {    
-//       double sample_pdf = microfacet_distribution_val * std::abs(ns_dot_wh);
-//       sample_pdf = HalfVectorPdfToReflectedPdf(sample_pdf, Dot(wh, wi));
-//       *pdf = sample_pdf;
-//     }
-//     
-//     if (n_dot_out >= 0) // Evaluate BRDF
-//     {
-//       double result = fresnel_reflectivity*geometry_term*microfacet_distribution_val*0.25/(std::abs(ns_dot_in*ns_dot_out)+Epsilon);
-//       return result;
-//     }
-//     else // Evaluate BTDF
-//     {
-//       return 0;
-//     }
-//   }
-//   
-//   
-//   std::pair<Double3, Double3> Sample(const Double3 &wi, Sampler& sampler) const
-//   {
-//     Double3 wh = ndf.SampleHalfVector(sampler.UniformUnitSquare());
-// 
-//     const Double3 out_direction = Reflected(wi, wh);
-//     return std::make_pair(wh, out_direction);
-//   }
-// };
-// 
-// 
-// 
-// GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_)
-//   : ior_ratio{_ior_ratio}, alpha{alpha_}
-// {
-// }
-// 
-// 
-// 
-// Spectral3 GlossyTransmissiveDielectricShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
-// {
-// 
-// }
-// 
-// 
-// ScatterSample GlossyTransmissiveDielectricShader::SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
-// {
-//   ScatterSample smpl; 
-//   return smpl;
-// }
+struct GlossyTransmissiveDielectricWrapper
+{
+  const Double3 wi;
+  const PathContext &context;
+  const BeckmanDistribution &ndf;
+  const LocalFrame &frame; 
+  const double eta_i_over_t; // eta_i refers to ior on the side of the incomming random walk!
+  
+  double Evaluate(const Double3& wo, double *pdf) const
+  {
+    assert(Dot(frame.ng, wi)>=0.);
+    const double n_dot_out = Dot(frame.ng, wo);
+    const double ns_dot_out = wo[2];
+    const double ns_dot_in  = wi[2];  
+    
+    if (pdf)
+    {    
+      *pdf = TransmissiveMicrofacetDensity{wi, eta_i_over_t, ndf}.Pdf(wo);
+    }
+    
+    if (n_dot_out >= 0) // Evaluate BRDF
+    {
+      const Double3 whr = HalfVector(wi, wo);
+      const double ns_dot_wh = whr[2];
+      const double wh_dot_out = Dot(wo, whr);
+      const double wh_dot_in  = Dot(wi, whr);
+      
+      const double fr_whr = FresnelReflectivity(std::abs(wh_dot_in), eta_i_over_t);  
+      const double ndf_reflect = ndf.EvalByHalfVector(std::abs(ns_dot_wh));
+      const double geometry_term = G2VCavity(wh_dot_in, wh_dot_out, ns_dot_in, ns_dot_out, ns_dot_wh);
+
+      double result = fr_whr*geometry_term*ndf_reflect*0.25/(std::abs(ns_dot_in*ns_dot_out)+Epsilon);
+      return result;
+    }
+    else // Evaluate BTDF
+    {
+      boost::optional<Double3> wht_ = HalfVectorRefracted(wi, wo, eta_i_over_t);
+      if (!wht_)
+        return 0.;
+      const Double3 wht = (*wht_)[2]<0. ? -(*wht_) : *wht_ ;
+      const double ns_dot_wh = wht[2];
+      const double wh_dot_out = Dot(wo, wht);
+      const double wh_dot_in  = Dot(wi, wht);
+      
+      const double fr_wht = FresnelReflectivity(std::abs(wh_dot_in), eta_i_over_t);
+      const double ndf_transm = ndf.EvalByHalfVector(std::abs(ns_dot_wh));
+      const double J_wh_to_wo = HalfVectorPdfToTransmittedPdf(1.0, eta_i_over_t, wh_dot_in, wh_dot_out);
+      const double geometry_term = G2VCavityTransmissive(wh_dot_in, wh_dot_out, ns_dot_in, ns_dot_out, ns_dot_wh);
+      
+      const double result = (1.0-fr_wht)*std::abs(wh_dot_in)*geometry_term*ndf_transm*J_wh_to_wo/(std::abs(ns_dot_in*ns_dot_out)+Epsilon);
+      
+      const double radiance_weight = (context.transport==RADIANCE) ? Sqr(eta_i_over_t) : 1.;
+      
+      return result*radiance_weight;
+    }
+  }
+  
+  
+  Double3 Sample(Sampler& sampler) const
+  {
+    return TransmissiveMicrofacetDensity{wi, eta_i_over_t, ndf}.
+      Sample(sampler.UniformUnitSquare(), sampler.Uniform01());
+  }
+};
+
+
+
+GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, std::shared_ptr<Texture> glossy_exponent_texture_)
+  : ior_ratio{_ior_ratio}, alpha_max{alpha_}, glossy_exponent_texture{glossy_exponent_texture_}
+{
+}
+
+
+
+Spectral3 GlossyTransmissiveDielectricShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
+{
+  LocalFrame frame{surface_hit};
+  const Double3 wi = frame.m_local_inv * reverse_incident_dir;
+  const Double3 wo = frame.m_local_inv * out_direction;
+  const double eta_i_over_t = (Dot(surface_hit.geometry_normal, reverse_incident_dir)<0.) ? ior_ratio : 1.0/ior_ratio;
+  
+  const double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
+  BeckmanDistribution ndf{alpha};
+  
+  const double result = GlossyTransmissiveDielectricWrapper{wi, context, ndf, frame, eta_i_over_t}.Evaluate(wo, pdf);
+  return Spectral3{result};
+}
+
+
+ScatterSample GlossyTransmissiveDielectricShader::SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
+{
+  LocalFrame frame{surface_hit};
+  const Double3 wi = frame.m_local_inv * reverse_incident_dir;
+  const double eta_i_over_t = (Dot(surface_hit.geometry_normal, reverse_incident_dir)<0.) ? ior_ratio : 1.0/ior_ratio;
+  
+  const double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
+  BeckmanDistribution ndf{alpha};
+  
+  GlossyTransmissiveDielectricWrapper bsdf{wi, context, ndf, frame, eta_i_over_t};
+  
+  Double3 wo = bsdf.Sample(sampler);
+  double pdf = NaN;
+  double value = bsdf.Evaluate(wo, &pdf);
+  return ScatterSample {
+    frame.m_local * wo,
+    Spectral3{value},
+    pdf
+  };
+}
 
 
 
