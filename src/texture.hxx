@@ -42,13 +42,15 @@ inline std::pair<int, int> UvToPixel(const Texture &tex, Float2 uv)
   float dummy;
   u = std::modf(u, &dummy);
   v = std::modf(v, &dummy);
-  if (u < 0.f) u = 1. + u;
-  if (v < 0.f) v = 1. + v;
-  if (u > 1.f - Epsilon) u -= Epsilon;
-  if (v > 1.f - Epsilon) v -= Epsilon;
+  if (u < 0.f) u = 1.f + u;
+  if (v < 0.f) v = 1.f + v;
+  if (u > 1.f - EpsilonFloat) u -= EpsilonFloat;
+  if (v > 1.f - EpsilonFloat) v -= EpsilonFloat;
   int x = u * w;
   int y = v * h;
   y = h - y - 1;
+  assert (x>=0 && x<tex.Width());
+  assert (y>=0 && y<tex.Height());
   return std::make_pair(x,y);
 }
 
