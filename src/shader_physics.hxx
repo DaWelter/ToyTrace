@@ -57,9 +57,8 @@ inline boost::optional<Double3> HalfVectorRefracted(const Double3 &wi, const Dou
   double norm = Length(ret);
   if (norm > 0)
     ret /= norm;
-  else // Added by me.
-    // Pick a direction perpendicular to wi and wo. 
-    ret = OrthogonalSystemZAligned(wi).col(0);
+  else // Added by me
+    ret = wi;
   if (Dot(ret,wi) * Dot(ret,wo) < 0.)
     // Physically possible, because wi and wo are on different sides of the computed normal.
     return ret;
@@ -81,6 +80,8 @@ inline double HalfVectorPdfToReflectedPdf(double pdf_wh, double wh_dot_in)
 inline double HalfVectorPdfToTransmittedPdf(double pdf_wh, double eta_i_over_t, double dot_wi_wh, double dot_wo_wh)
 {
   double denom = eta_i_over_t*dot_wi_wh + dot_wo_wh;
+  if (denom == 0.)
+    return pdf_wh;
   denom *= denom;
   return pdf_wh*std::abs(dot_wo_wh)/denom;
 }
