@@ -50,16 +50,22 @@ inline Double3 HalfVector(const Double3 &wi, const Double3 &wo)
 }
 
 
-inline Double3 HalfVectorRefracted(const Double3 &wi, const Double3 &wo, double eta_i_over_t)
+inline boost::optional<Double3> HalfVectorRefracted(const Double3 &wi, const Double3 &wo, double eta_i_over_t)
 {
   // From Walter et al. (2007) "Microfacet Models for Refraction through Rough Surfaces" Eq. 16
   Double3 ret = -(eta_i_over_t*wi + wo);
   double norm = Length(ret);
   if (norm > 0)
-    return ret/norm;
+    ret /= norm;
   else // Added by me.
     // Pick a direction perpendicular to wi and wo. 
-    return OrthogonalSystemZAligned(wi).col(0);
+    ret = OrthogonalSystemZAligned(wi).col(0);
+  if (Dot(ret,wi) * Dot(ret,wo) < 0.)
+    // Physically possible, because wi and wo are on different sides of the computed normal.
+    return ret;
+  else
+    // The computed normal has no relation to actual physics.
+    return boost::none;
 }
 
 

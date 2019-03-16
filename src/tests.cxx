@@ -164,8 +164,8 @@ TEST(TestMath, RefractedHalfVector)
   double eta_1_over_2 = 1.0/1.5;
   Double3 w1{0., 1., 1.};
   Double3 w2{0., -1., 0.};
-  Double3 h = HalfVectorRefracted(w1, w2, eta_1_over_2);
-  boost::optional<Double3> wr = Refracted(w1, h, eta_1_over_2);
+  boost::optional<Double3> h = HalfVectorRefracted(w1, w2, eta_1_over_2);
+  boost::optional<Double3> wr = Refracted(w1, *h, eta_1_over_2);
   ASSERT_TRUE((bool)wr);
   ASSERT_NEAR((*wr)[0], w2[0], 1.e-3);
   ASSERT_NEAR((*wr)[0], w2[0], 1.e-3);
@@ -178,8 +178,8 @@ TEST(TestMath, RefractedHalfVectorDegenerate)
   double eta_1_over_2 = 1.0/1.5;
   Double3 w1{0., 1., 0.};
   Double3 w2{0., -1., 0.};
-  Double3 h = HalfVectorRefracted(w1, w2, eta_1_over_2);
-  boost::optional<Double3> wr = Refracted(w1, h, eta_1_over_2);
+  boost::optional<Double3> h = HalfVectorRefracted(w1, w2, eta_1_over_2);
+  boost::optional<Double3> wr = Refracted(w1, *h, eta_1_over_2);
   ASSERT_TRUE((bool)wr);
   ASSERT_NEAR((*wr)[0], w2[0], 1.e-3);
   ASSERT_NEAR((*wr)[0], w2[0], 1.e-3);

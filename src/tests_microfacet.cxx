@@ -158,25 +158,23 @@ struct TransmissiveMicrofacetDensity
   
   double Pdf(const Double3 &wo) const
   {
-    //double eta_i_over_t = 1.0/eta_ground;
-    Double3 wht = HalfVectorRefracted(wi, wo, eta_i_over_t);
-    Double3 whr = HalfVector(wi, wo);
-    double fr_whr = FresnelReflectivity(AbsDot(whr,wi), eta_i_over_t);
-    double fr_wht = FresnelReflectivity(AbsDot(wht,wi), eta_i_over_t);
-    bool is_refracted_physically_possible = Dot(wht, wi) * Dot(wht, wo) < 0.;   // On opposing side of normal.
-    //bool reflect_is_total = (bool)Refracted(wi, whr, eta_i_over_t) == false;
-    double prob_reflect = fr_whr;
-    double prob_transmit = is_refracted_physically_possible ? 1.0-fr_wht : 0.0;
-    double ndf_reflect = ndf.EvalByHalfVector(std::abs(whr[2]))*std::abs(whr[2]);
-    double ndf_transm = ndf.EvalByHalfVector(std::abs(wht[2]))*std::abs(wht[2]);
+    double pdf_wot = 0.;
+    boost::optional<Double3> wht = HalfVectorRefracted(wi, wo, eta_i_over_t);
+    if (wht)
+    {
+      const double fr_wht = FresnelReflectivity(AbsDot(*wht,wi), eta_i_over_t);
+      const double ndf_transm = ndf.EvalByHalfVector(std::abs((*wht)[2]))*std::abs((*wht)[2]);
+      pdf_wot = HalfVectorPdfToTransmittedPdf(ndf_transm, eta_i_over_t, Dot(*wht, wi), Dot(*wht, wo));
+      pdf_wot *= 1.0-fr_wht;
+    }
+    
+    const Double3 whr = HalfVector(wi, wo);
+    const double fr_whr = FresnelReflectivity(AbsDot(whr,wi), eta_i_over_t);  
+    const double ndf_reflect = ndf.EvalByHalfVector(std::abs(whr[2]))*std::abs(whr[2]);
     double pdf_wor = HalfVectorPdfToReflectedPdf(ndf_reflect, Dot(whr, wi));
-    double pdf_wot = HalfVectorPdfToTransmittedPdf(ndf_transm, eta_i_over_t, Dot(wht, wi), Dot(wht, wo));
+    pdf_wor *= fr_whr;
     
-    return prob_reflect*pdf_wor + prob_transmit*pdf_wot;
-    
-    //return is_refracted_physically_possible ? pdf_wot : 0.;
-    
-    //return pdf_wor;
+    return pdf_wor + pdf_wot;
   }
   
   Double3 Sample(Sampler &sampler)
@@ -193,14 +191,6 @@ struct TransmissiveMicrofacetDensity
     }
     else
       return *wt;
-    
-//     boost::optional<Double3> wt = Refracted(wi, wh, eta_i_over_t);
-//     if (!wt)
-//       return SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
-//     else
-//       return *wt;
-    
-//    return Reflected(wi, wh);
   }
 };
 
