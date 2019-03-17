@@ -179,10 +179,6 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
   there must be two different sampling procedures, or an explicit flag that specifies whether
   the direct or adjoint BSDF is being sampled."! */
 
-  // Shading normals cause violation of energy conservation?
-  // Well how about simply removing a little bit of energy every bounce.
-  // That should help convergence.
-  const double damping_factor = 0.95; 
   double radiance_weight = (context.transport==RADIANCE) ? Sqr(eta_i_over_t) : 1.;
   
   double fresnel_reflectivity = 1.;
@@ -212,7 +208,7 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
   
   // Veach style handling of shading normals. See  Veach Figure 5.8.
   // In this case, the BRDF and the BTDF are almost equal.
-  smpl.value = damping_factor * (double)smpl.pdf_or_pmf / std::abs(Dot(smpl.coordinates, surface_hit.shading_normal));
+  smpl.value = (double)smpl.pdf_or_pmf / std::abs(Dot(smpl.coordinates, surface_hit.shading_normal));
   // Must use the fresnel_reflectivity term like in the pdf to make it cancel.
   // Then I must use the dot product with the shading normal to make it cancel with the 
   // corresponding term in the reflection integration (outside of BSDF code).
