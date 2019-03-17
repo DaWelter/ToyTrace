@@ -1068,7 +1068,7 @@ public:
   {
     std::printf("Reading Mesh: %s\n", filename);
     this->aiscene = aiImportFile(filename, 
-      aiProcess_JoinIdenticalVertices | aiProcess_Triangulate 
+      aiProcess_Triangulate 
     );
     
     if (!aiscene)
