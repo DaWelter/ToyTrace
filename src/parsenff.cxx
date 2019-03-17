@@ -1133,7 +1133,6 @@ private:
   void ReadMesh(Scope &scope, const aiMesh* aimesh, const NodeRef &ndref)
   {
     auto m = ndref.local_to_world;
-    auto m_linear = aiMatrix3x3(m);
     bool hasuv = aimesh->GetNumUVChannels()>0;
     bool hasnormals = false; //aimesh->HasNormals();
     
@@ -1169,7 +1168,7 @@ private:
       {
         Double3 n =
           TransformNormal(scope.currentTransform,
-            aiVector3_to_myvector(m_linear*aimesh->mNormals[i]));
+            aiVector3_to_myvector(aimesh->mNormals[i]));
         assert(n.allFinite());
         mesh.normals.row(i) = n.cast<float>();
       }
