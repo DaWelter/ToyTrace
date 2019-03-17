@@ -590,7 +590,7 @@ public:
  
   void ComputeBinProbabilities()
   {
-    constexpr int MAX_NUM_FUNC_EVALS = 100000;
+    constexpr int MAX_NUM_FUNC_EVALS = 10000000;
     this->bin_probabilities = std::vector<double>(cubemap.TotalNumBins(), 0.);
     this->bin_probabilities_error = std::vector<double>(cubemap.TotalNumBins(), 0.);
     this->total_probability = 0.;
@@ -614,7 +614,7 @@ public:
       Double2 start, end;
       std::tie(start, end) = cubemap.CellToUVBounds(i, j);       
       double err = NaN;
-      double prob = Integral2D(probabilityDensityTimesJ, start, end, 1.e-3, 1.e-2, MAX_NUM_FUNC_EVALS, &err);
+      double prob = Integral2D(probabilityDensityTimesJ, start, end, 1.e-4, 1.e-3, MAX_NUM_FUNC_EVALS, &err);
       bin_probabilities[idx] = prob;
       bin_probabilities_error[idx] = err;
       total_probability += bin_probabilities[idx];
@@ -1462,7 +1462,7 @@ namespace GlossyTransmissiveDielectric
 
 Params P(const Double3 &wi, const Double3 &n)
 {
-  auto f = []() { return new GlossyTransmissiveDielectricShader(1.3, 0.2, nullptr); };
+  auto f = []() { return new GlossyTransmissiveDielectricShader(1.3, 0.2, 0., nullptr); };
   return Params{f, wi, n, 1.3}.NumSamples(100).Albedo(Spectral3{1.}).TestSampleDistribution(false);
 }
 
