@@ -806,11 +806,13 @@ public:
     for (int n = 0; n < MAX_ITERATIONS; ++n)
     {
       bool hit = iter.Next(seg, intersection);
-      if (hit)
+      if (hit && scene.GetMaterialOf(intersection.hitid).shader!=&scene.GetInvisibleShader())
       {
-        result *= GetShaderOf(intersection, scene).EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, context, nullptr);
-        if (result.isZero())
-          break;
+        result.setZero();
+        break;
+//         result *= GetShaderOf(intersection, scene).EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, context, nullptr);
+//         if (result.isZero())
+//           break;
       }
       if (volume_pdf_coeff)
       {
