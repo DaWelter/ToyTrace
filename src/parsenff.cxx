@@ -1134,7 +1134,7 @@ private:
   {
     auto m = ndref.local_to_world;
     bool hasuv = aimesh->GetNumUVChannels()>0;
-    bool hasnormals = false; //aimesh->HasNormals();
+    bool hasnormals = aimesh->HasNormals();
     
     std::vector<UInt3> vert_indices; vert_indices.reserve(1024);
     for (unsigned int face_idx = 0; face_idx < aimesh->mNumFaces; ++face_idx)
