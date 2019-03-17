@@ -1031,13 +1031,15 @@ void NFFParser::ParseYamlNode(const std::string &key, const YAML::Node &node, Sc
       auto alpha = node["alpha"].as<double>();
       auto texture_node = node["alpha_texture"];
       std::shared_ptr<Texture> texture;
+      double alpha_min = 0.;
       if (texture_node)
       {
         auto path = MakeFullPath(texture_node.as<std::string>());
         texture = std::make_shared<Texture>(path);
+        alpha_min = node["alpha_min"].as<double>();
       }
       InsertAndActivate(name.c_str(), scope,
-        std::make_unique<GlossyTransmissiveDielectricShader>(ior_ratio, alpha, texture));
+        std::make_unique<GlossyTransmissiveDielectricShader>(ior_ratio, alpha, alpha_min, texture));
     }
     else
       throw MakeException(strconcat("Unkown shader class in yaml: ", class_));

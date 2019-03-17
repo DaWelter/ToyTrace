@@ -483,8 +483,8 @@ struct GlossyTransmissiveDielectricWrapper
 
 
 
-GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, std::shared_ptr<Texture> glossy_exponent_texture_)
-  : ior_ratio{_ior_ratio}, alpha_max{alpha_}, glossy_exponent_texture{glossy_exponent_texture_}
+GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, double alpha_min_, std::shared_ptr<Texture> glossy_exponent_texture_)
+  : ior_ratio{_ior_ratio}, alpha_max{alpha_}, alpha_min{alpha_min_}, glossy_exponent_texture{glossy_exponent_texture_}
 {
 }
 
@@ -497,7 +497,7 @@ Spectral3 GlossyTransmissiveDielectricShader::EvaluateBSDF(const Double3 &revers
   const Double3 wo = frame.m_local_inv * out_direction;
   const double eta_i_over_t = (Dot(surface_hit.geometry_normal, reverse_incident_dir)<0.) ? ior_ratio : 1.0/ior_ratio;
   
-  const double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
+  const double alpha = alpha_min + MaybeMultiplyTextureLookup(alpha_max-alpha_min, glossy_exponent_texture.get(), surface_hit);
   BeckmanDistribution ndf{alpha};
   
   const double result = GlossyTransmissiveDielectricWrapper{wi, context, ndf, frame, eta_i_over_t}.Evaluate(wo, pdf);
@@ -511,7 +511,7 @@ ScatterSample GlossyTransmissiveDielectricShader::SampleBSDF(const Double3 &reve
   const Double3 wi = frame.m_local_inv * reverse_incident_dir;
   const double eta_i_over_t = (Dot(surface_hit.geometry_normal, reverse_incident_dir)<0.) ? ior_ratio : 1.0/ior_ratio;
   
-  const double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
+  const double alpha = alpha_min + MaybeMultiplyTextureLookup(alpha_max-alpha_min, glossy_exponent_texture.get(), surface_hit);
   BeckmanDistribution ndf{alpha};
   
   GlossyTransmissiveDielectricWrapper bsdf{wi, context, ndf, frame, eta_i_over_t};

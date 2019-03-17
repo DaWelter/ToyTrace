@@ -79,9 +79,10 @@ class GlossyTransmissiveDielectricShader : public Shader
 {
   double ior_ratio; // Inside ior / Outside ior
   double alpha_max;
+  double alpha_min;
   std::shared_ptr<Texture> glossy_exponent_texture;
 public:
-  GlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, std::shared_ptr<Texture> glossy_exponent_texture_);
+  GlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, double alpha_min_, std::shared_ptr<Texture> glossy_exponent_texture_);
   ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
   Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
