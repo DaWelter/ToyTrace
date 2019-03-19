@@ -462,10 +462,8 @@ struct GlossyTransmissiveDielectricWrapper
       const double geometry_term = G2VCavityTransmissive(wh_dot_in, wh_dot_out, ns_dot_in, ns_dot_out, ns_dot_wh);
       
       const double result = (1.0-fr_wht)*std::abs(wh_dot_in)*geometry_term*ndf_transm*J_wh_to_wo/(std::abs(ns_dot_in*ns_dot_out)+Epsilon);
-      
-      const double radiance_weight = (context.transport==RADIANCE) ? Sqr(eta_i_over_t) : 1.;
-      
-      return result*radiance_weight;
+
+      return result;
     }
   }
   
