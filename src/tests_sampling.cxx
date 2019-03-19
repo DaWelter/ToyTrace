@@ -623,6 +623,10 @@ public:
   }
   
   
+  // Check energy conservation by 
+  // Theorem 6.2.  in Veach's thesis. It is valid for integration over the entire sphere 
+  // of directions. If BSDF is only reflective, it must yield zero for directions that
+  // are below the surface.
   void ComputeCubatureIntegral()
   {
     constexpr int MAX_NUM_FUNC_EVALS = 100000;
@@ -664,6 +668,7 @@ class PointwiseSymmetryTest
 {
     ScatterSample CheckedSample(const Double3 &wi, bool sample_adjoint)
     {
+      const double eta_i = Eta(wi);
       scatterer->SetAdjoint(sample_adjoint);
       ScatterSample smpl = scatterer->MakeScatterSample(wi, sampler);
       if (!smpl.pdf_or_pmf.IsFromDelta())
@@ -672,19 +677,28 @@ class PointwiseSymmetryTest
         scatterer->SetAdjoint(!sample_adjoint);
         Spectral3 f = scatterer->ScatterFunction(smpl.coordinates, wi);
         constexpr double TOL = 1.e-6;
-        ExpectNear(smpl.value, f, TOL);
+        const double eta_o = Eta(smpl.coordinates);
+        ExpectNear(smpl.value*eta_i, f*eta_o, TOL);
       }
       return smpl;
+    }
+  
+    inline double Eta(const Double3 &w)
+    {
+      return (Dot(w, n) > 0.) ? eta_above : eta_below;
     }
   
   protected:
     Scatterer *scatterer {nullptr};
     int num_samples;
     Sampler sampler;
+    double eta_above;
+    double eta_below;
+    inline static const Double3 n{0,0,1};
     
   public:
-    PointwiseSymmetryTest(Scatterer &_scatterer, int _num_samples, std::uint64_t seed) :
-      scatterer{&_scatterer}, num_samples{_num_samples}
+    PointwiseSymmetryTest(Scatterer &_scatterer, int _num_samples, double eta_above, double eta_below, std::uint64_t seed) :
+      scatterer{&_scatterer}, num_samples{_num_samples}, eta_above{eta_above}, eta_below{eta_below}
     {
       sampler.Seed(seed);
     }
@@ -695,11 +709,13 @@ class PointwiseSymmetryTest
       {
         Double3 wi = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
         Double3 wo = SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
+        const double eta_i = Eta(wi);
+        const double eta_o = Eta(wo);
         scatterer->SetAdjoint(false);
         Spectral3 f_val = scatterer->ScatterFunction(wi, wo);
         scatterer->SetAdjoint(true);
         Spectral3 f_rev = scatterer->ScatterFunction(wo, wi);
-        ExpectNear(f_val, f_rev, 1.e-6);
+        ExpectNear(f_val*eta_i, f_rev*eta_o, 1.e-6);
       }
       
       for (int snum = 0; snum<num_samples; ++snum)
@@ -833,7 +849,7 @@ class ShaderScatterer : public Scatterer
       // According to Veach's Thesis (Eq. 5.12), transmitted radiance is scaled by (eta_t/eta_i)^2.
       // Here I undo the scaling factor, so that when summing, the total scattered radiance equals
       // the incident radiance. And that conservation is much simpler to check for.
-      if (Dot(wi, intersection.geometry_normal) >= 0.) // Light goes from below surface to above. Because wi, wo denote direction of randomwalk.
+      if (Dot(wi, intersection.geometry_normal) < 0.) // Light goes from below surface to above. Because wi, wo denote direction of randomwalk.
         value *= Sqr(ior_below_over_above);
       else
         value *= Sqr(1./ior_below_over_above);
@@ -897,7 +913,7 @@ public:
     auto &intersection = MakeIntersection(wi);
     auto value = shader->EvaluateBSDF(wi, intersection, wo, context, nullptr);
     value = CosThetaTerm(value, wi, intersection, wo);
-    value = UndoneIorScaling(value, wi, intersection, wo);
+    //value = UndoneIorScaling(value, wi, intersection, wo);
     return value;
   }
   
@@ -906,7 +922,7 @@ public:
     auto &intersection = MakeIntersection(wi);
     auto smpl = shader->SampleBSDF(wi, intersection, sampler, context);
     smpl.value= CosThetaTerm(smpl.value,wi, intersection, smpl.coordinates);
-    smpl.value = UndoneIorScaling(smpl.value, wi, intersection, smpl.coordinates);
+    //smpl.value = UndoneIorScaling(smpl.value, wi, intersection, smpl.coordinates);
     return smpl;
   }
   
@@ -1271,7 +1287,7 @@ protected:
 TEST_P(ShaderSymmetry, Pointwise)
 {
   const Params& p = this->GetParam();
-  PointwiseSymmetryTest test(*scatter, 100, p.seed.value_or(Sampler::default_seed));
+  PointwiseSymmetryTest test(*scatter, 100, 1.0/p.ior, p.ior, p.seed.value_or(Sampler::default_seed));
   test.Run();
 }
 
