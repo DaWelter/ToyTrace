@@ -756,8 +756,7 @@ bool CameraRenderWorker::MaybeScatterAtSpecularLayer(Ray& ray, const SurfaceInte
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, current_node_count, sampler))
   {
     monochromatic |= shader.require_monochromatic;
-    weight_accum *= smpl.value * (BsdfCorrectionFactorPBRT(-ray.dir, interaction, smpl.coordinates, 2.0) *
-                  DFactorPBRT(interaction, smpl.coordinates) / smpl.pdf_or_pmf);
+    weight_accum *= smpl.value * DFactorPBRT(interaction, smpl.coordinates) / smpl.pdf_or_pmf;
     ray.dir = smpl.coordinates;
     ray.org = interaction.pos + AntiSelfIntersectionOffset(interaction, ray.dir);
     if (Dot(ray.dir, interaction.normal) < 0.)
