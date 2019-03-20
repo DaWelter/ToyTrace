@@ -209,9 +209,9 @@ public:
   const Scene &scene;
 public:
   PhotonmappingRenderingAlgo(const Scene &scene_, const RenderingParameters &render_params_)
-    : RenderingAlgo{}, render_params{render_params_}, scene{scene_},
-      buffer{render_params_.width, render_params_.height}, num_threads{0},
-      spp_schedule{render_params_}
+    : RenderingAlgo{}, buffer{render_params_.width, render_params_.height}, 
+       num_threads{0}, spp_schedule{render_params_},  render_params{render_params_}, scene{scene_}
+      
   {
     num_pixels = render_params.width * render_params.height;
     current_surface_photon_radius = render_params.initial_photon_radius;
