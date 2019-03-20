@@ -1022,8 +1022,8 @@ void NFFParser::ParseYamlNode(const std::string &key, const YAML::Node &node, Sc
         // Assuming that ior_ratio is the number for lambda=589nm.
         ior_coeff = (ior_ratio-1)/v/(656-486); 
       }
-      InsertAndActivate(name.c_str(), scope,
-        std::make_unique<SpecularTransmissiveDielectricShader>(ior_ratio, ior_coeff));
+      auto shd = std::make_unique<SpecularTransmissiveDielectricShader>(ior_ratio, ior_coeff);
+      InsertAndActivate(name.c_str(), scope, std::move(shd));
     }
     else if (class_ == "glossytransmissivedielectric")
     {
@@ -1038,8 +1038,10 @@ void NFFParser::ParseYamlNode(const std::string &key, const YAML::Node &node, Sc
         texture = std::make_shared<Texture>(path);
         alpha_min = node["alpha_min"].as<double>();
       }
-      InsertAndActivate(name.c_str(), scope,
-        std::make_unique<GlossyTransmissiveDielectricShader>(ior_ratio, alpha, alpha_min, texture));
+      auto shd = std::make_unique<GlossyTransmissiveDielectricShader>(ior_ratio, alpha, alpha_min, texture);
+      if (node["prefer_path_tracing"])
+        shd->prefer_path_tracing_over_photonmap = node["prefer_path_tracing"].as<bool>();
+      InsertAndActivate(name.c_str(), scope, std::move(shd));
     }
     else
       throw MakeException(strconcat("Unkown shader class in yaml: ", class_));

@@ -18,6 +18,7 @@ class Shader
 {
 public:
   bool require_monochromatic = false;
+  bool prefer_path_tracing_over_photonmap = false;
   Shader() {}
   virtual ~Shader() {}
   virtual ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const = 0;

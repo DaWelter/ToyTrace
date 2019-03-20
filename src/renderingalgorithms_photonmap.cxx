@@ -535,13 +535,16 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
     /*surface=*/[&](const SurfaceInteraction &interaction, double distance, const Spectral3 &track_weight) -> bool
     {
       weight_accum *= track_weight;
-      photons_surface.push_back({
-        interaction.pos,
-        /*photon_surface_blur_weight**/weight_accum*current_emission,
-        ray.dir.cast<float>(),
-        (short)current_node_count,
-        monochromatic
-      });
+      if (!GetShaderOf(interaction, master->scene).prefer_path_tracing_over_photonmap)
+      {
+        photons_surface.push_back({
+          interaction.pos,
+          /*photon_surface_blur_weight**/weight_accum*current_emission,
+          ray.dir.cast<float>(),
+          (short)current_node_count,
+          monochromatic
+        });
+      }
       current_node_count++;
       SpectralMaxInplace(max_throughput_weight, lambda_selection, weight_accum);
       return ScatterAt(ray, interaction, track_weight, weight_accum);
@@ -751,7 +754,7 @@ bool CameraRenderWorker::MaybeScatterAtSpecularLayer(Ray& ray, const SurfaceInte
 {
   const auto &shader = GetShaderOf(interaction,master->scene);
   auto smpl = shader.SampleBSDF(-ray.dir, interaction, sampler, context);
-  if (!smpl.pdf_or_pmf.IsFromDelta())
+  if (!smpl.pdf_or_pmf.IsFromDelta() && !shader.prefer_path_tracing_over_photonmap)
     return false;
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, current_node_count, sampler))
   {
@@ -802,13 +805,16 @@ inline Spectral3 MaybeReWeightToMonochromatic(const Spectral3 &w, bool monochrom
 
 void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& interaction, const Double3 &incident_dir, const Spectral3& path_weight)
 {
+  const auto &shader = GetShaderOf(interaction,master->scene);
+  if (shader.prefer_path_tracing_over_photonmap)
+    return;
   Spectral3 reflect_estimator{0.};
     master->hashgrid_surface->Query(interaction.pos, [&](int photon_idx){
     const auto &photon = master->photons_surface[photon_idx];
     const double kernel_val = EvalKernel(kernel2d, photon.position, interaction.pos);
     if (kernel_val <= 0.)
       return;
-    Spectral3 bsdf_val = GetShaderOf(interaction,master->scene).EvaluateBSDF(-incident_dir, interaction, -photon.direction.cast<double>(), context, nullptr);
+    Spectral3 bsdf_val = shader.EvaluateBSDF(-incident_dir, interaction, -photon.direction.cast<double>(), context, nullptr);
     {
       // This is Veach's shading correction for the normal (non-adjoint) BSDF, defined in Eq. 5.17, pg. 152.
       // The reason it is added here and why there is no bare cos(Ng,wi), is that when the photon is cast to this point, the integral transform
