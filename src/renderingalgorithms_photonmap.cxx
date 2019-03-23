@@ -94,7 +94,7 @@ struct Photon
   Double3 position;
   Spectral3 weight;
   Float3 direction;
-  short level;
+  short node_number; // Starts at 2. First node is on the light source.
   bool monochromatic;
 };
 
@@ -128,7 +128,7 @@ public:
   double max_bsdf_correction_weight{0};
   SpectralN max_uncorrected_bsdf_weight{0};
   bool should_log_path = false;
-  static constexpr double log_path_weight_threshold = 2000.;
+  static constexpr double log_path_weight_threshold = 1000.;
   Pathlogger logger;
   
   PhotonmappingWorker(PhotonmappingRenderingAlgo *master);
@@ -662,12 +662,12 @@ void CameraRenderWorker::Render(int pixel_index_, int batch_size, int samples_pe
   {
     for (int i=0; i<samples_per_pixel; ++i)
     {
-      current_node_count = 2;
+      current_node_count = 2; // First node on camera. We start with the node code of the next interaction.
       monochromatic = false;
       Spectral3 weight_accum = lambda_selection.weights;
       Ray ray = GeneratePrimaryRay(weight_accum);
       bool keepgoing = true;
-      do 
+      do
       {
         keepgoing = TrackToNextInteractionAndRecordPixel(ray, weight_accum);
       }
@@ -811,6 +811,9 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
   Spectral3 reflect_estimator{0.};
     master->hashgrid_surface->Query(interaction.pos, [&](int photon_idx){
     const auto &photon = master->photons_surface[photon_idx];
+    // There is minus one because there are two coincident nodes, photon and camera node. But we only want to count one.
+    if (photon.node_number + current_node_count - 1 > ray_termination.max_node_count)
+      return;
     const double kernel_val = EvalKernel(kernel2d, photon.position, interaction.pos);
     if (kernel_val <= 0.)
       return;
@@ -828,10 +831,10 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
     Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight*bsdf_val, photon.monochromatic | monochromatic);
     reflect_estimator += weight;
 #ifdef DEBUG_BUFFERS 
-    if (photon.level < master->debugbuffers.size()) {
+    if (photon.node_number < master->debugbuffers.size()) {
       Spectral3 w = path_weight*weight*photon_surface_blur_weight/master->num_photons_traced;
       auto color = Color::SpectralSelectionToRGB(w, lambda_selection.indices);
-      master->debugbuffers[photon.level].Insert(pixel_index, color);
+      master->debugbuffers[photon.node_number].Insert(pixel_index, color);
     }
 #endif
   });
@@ -845,6 +848,9 @@ void CameraRenderWorker::AddPhotonContributions(const VolumeInteraction& interac
   Spectral3 inscatter_estimator{0.};
   master->hashgrid_volume->Query(interaction.pos, [&](int photon_idx){
     const auto &photon = master->photons_volume[photon_idx];
+    // There is minus one because there are two coincident nodes, photon and camera node. But we only want to count one.
+    if (photon.node_number + current_node_count - 1 > ray_termination.max_node_count)
+      return;
     const double kernel_val = EvalKernel(kernel3d, photon.position, interaction.pos);
     if (kernel_val <= 0.)
       return;
@@ -852,10 +858,10 @@ void CameraRenderWorker::AddPhotonContributions(const VolumeInteraction& interac
     Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight*scatter_val*kernel_val, photon.monochromatic | monochromatic);
     inscatter_estimator += weight;
 #ifdef DEBUG_BUFFERS
-    if (photon.level < master->debugbuffers.size()) {
+    if (photon.node_number < master->debugbuffers.size()) {
       Spectral3 w = interaction.sigma_s*path_weight*weight*photon_volume_blur_weight*master->num_photons_traced;
       auto color = Color::SpectralSelectionToRGB(w, lambda_selection.indices);
-      master->debugbuffers[photon.level].Insert(pixel_index, color);
+      master->debugbuffers[photon.node_number].Insert(pixel_index, color);
     }
 #endif
   });
@@ -873,6 +879,9 @@ void CameraRenderWorker::AddPhotonBeamContributions(const RaySegment &segment, c
   for (int i=0; i<n; ++i)
   {
     const auto &photon = master->photons_volume[photon_idx[i]];
+    // There is no -1 because  there is no interaction point on the query path. The interaction comes from the photon.
+    if (photon.node_number + current_node_count > ray_termination.max_node_count) 
+      return;
     Spectral3 scatter_val = medium.EvaluatePhaseFunction(-segment.ray.dir, photon.position, -photon.direction.cast<double>(), context, nullptr);
     auto [sigma_s, _] = medium.EvaluateCoeffs(photon.position, context);
     const double kernel_value = EvalKernel(kernel2d, photon.position, segment.ray.PointAt(photon_distance[i]));
