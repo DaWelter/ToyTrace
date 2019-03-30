@@ -1200,33 +1200,6 @@ private:
       mesh.material_indices[i] = mat_idx;
     
     scene.Append(mesh);
-    
-//     // TODO: delete me!
-//     for (int tri_index = 0; tri_index < mesh.NumTriangles(); ++tri_index)
-//     {
-//       int a = mesh.vert_indices(tri_index, 0);
-//       int b = mesh.vert_indices(tri_index, 1);
-//       int c = mesh.vert_indices(tri_index, 2);
-// 
-//       Double2 uv[3];
-//       Double3 no[3];
-// 
-//       no[0] = mesh.normals.row(a).cast<double>();
-//       no[1] = mesh.normals.row(b).cast<double>();
-//       no[2] = mesh.normals.row(c).cast<double>();
-//       ASSERT_NORMALIZED(no[0]);
-//       ASSERT_NORMALIZED(no[1]);
-//       ASSERT_NORMALIZED(no[2]);
-//       
-//       uv[0] = mesh.uvs.row(a).cast<double>();
-//       uv[1] = mesh.uvs.row(b).cast<double>();
-//       uv[2] = mesh.uvs.row(c).cast<double>();
-//       
-//       const Float3 normal = Normalized(
-//         Cross(mesh.vertices.row(b)-mesh.vertices.row(a),
-//               mesh.vertices.row(c)-mesh.vertices.row(a)));
-//       ASSERT_NORMALIZED(normal);
-//     }
   }
   
   
