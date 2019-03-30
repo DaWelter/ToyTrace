@@ -42,7 +42,7 @@ class SymbolTable
   std::string name_of_this_table;
 public:
   SymbolTable(const std::string &_name) :
-    currentThing(nullptr), name_of_this_table(_name)
+    currentThing{}, name_of_this_table(_name)
   {}
   
   int size() const
@@ -75,6 +75,15 @@ public:
   {
     return currentThing;
   }
+  
+  boost::optional<Thing> operator[](const char *name) const
+  {
+    auto it = things.find(name);
+    if (it == things.end())
+      return boost::none;
+    else
+      return it->second;
+  }
 };
 
 
@@ -84,18 +93,24 @@ struct Scope
   SymbolTable<Shader*> shaders;
   SymbolTable<Medium*> mediums;
   SymbolTable<AreaEmitter*> areaemitters;
+  SymbolTable<Material> materials;
   Eigen::Transform<double,3,Eigen::Affine> currentTransform;
   
   Scope() :
     shaders("Shader"),
     mediums("Medium"),
     areaemitters("AreaEmitter"),
+    materials("Materials"),
     currentTransform(decltype(currentTransform)::Identity())
   {
   }
 };
 
 
+Material MakeMaterialFromActiveThings(const Scope &scope)
+{
+  return {scope.shaders(), scope.mediums(), scope.areaemitters()};
+}
 
 
 
@@ -1046,6 +1061,11 @@ void NFFParser::ParseYamlNode(const std::string &key, const YAML::Node &node, Sc
     else
       throw MakeException(strconcat("Unkown shader class in yaml: ", class_));
   }
+  else if (key == "material")
+  {
+    auto name = node["name"].as<std::string>();
+    scope.materials.set_and_activate(name.c_str(), MakeMaterialFromActiveThings(scope));
+  }
 }
 
 
@@ -1195,7 +1215,7 @@ private:
     else
       mesh.uvs.setConstant(0.);
     
-    MaterialIndex mat_idx = parser.GetMaterialIndexOfCurrentParams(scope);
+    MaterialIndex mat_idx = parser.MaterialInsertAndOrGetIndex(scope.materials());
     for (int i=0; i<mesh.NumTriangles(); ++i)
       mesh.material_indices[i] = mat_idx;
     
@@ -1205,15 +1225,10 @@ private:
   
   void DealWithTheMaterialAssignment(Scope &scope, const aiMesh* mesh)
   {
+    bool must_create = true;
     if (mesh->mMaterialIndex < aiscene->mNumMaterials)
     {
-      SetCurrentShader(scope, aiscene->mMaterials[mesh->mMaterialIndex]);
-    }
-  }
-  
-  
-  void SetCurrentShader(Scope &scope, const aiMaterial *mat)
-  {
+      const aiMaterial* mat = aiscene->mMaterials[mesh->mMaterialIndex];
 //     for (int prop_idx = 0; prop_idx < mat->mNumProperties; ++prop_idx)
 //     {
 //       const auto *prop = mat->mProperties[prop_idx];
@@ -1221,12 +1236,30 @@ private:
 //       
 //       std::printf("Mat %p key[%i/%s]\n", (void*)mat, prop_idx, prop->mKey.C_Str());
 //     }
-    aiString ainame;
-    mat->Get(AI_MATKEY_NAME,ainame);
-    auto name = std::string(ainame.C_Str());
-    if (name != "DefaultMaterial")
-      scope.shaders.activate(name);
+
+      aiString ainame;
+      mat->Get(AI_MATKEY_NAME,ainame);
+      auto name = std::string(ainame.C_Str());
+      if (name != "DefaultMaterial")
+      {
+        if (auto mymat = scope.materials[name.c_str()]; mymat)
+        {
+          scope.materials.activate(name);
+          must_create = false;
+        }
+        else
+        {
+          scope.shaders.activate(name);
+        }
+      }
+    }
+    if (must_create)
+    {
+      scope.materials.set_and_activate("", MakeMaterialFromActiveThings(scope));
+    }
   }
+  
+
 
 private:
   const aiScene *aiscene = { nullptr };
@@ -1312,8 +1345,7 @@ void NFFParser::InsertAndActivate(const char* name, Scope& scope, std::unique_pt
 
 MaterialIndex NFFParser::GetMaterialIndexOfCurrentParams(const Scope &scope)
 {
-  Material mat{scope.shaders(), scope.mediums(), scope.areaemitters()};
-  return MaterialInsertAndOrGetIndex(mat);
+  return MaterialInsertAndOrGetIndex(MakeMaterialFromActiveThings(scope));
 }
 
 
