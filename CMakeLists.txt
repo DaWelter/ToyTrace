@@ -82,7 +82,7 @@ set(SOURCES src/image.cxx  src/parsenff.cxx  src/shader.cxx src/ray.cxx src/samp
             src/light.cxx src/texture.cxx src/embreeaccelerator.cxx src/scene.cxx src/lightpicker_trivial.cxx src/renderingalgorithms_photonmap.cxx 
             src/rendering_util.cxx src/pathlogger.cxx src/photonintersector.cxx)
 add_executable(toytrace src/toytrace.cxx ${SOURCES})
-target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE} ${Boost_FILESYSTEM_LIBRARY_RELEASE} tbb)
+target_link_libraries(toytrace ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE} ${Boost_FILESYSTEM_LIBRARY_RELEASE} ${Boost_SYSTEM_LIBRARY_RELEASE} tbb)
 
 add_executable(tests src/tests.cxx src/tests3.cxx src/tests_sampling.cxx src/tests_microfacet.cxx src/tests_stats.cxx ${Cubature_DIR}/hcubature.c ${SOURCES})
 add_executable(tests2 src/tests2.cxx)
@@ -91,7 +91,7 @@ add_executable(tests_tbb src/tests_tbb.cxx)
 target_link_libraries(tests_tbb tbb)
 foreach(EXE tests tests2)
   target_include_directories(${EXE} PUBLIC ${GTEST_INCLUDE_DIRS} ${Cubature_DIR})
-  target_link_libraries(${EXE} ${GTEST_LIBRARIES}  ${Boost_FILESYSTEM_LIBRARY_RELEASE} pthread tbb)
+  target_link_libraries(${EXE} ${GTEST_LIBRARIES}  ${Boost_FILESYSTEM_LIBRARY_RELEASE} ${Boost_SYSTEM_LIBRARY_RELEASE} pthread tbb)
 endforeach()
 
 
