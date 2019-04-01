@@ -7,11 +7,16 @@ private/
 .spyderworkspace
 .spyderproject
 *.kate-swp
-*.swp # create by vim
+*.swp 
 *.log
 .fuse_*
 .ipynb_checkpoints
-
+# Visual Studio
+.vs
+# Leftover garbage from merges
+*.orig
+# More Visual Studio stuff
+CppProperties.json
 #pycharm project files
 .idea
 
