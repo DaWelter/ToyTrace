@@ -91,7 +91,7 @@ void DrawImageGrid(Image& dst, const std::vector< Image >& images, int dir = 0);
 void DrawImageGrid(Image &dst, const std::vector<std::vector<Image> > &images);
 
 namespace cimg_library {
-class CImgDisplay;
+struct CImgDisplay;
 }
 
 class ImageDisplay
