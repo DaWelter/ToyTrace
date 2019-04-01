@@ -9,6 +9,8 @@
 #include <boost/math/distributions/students_t.hpp>
 #include <boost/numeric/interval.hpp>
 
+#include <numeric> // for std::accumulate1
+
 
 
 // A review of statistical testing applied to computer graphics!
