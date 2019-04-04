@@ -8,6 +8,9 @@
 #include "shader_util.hxx"
 
 
+double UpperBoundToBoundingBoxDiameter(const Scene &scene);
+
+
 class IterateIntersectionsBetween
 {
 #if 0
@@ -125,6 +128,18 @@ inline void MediumTracker::leaveVolume(const Medium* medium)
   {
     current = findMediumOfHighestPriority();
   }
+}
+
+
+inline void MaybeGoingThroughSurface(MediumTracker &mt, const Double3& dir_of_travel, const SurfaceInteraction &surf)
+{
+    if(Dot(dir_of_travel, surf.normal) < 0.)
+    {
+      // By definition, intersection.normal points to where the intersection ray is coming from.
+      // Thus we can determine if the sampled direction goes through the surface by looking
+      // if the direction goes in the opposite direction of the normal.
+      mt.goingThroughSurface(dir_of_travel, surf);
+    }
 }
 
 
@@ -306,6 +321,11 @@ inline void TrackBeam(
   }
 };
 
+
+
+Spectral3 TransmittanceEstimate(const Scene &scene, RaySegment seg, MediumTracker &medium_tracker, 
+                                const PathContext &context, Sampler &sampler, 
+                                VolumePdfCoefficients *volume_pdf_coeff = nullptr);
 
 
 /* Straight forwardly following Cpt 5.3 Veach's thesis.

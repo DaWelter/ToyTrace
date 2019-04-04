@@ -82,3 +82,38 @@ void MediumTracker::initializePosition(const Double3& pos)
   }
 }
 
+
+Spectral3 TransmittanceEstimate(const Scene &scene, RaySegment seg, MediumTracker &medium_tracker, const PathContext &context, Sampler &sampler, VolumePdfCoefficients *volume_pdf_coeff)
+{
+    static constexpr int MAX_ITERATIONS = 100; // For safety, in case somethign goes wrong with the intersections ...
+    Spectral3 result{1.};
+    SurfaceInteraction intersection;
+    seg.length *= 0.99999; // Dammit!
+    IterateIntersectionsBetween iter{seg, scene};
+    for (int n = 0; n < MAX_ITERATIONS; ++n)
+    {
+        bool hit = iter.Next(seg, intersection);
+        if (hit && scene.GetMaterialOf(intersection.hitid).shader!=&scene.GetInvisibleShader())
+        {
+            result.setZero();
+            break;
+    //         result *= GetShaderOf(intersection, scene).EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, context, nullptr);
+    //         if (result.isZero())
+    //           break;
+        }
+        if (volume_pdf_coeff)
+        {
+            VolumePdfCoefficients local_coeff = medium_tracker.getCurrentMedium().ComputeVolumePdfCoefficients(seg, context);
+            Accumulate(*volume_pdf_coeff, local_coeff, n == 0, !hit);
+        }
+        result *= medium_tracker.getCurrentMedium().EvaluateTransmission(seg, sampler, context);
+        if (hit)
+        {
+            medium_tracker.goingThroughSurface(seg.ray.dir, intersection);
+        }
+        if (!hit)
+        break;
+        assert (n < MAX_ITERATIONS-1);
+    }
+    return result;
+}

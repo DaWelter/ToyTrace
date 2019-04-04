@@ -139,8 +139,9 @@ public:
 
 class CameraRenderWorker
 {
-  friend struct CameraSampleVisitor;
+  friend struct EmitterDirectLightingVisitor;
   PhotonmappingRenderingAlgo *master;
+  TrivialLightPicker light_picker;
   MediumTracker medium_tracker;
   Sampler sampler;
   LambdaSelection lambda_selection;
@@ -151,6 +152,7 @@ class CameraRenderWorker
   int pixel_index = 0;
   Kernel2d kernel2d;
   Kernel3d kernel3d;
+  boost::optional<Pdf> last_scatter_pdf_value; // For MIS.
 private:
   Ray GeneratePrimaryRay(Spectral3 &path_weight);
   bool TrackToNextInteractionAndRecordPixel(Ray &ray, Spectral3 &weight_accum);
@@ -158,9 +160,11 @@ private:
   void AddPhotonContributions(const VolumeInteraction& interaction, const Double3& incident_dir, const Spectral3& path_weight);
   bool MaybeScatterAtSpecularLayer(Ray& ray, const SurfaceInteraction &interaction, Spectral3& weight_accum, const Spectral3 &track_weight);
   void RecordMeasurementToCurrentPixel(const Spectral3 &measurement);
-  void MaybeAddEmission(Ray& ray, const SurfaceInteraction &interaction, Spectral3& weight_accum);
-  void MaybeAddEmission(Ray& ray, const VolumeInteraction &interaction, Spectral3& weight_accum);
+  void MaybeAddEmission(const Ray& ray, const SurfaceInteraction &interaction, Spectral3& weight_accum);
+  void MaybeAddEmission(const Ray& ray, const VolumeInteraction &interaction, Spectral3& weight_accum);
+  void AddEnvEmission(const Double3 &travel_dir, const Spectral3 &path_weight);
   void AddPhotonBeamContributions(const RaySegment &segment, const Medium &medium, const PiecewiseConstantTransmittance &pct, const Spectral3 &track_weight);
+  void MaybeAddDirectLighting(const Double3 &travel_dir, const SurfaceInteraction &interaction, const Spectral3& weight_accum);
   void AddToImageBuffer(const Spectral3 &measurement_estimate);
 public:
   CameraRenderWorker(PhotonmappingRenderingAlgo *master);
@@ -641,7 +645,9 @@ bool PhotonmappingWorker::ScatterAt(Ray& ray, const VolumeInteraction& interacti
 
 
 CameraRenderWorker::CameraRenderWorker(Photonmapping::PhotonmappingRenderingAlgo* master)
-  : master{master}, medium_tracker{master->scene}, context{}, 
+  : master{master}, 
+    light_picker{master->scene},
+    medium_tracker{master->scene}, context{}, 
     ray_termination{master->render_params}
 {
 }
@@ -692,6 +698,7 @@ Ray CameraRenderWorker::GeneratePrimaryRay(Spectral3& path_weight)
     auto dir = camera.TakeDirectionSampleFrom(pixel_index, pos.coordinates, sampler, context);
     path_weight *= dir.value / dir.pdf_or_pmf;
     medium_tracker.initializePosition(pos.coordinates);
+    last_scatter_pdf_value = boost::none;
     return Ray{pos.coordinates, dir.coordinates};
 }
 
@@ -731,6 +738,7 @@ bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(Ray& ray, Spectral
       weight_accum *= track_weight;
       AddPhotonContributions(interaction, ray.dir, weight_accum);
       MaybeAddEmission(ray, interaction, weight_accum);
+      MaybeAddDirectLighting(ray.dir, interaction, weight_accum);
       current_node_count++;
       keepgoing = MaybeScatterAtSpecularLayer(ray, interaction, weight_accum, track_weight);
     },
@@ -740,13 +748,142 @@ bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(Ray& ray, Spectral
     },
     /* escape_visitor=*/[&](const Spectral3 &track_weight)
     {
-      const auto &emitter = master->scene.GetTotalEnvLight();
-      const auto radiance = emitter.Evaluate(-ray.dir, context);
-      RecordMeasurementToCurrentPixel(radiance * track_weight * weight_accum);
+      AddEnvEmission(ray.dir, track_weight*weight_accum);
     }
   );
   return keepgoing;
 #endif
+}
+
+
+struct EmitterDirectLightingVisitor
+{
+  CameraRenderWorker* this_;
+  PhotonmappingRenderingAlgo *master;
+  const SurfaceInteraction &surface;
+  const Double3 reverse_incident_dir;
+  
+  RaySegment segment_to_light;
+  Spectral3 weight;
+  Pdf pdf;
+  
+  EmitterDirectLightingVisitor(CameraRenderWorker* this_, const Double3 &reverse_incident_dir, const SurfaceInteraction &surface) 
+    : this_{this_}, master{this_->master}, surface{surface}, reverse_incident_dir{reverse_incident_dir} {}
+  
+  void operator()(const ROI::EnvironmentalRadianceField &env, double prob)
+  {
+    auto smpl = env.TakeDirectionSample(this_->sampler, this_->context);
+    this->weight = smpl.value / (prob*(double)smpl.pdf_or_pmf);
+    this->pdf = smpl.pdf_or_pmf;
+    this->segment_to_light = SegmentToEnv(smpl.coordinates);
+
+  }
+  void operator()(const ROI::PointEmitter &light, double prob)
+  {
+    this->segment_to_light = SegmentToPoint(light.Position());
+    this->weight = light.Evaluate(light.Position(), -this->segment_to_light.ray.dir, this_->context, nullptr);
+    this->weight /= prob;
+    this->weight /= Sqr(this->segment_to_light.length);
+    this->pdf = Pdf::MakeFromDelta(1.);
+  }
+  void operator()(const PrimRef& prim_ref, double prob)
+  {
+    const auto &mat = master->scene.GetMaterialOf(prim_ref);
+    assert(mat.emitter); // Otherwise would would not have been selected.
+    ROI::AreaSample area_smpl = mat.emitter->TakeAreaSample(prim_ref, this_->sampler, this_->context);
+    SurfaceInteraction light_surf{area_smpl.coordinates};
+    this->segment_to_light = SegmentToPoint(light_surf.pos);
+    this->weight = mat.emitter->Evaluate(area_smpl.coordinates, -segment_to_light.ray.dir, this_->context, nullptr);
+    this->weight *= 1.0 / (prob * Sqr(this->segment_to_light.length) * (double)area_smpl.pdf_or_pmf);
+    this->weight *= DFactorPBRT(surface, -segment_to_light.ray.dir);
+    this->pdf = PdfConversion::AreaToSolidAngle(segment_to_light.length, segment_to_light.ray.dir, light_surf.normal)*area_smpl.pdf_or_pmf;
+  }
+  void operator()(const Medium &medium, double prob)
+  {
+      assert(!"Not implemented!");
+//     Medium::VolumeSample smpl = medium.SampleEmissionPosition(sampler, context);
+//     double pdf_which_cannot_be_delta = 0;
+//     auto radiance =  medium.EvaluateEmission(smpl.pos, context, &pdf_which_cannot_be_delta);
+//     node.node_type = RW::NodeType::VOLUME_EMITTER;
+//     node.interaction.volume = VolumeInteraction(smpl.pos, medium, radiance, Spectral3{0.});
+//     // The reason sigma_s is set to 0 in the line above, is that the initial light node will never be used for scattering.
+//     pdf = prob*pdf_which_cannot_be_delta;
+  }
+
+private:
+  RaySegment SegmentToEnv(const Double3 &dir)
+  {
+      Ray ray{surface.pos, dir};
+      const double length = 10.*UpperBoundToBoundingBoxDiameter(master->scene);
+      ray.org += AntiSelfIntersectionOffset(surface, ray.dir);
+      return {ray, length};
+  }
+  
+  RaySegment SegmentToPoint(const Double3 &pos)
+  {
+      Ray ray{surface.pos, pos - surface.pos}; 
+      double length = Length(ray.dir);
+      if (length > 0.)
+        ray.dir /= length;
+      else // Just pick something which will not result in NaN.
+      {
+        length = Epsilon;
+        ray.dir = surface.normal;
+      }
+//       if constexpr (endpoint.on_surface)
+//       {DirectLightSegmentToEnv(const SurfaceInteraction &surf
+//         end_pos += AntiSelfIntersectionOffset(endpoint.surface, -ray.dir);
+//         ray.dir = end_pos - ray.org;
+//         length = Length(ray.dir);
+//         ray.dir /= length;
+//       }
+      ray.org += AntiSelfIntersectionOffset(surface, ray.dir);
+      return {ray, length};
+  }
+};
+
+
+static double MisWeight(Pdf pdf_or_pmf_taken, double pdf_other)
+{
+    double mis_weight = 1.;
+    if (!pdf_or_pmf_taken.IsFromDelta())
+    {
+        mis_weight = PowerHeuristic(pdf_or_pmf_taken, {pdf_other});
+    }
+    return mis_weight;
+}
+
+
+void CameraRenderWorker::MaybeAddDirectLighting(const Double3 &travel_dir, const SurfaceInteraction &interaction, const Spectral3& weight_accum)
+{
+    // To consider for direct lighting NEE with MIS.
+    // Segment, DFactors, AntiselfIntersectionOffset, Medium Passage, Transmittance Estimate, BSDF/Le factor, inv square factor.
+    // Mis weight. P_light, P_bsdf
+    
+    const auto &shader = GetShaderOf(interaction,master->scene);
+    if (!shader.prefer_path_tracing_over_photonmap)
+        return;
+    
+    EmitterDirectLightingVisitor lighting_visitor{this, -travel_dir, interaction};
+    light_picker.PickLight(sampler, lighting_visitor);
+    auto [ray, length] = lighting_visitor.segment_to_light;
+    
+    Spectral3 path_weight = weight_accum;
+    path_weight *= DFactorPBRT(interaction, ray.dir);
+
+    double bsdf_pdf = 0.;
+    Spectral3 bsdf_weight = shader.EvaluateBSDF(-travel_dir, interaction, ray.dir, context, &bsdf_pdf);
+    path_weight *= bsdf_weight;
+
+    
+    MediumTracker medium_tracker{this->medium_tracker}; // Copy because well don't want to keep modifications.
+    MaybeGoingThroughSurface(medium_tracker, ray.dir, interaction);
+    Spectral3 transmittance = TransmittanceEstimate(master->scene, lighting_visitor.segment_to_light, medium_tracker, context, sampler);
+    path_weight *= transmittance;
+    
+    double mis_weight = MisWeight(lighting_visitor.pdf, bsdf_pdf);
+    
+    AddToImageBuffer(mis_weight*path_weight*lighting_visitor.weight);
 }
 
 
@@ -762,13 +899,8 @@ bool CameraRenderWorker::MaybeScatterAtSpecularLayer(Ray& ray, const SurfaceInte
     weight_accum *= smpl.value * DFactorPBRT(interaction, smpl.coordinates) / smpl.pdf_or_pmf;
     ray.dir = smpl.coordinates;
     ray.org = interaction.pos + AntiSelfIntersectionOffset(interaction, ray.dir);
-    if (Dot(ray.dir, interaction.normal) < 0.)
-    {
-      // By definition, intersection.normal points to where the intersection ray is coming from.
-      // Thus we can determine if the sampled direction goes through the surface by looking
-      // if the direction goes in the opposite direction of the normal.
-      medium_tracker.goingThroughSurface(ray.dir, interaction);
-    }
+    MaybeGoingThroughSurface(medium_tracker, ray.dir, interaction);
+    last_scatter_pdf_value = smpl.pdf_or_pmf;
     return true;
   }
   else 
@@ -776,18 +908,45 @@ bool CameraRenderWorker::MaybeScatterAtSpecularLayer(Ray& ray, const SurfaceInte
 }
 
 
-void CameraRenderWorker::MaybeAddEmission(Ray& ray, const SurfaceInteraction &interaction, Spectral3& weight_accum)
+void CameraRenderWorker::MaybeAddEmission(const Ray& ray, const SurfaceInteraction &interaction, Spectral3& weight_accum)
 {
-  const auto emitter = GetMaterialOf(interaction, master->scene).emitter; 
-  if (emitter)
-  {
+    const auto emitter = GetMaterialOf(interaction, master->scene).emitter; 
+    if (!emitter)
+        return;
+         
     Spectral3 radiance = emitter->Evaluate(interaction.hitid, -ray.dir, context, nullptr);
-    RecordMeasurementToCurrentPixel(radiance*weight_accum);
-  }
+
+    double mis_weight = 1.0;
+    if (last_scatter_pdf_value)
+    {
+        const double prob_select = light_picker.PmfOfLight(*emitter);
+        const double area_pdf = emitter->EvaluatePdf(interaction.hitid, context);
+        const double pdf_cvt = PdfConversion::AreaToSolidAngle(Length(ray.org-interaction.pos), ray.dir, interaction.normal);
+        mis_weight = MisWeight(*last_scatter_pdf_value, prob_select*area_pdf*pdf_cvt);
+    }
+
+    RecordMeasurementToCurrentPixel(mis_weight*radiance*weight_accum);
 }
 
 
-void CameraRenderWorker::MaybeAddEmission(Ray& , const VolumeInteraction &interaction, Spectral3& weight_accum)
+void CameraRenderWorker::AddEnvEmission(const Double3 &travel_dir, const Spectral3 &path_weight)
+{
+    const auto &emitter = master->scene.GetTotalEnvLight();
+    const auto radiance = emitter.Evaluate(-travel_dir, context);
+    
+    double mis_weight = 1.0;
+    if (last_scatter_pdf_value)
+    {
+        const double prob_select = light_picker.PmfOfLight(emitter);
+        const double pdf_env = emitter.EvaluatePdf(-travel_dir, context);
+        mis_weight = MisWeight(*last_scatter_pdf_value, pdf_env*prob_select);
+    }
+  
+    RecordMeasurementToCurrentPixel(mis_weight*radiance*path_weight);
+}
+
+
+void CameraRenderWorker::MaybeAddEmission(const Ray& , const VolumeInteraction &interaction, Spectral3& weight_accum)
 {
   if (interaction.medium().is_emissive)
   {
@@ -861,7 +1020,7 @@ void CameraRenderWorker::AddPhotonContributions(const VolumeInteraction& interac
     if (photon.node_number < master->debugbuffers.size()) {
       Spectral3 w = interaction.sigma_s*path_weight*weight*photon_volume_blur_weight*master->num_photons_traced;
       auto color = Color::SpectralSelectionToRGB(w, lambda_selection.indices);
-      master->debugbuffers[photon.node_number].Insert(pixel_index, color);
+      master->debugbuffers[photon.node_number].Insert(pixel_index, color);DirectLightSegmentToEnv(const SurfaceInteraction &surf
     }
 #endif
   });
