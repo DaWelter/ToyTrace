@@ -1054,12 +1054,35 @@ void NFFParser::ParseYamlNode(const std::string &key, const YAML::Node &node, Sc
         alpha_min = node["alpha_min"].as<double>();
       }
       auto shd = std::make_unique<GlossyTransmissiveDielectricShader>(ior_ratio, alpha, alpha_min, texture);
-      if (node["prefer_path_tracing"])
-        shd->prefer_path_tracing_over_photonmap = node["prefer_path_tracing"].as<bool>();
+      InsertAndActivate(name.c_str(), scope, std::move(shd));
+    }
+    else if (class_ == "glossy")
+    {
+      auto alpha = node["alpha"].as<double>();
+      auto texture_node = node["alpha_texture"];
+      std::shared_ptr<Texture> texture;
+      if (texture_node)
+      {
+        auto path = MakeFullPath(texture_node.as<std::string>());
+        texture = std::make_shared<Texture>(path);
+      }
+      RGB ks_rgb{1._rgb};
+      RGBScalar k{1._rgb};
+      if (node["rgb"])
+      {
+        auto tmp = node["rgb"].as<Double3>();
+        ks_rgb = RGB{RGBScalar{tmp[0]},RGBScalar{tmp[1]},RGBScalar{tmp[2]}};
+      }
+      if (node["x"])
+        k = RGBScalar{node["x"].as<double>()};
+      auto shd = std::make_unique<MicrofacetShader>(Color::RGBToSpectrum(k*ks_rgb), alpha, texture);
       InsertAndActivate(name.c_str(), scope, std::move(shd));
     }
     else
       throw MakeException(strconcat("Unkown shader class in yaml: ", class_));
+
+    if (scope.shaders() && node["prefer_path_tracing"])
+      scope.shaders()->prefer_path_tracing_over_photonmap = node["prefer_path_tracing"].as<bool>();
   }
   else if (key == "material")
   {
