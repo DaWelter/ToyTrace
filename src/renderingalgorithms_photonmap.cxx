@@ -166,6 +166,9 @@ private:
   void AddPhotonBeamContributions(const RaySegment &segment, const Medium &medium, const PiecewiseConstantTransmittance &pct, const Spectral3 &track_weight);
   void MaybeAddDirectLighting(const Double3 &travel_dir, const SurfaceInteraction &interaction, const Spectral3& weight_accum);
   void AddToImageBuffer(const Spectral3 &measurement_estimate);
+#ifdef DEBUG_BUFFERS
+  void AddToDebugBuffer(int id, int level, const Spectral3 &measurement_estimate);
+#endif
 public:
   CameraRenderWorker(PhotonmappingRenderingAlgo *master);
   void StartNewPass(const LambdaSelection &lambda_selection);
@@ -204,6 +207,10 @@ private:
   ToyVector<CameraRenderWorker> camerarender_workers;
 #ifdef DEBUG_BUFFERS  
   ToyVector<Spectral3ImageBuffer> debugbuffers;
+  static constexpr int DEBUGBUFFER_DEPTH = 10;
+  static constexpr int DEBUGBUFFER_ID_PH = 0;
+  static constexpr int DEBUGBUFFER_ID_BSDF = 10;
+  static constexpr int DEBUGBUFFER_ID_DIRECT = 11;
 #endif
   SpectralN max_throughput_weight{0.};
   double max_bsdf_correction_weight{0};
@@ -221,7 +228,7 @@ public:
     current_surface_photon_radius = render_params.initial_photon_radius;
     current_volume_photon_radius = render_params.initial_photon_radius;
 #ifdef DEBUG_BUFFERS
-    for (int i=0; i<10; ++i)
+    for (int i=0; i<DEBUGBUFFER_DEPTH+2; ++i)
     {
       debugbuffers.emplace_back(render_params.width, render_params.height);
     }
@@ -883,6 +890,9 @@ void CameraRenderWorker::MaybeAddDirectLighting(const Double3 &travel_dir, const
     
     double mis_weight = MisWeight(lighting_visitor.pdf, bsdf_pdf);
     
+#ifdef DEBUG_BUFFERS 
+    AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_DIRECT, 0, path_weight*lighting_visitor.weight);
+#endif
     AddToImageBuffer(mis_weight*path_weight*lighting_visitor.weight);
 }
 
@@ -903,7 +913,7 @@ bool CameraRenderWorker::MaybeScatterAtSpecularLayer(Ray& ray, const SurfaceInte
     last_scatter_pdf_value = smpl.pdf_or_pmf;
     return true;
   }
-  else 
+  else
     return false;
 }
 
@@ -917,7 +927,7 @@ void CameraRenderWorker::MaybeAddEmission(const Ray& ray, const SurfaceInteracti
     Spectral3 radiance = emitter->Evaluate(interaction.hitid, -ray.dir, context, nullptr);
 
     double mis_weight = 1.0;
-    if (last_scatter_pdf_value)
+    if (last_scatter_pdf_value) // Should be set if this is secondary ray.
     {
         const double prob_select = light_picker.PmfOfLight(*emitter);
         const double area_pdf = emitter->EvaluatePdf(interaction.hitid, context);
@@ -925,6 +935,9 @@ void CameraRenderWorker::MaybeAddEmission(const Ray& ray, const SurfaceInteracti
         mis_weight = MisWeight(*last_scatter_pdf_value, prob_select*area_pdf*pdf_cvt);
     }
 
+#ifdef DEBUG_BUFFERS 
+    AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_BSDF, 0, radiance*weight_accum);
+#endif
     RecordMeasurementToCurrentPixel(mis_weight*radiance*weight_accum);
 }
 
@@ -935,24 +948,28 @@ void CameraRenderWorker::AddEnvEmission(const Double3 &travel_dir, const Spectra
     const auto radiance = emitter.Evaluate(-travel_dir, context);
     
     double mis_weight = 1.0;
-    if (last_scatter_pdf_value)
+    if (last_scatter_pdf_value) // Should be set if this is secondary ray.
     {
         const double prob_select = light_picker.PmfOfLight(emitter);
         const double pdf_env = emitter.EvaluatePdf(-travel_dir, context);
         mis_weight = MisWeight(*last_scatter_pdf_value, pdf_env*prob_select);
     }
   
+#ifdef DEBUG_BUFFERS 
+    AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_BSDF, 0, radiance*path_weight);
+#endif
     RecordMeasurementToCurrentPixel(mis_weight*radiance*path_weight);
 }
 
 
 void CameraRenderWorker::MaybeAddEmission(const Ray& , const VolumeInteraction &interaction, Spectral3& weight_accum)
 {
-  if (interaction.medium().is_emissive)
-  {
-    Spectral3 irradiance = interaction.medium().EvaluateEmission(interaction.pos, context, nullptr);
-    RecordMeasurementToCurrentPixel(irradiance*weight_accum/UnitSphereSurfaceArea);
-  }
+    // TODO: Implement MIS.
+//   if (interaction.medium().is_emissive)
+//   {
+//     Spectral3 irradiance = interaction.medium().EvaluateEmission(interaction.pos, context, nullptr);
+//     RecordMeasurementToCurrentPixel(irradiance*weight_accum/UnitSphereSurfaceArea);
+//   }
 }
 
 
@@ -968,7 +985,8 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
   if (shader.prefer_path_tracing_over_photonmap)
     return;
   Spectral3 reflect_estimator{0.};
-    master->hashgrid_surface->Query(interaction.pos, [&](int photon_idx){
+  master->hashgrid_surface->Query(interaction.pos, [&](int photon_idx)
+  {
     const auto &photon = master->photons_surface[photon_idx];
     // There is minus one because there are two coincident nodes, photon and camera node. But we only want to count one.
     if (photon.node_number + current_node_count - 1 > ray_termination.max_node_count)
@@ -990,10 +1008,11 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
     Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight*bsdf_val, photon.monochromatic | monochromatic);
     reflect_estimator += weight;
 #ifdef DEBUG_BUFFERS 
-    if (photon.node_number < master->debugbuffers.size()) {
-      Spectral3 w = path_weight*weight*photon_surface_blur_weight/master->num_photons_traced;
-      auto color = Color::SpectralSelectionToRGB(w, lambda_selection.indices);
-      master->debugbuffers[photon.node_number].Insert(pixel_index, color);
+    {
+      Spectral3 w = path_weight*weight/master->num_photons_traced;
+      AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_PH, photon.node_number, w);
+      if (last_scatter_pdf_value)
+        AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_BSDF, 0, w);
     }
 #endif
   });
@@ -1017,10 +1036,11 @@ void CameraRenderWorker::AddPhotonContributions(const VolumeInteraction& interac
     Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight*scatter_val*kernel_val, photon.monochromatic | monochromatic);
     inscatter_estimator += weight;
 #ifdef DEBUG_BUFFERS
-    if (photon.node_number < master->debugbuffers.size()) {
-      Spectral3 w = interaction.sigma_s*path_weight*weight*photon_volume_blur_weight*master->num_photons_traced;
-      auto color = Color::SpectralSelectionToRGB(w, lambda_selection.indices);
-      master->debugbuffers[photon.node_number].Insert(pixel_index, color);DirectLightSegmentToEnv(const SurfaceInteraction &surf
+    {
+      Spectral3 w = interaction.sigma_s*path_weight*weight/master->num_photons_traced;
+      AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_PH, photon.node_number, w);
+      if (last_scatter_pdf_value)
+        AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_BSDF, 0, w);
     }
 #endif
   });
@@ -1046,6 +1066,14 @@ void CameraRenderWorker::AddPhotonBeamContributions(const RaySegment &segment, c
     const double kernel_value = EvalKernel(kernel2d, photon.position, segment.ray.PointAt(photon_distance[i]));
     Spectral3 weight = MaybeReWeightToMonochromatic(kernel_value*scatter_val*sigma_s*photon.weight*pct(photon_distance[i]), photon.monochromatic | monochromatic);
     inscatter_estimator += weight;
+#ifdef DEBUG_BUFFERS
+    {
+      Spectral3 w = weight/master->num_photons_traced;
+      AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_PH, photon.node_number, w);
+      if (last_scatter_pdf_value)
+        AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_BSDF, 0, w);
+    }
+#endif
   }
   inscatter_estimator *= path_weight*(1.0/master->num_photons_traced);
   AddToImageBuffer(inscatter_estimator);
@@ -1057,6 +1085,18 @@ void CameraRenderWorker::AddToImageBuffer(const Spectral3& measurement_estimate)
   auto color = Color::SpectralSelectionToRGB(measurement_estimate, lambda_selection.indices);
   master->buffer.Insert(pixel_index, color);
 }
+
+#ifdef DEBUG_BUFFERS
+void CameraRenderWorker::AddToDebugBuffer(int id, int level, const Spectral3 &measurement_estimate)
+{
+    assert (level >= 0);
+    if (id == PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_PH && (level >= PhotonmappingRenderingAlgo::DEBUGBUFFER_DEPTH))
+      return;
+    Spectral3ImageBuffer &buf = master->debugbuffers[id+level];
+    auto color = Color::SpectralSelectionToRGB(measurement_estimate, lambda_selection.indices);
+    buf.Insert(pixel_index, color);
+}
+#endif
 
 
 } // Namespace
