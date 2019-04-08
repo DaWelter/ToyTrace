@@ -1060,7 +1060,7 @@ void CameraRenderWorker::AddPhotonBeamContributions(const RaySegment &segment, c
     const auto &photon = master->photons_volume[photon_idx[i]];
     // There is no -1 because  there is no interaction point on the query path. The interaction comes from the photon.
     if (photon.node_number + current_node_count > ray_termination.max_node_count) 
-      return;
+      continue;
     Spectral3 scatter_val = medium.EvaluatePhaseFunction(-segment.ray.dir, photon.position, -photon.direction.cast<double>(), context, nullptr);
     auto [sigma_s, _] = medium.EvaluateCoeffs(photon.position, context);
     const double kernel_value = EvalKernel(kernel2d, photon.position, segment.ray.PointAt(photon_distance[i]));
