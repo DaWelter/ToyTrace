@@ -5,6 +5,34 @@
 #include "light.hxx"
 #include "util.hxx"
 
+class LightRef
+{
+    std::uint32_t type : 2;
+    std::uint32_t geom_idx : 30;
+    std::uint32_t prim_idx;
+    friend class LightPicker;
+};
+static_assert(sizeof(LightRef) == 8);
+
+
+class LightPicker
+{
+public:
+    virtual LightRef PickLight(Sampler &sampler) const;
+    virtual void ObserveLightContribution(const LightRef &lr, const Spectral3 &radiance);
+    
+    template<class Visitor> 
+    void PickLight(Sampler &sampler, Visitor &&visitor) const
+    {
+        LightRef lr = PickLight(sampler);
+        switch (lr.type)
+        {
+            // case ...
+            
+        }
+    }
+};
+
 
 using  AlgorithmParameters = RenderingParameters;
 namespace ROI = RadianceOrImportance;
