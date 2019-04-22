@@ -207,7 +207,7 @@ namespace OnlineVariance
 // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Online_algorithm
 // sqr_deviation_sum = M_2,n
 template<class T>
-void Update(T& mean, T &sqr_deviation_sum, int &num_previous_samples, const T &new_x)
+inline void Update(T& mean, T &sqr_deviation_sum, int &num_previous_samples, const T &new_x)
 {
   ++num_previous_samples;
   T delta = new_x - mean;
@@ -217,7 +217,7 @@ void Update(T& mean, T &sqr_deviation_sum, int &num_previous_samples, const T &n
 }
 
 template<class T>
-T FinalizeVariance(const T &sqr_deviation_sum, int num_samples)
+inline T FinalizeVariance(const T &sqr_deviation_sum, int num_samples)
 {
   if (num_samples < 2)
     return T{NaN};
