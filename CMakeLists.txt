@@ -77,7 +77,7 @@ if(NOT WIN32)
 else()
     include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
     add_compile_options(-std:c++17)
-    add_definitions(-DNOMINMAX)
+    add_definitions(-DNOMINMAX -D_CRT_SECURE_NO_WARNINGS -D_NOEXCEPT=noexcept)
 endif(NOT WIN32)
     
 set(Cubature_DIR "external/cubature")
