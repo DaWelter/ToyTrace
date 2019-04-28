@@ -59,8 +59,8 @@ inline Float2 PixelCenterToUv(const Texture &tex, std::pair<int,int> xy)
 {
   const int w = tex.Width();
   const int h = tex.Height();
-  Float2 uv( xy.first,
-             h - 1 - xy.second );
+  Float2 uv( (float)(xy.first),
+             (float)(h - 1 - xy.second));
   uv.array() += 0.5f;
   uv[0] /= w;
   uv[1] /= h;
@@ -72,8 +72,8 @@ inline std::pair<Float2,Float2> PixelToUvBounds(const Texture &tex, std::pair<in
   const int w = tex.Width();
   const int h = tex.Height();
   Float2 uv_lower( 
-    xy.first,
-    xy.second );
+    (float)xy.first,
+    (float)xy.second );
   uv_lower[0] /= w;
   uv_lower[1] /= h;
   Float2 uv_upper = uv_lower;
