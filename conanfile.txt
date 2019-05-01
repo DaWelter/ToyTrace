@@ -15,6 +15,7 @@ eigen/3.3.5@dawelter/testing
 [options]
 Assimp:shared=True
 openexr:shared=True
+yaml-cpp:shared=False
 
 [generators]
 cmake

@@ -78,6 +78,7 @@ else()
     include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
     add_compile_options(-std:c++17)
     add_definitions(-DNOMINMAX -D_CRT_SECURE_NO_WARNINGS -D_NOEXCEPT=noexcept)
+    conan_basic_setup()
 endif(NOT WIN32)
     
 set(Cubature_DIR "external/cubature")
@@ -88,8 +89,6 @@ set(SOURCES src/image.cxx  src/parsenff.cxx  src/shader.cxx src/ray.cxx src/samp
             src/light.cxx src/texture.cxx src/embreeaccelerator.cxx src/scene.cxx src/lightpicker_trivial.cxx src/renderingalgorithms_photonmap.cxx 
             src/rendering_util.cxx src/pathlogger.cxx src/photonintersector.cxx)
 add_executable(toytrace src/toytrace.cxx ${SOURCES})
-
-
 
 
 if(BuildTests)
@@ -109,7 +108,7 @@ if(NOT WIN32)
         endforeach()
     endif(BuildTests)
 else()
-    conan_basic_setup(toytrace)
+    target_link_libraries(toytrace ${CONAN_LIBS})
 endif()
     
 # # For qtcreator to display all header files. (https://stackoverflow.com/questions/28384935/qtcreator-cmake-project-how-to-show-all-project-files)
