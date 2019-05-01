@@ -61,7 +61,7 @@ public:
         {
           for (int i=0; i<3; ++i)
           {
-            rgb[i] = convert_linear_to_srgb ? value(Color::LinearToSRGB(average[i])*255.999_rgb) : value(average[i]*255.999_rgb);
+            rgb[i] = Image::uchar(convert_linear_to_srgb ? value(Color::LinearToSRGB(average[i])*255.999_rgb) : value(average[i]*255.999_rgb));
           }
           dest.set_pixel(x, dest.height() - 1 - y, rgb[0], rgb[1], rgb[2]);
         }

@@ -260,7 +260,7 @@ inline OrthogonalSystemZAligned(const Eigen::MatrixBase<Derived> &_Z)
   Z = _Z;
   ASSERT_NORMALIZED(Z);
   // Listing 3 in Duff et al. (2017) "Building an Orthonormal Basis, Revisited".
-  Scalar sign = std::copysignf(Scalar(1.0f), Z[2]);
+  Scalar sign = std::copysign(Scalar(1.0f), Z[2]);
   const Scalar a = Scalar(-1.0) / (sign + Z[2]);
   const Scalar b = Z[0] * Z[1] * a;
   X = Eigen::Matrix<Scalar,3,1>(Scalar(1.0f) + sign * Z[0] * Z[0] * a, sign * b, -sign * Z[0]);
@@ -273,7 +273,7 @@ inline auto Take(const Eigen::ArrayBase<Derived>& u, const Eigen::Array<int, M, 
 {
   using Scalar = typename Eigen::internal::traits<Derived>::Scalar;
   Eigen::Array<Scalar,M,1> ret;
-  for (int i=0; i<indices.size(); ++i)
+  for (decltype(indices.size()) i=0; i<indices.size(); ++i)
   {
     assert(indices[i] >= 0 && indices[i]<u.size());
     ret[i] = u[indices[i]];
@@ -322,12 +322,12 @@ inline auto KartesianToSpherical(const Eigen::MatrixBase<Derived> &xyz)
   if (ax > az)
   {
     phi = std::atan2(z,ax);
-    phi = (x > 0.) ? phi : Pi - phi;
+    phi = (x > Scalar(0)) ? phi : Scalar(Pi) - phi;
   }
   else
   {
     phi = std::atan2(x,az);
-    phi = (z > 0.) ? Pi/2.-phi : 3./2.*Pi + phi;
+    phi = (z > Scalar(0)) ? Scalar(Pi/2.)-phi : Scalar(3./2.*Pi )+ phi;
   }
   return Eigen::Matrix<Scalar,2,1>{phi, theta};
 }
@@ -341,7 +341,7 @@ inline auto SphericalToUnitKartesian(const Eigen::MatrixBase<Derived> &angles)
   const Scalar phi   = angles[0];
   const Scalar z = std::cos(theta);
   Scalar r = std::sqrt(Scalar(1)-z*z);
-  r = std::isnan(r) ? 0. : r;
+  r = std::isnan(r) ? Scalar(0) : r;
   const Scalar x = r*std::cos(phi);
   const Scalar y = r*std::sin(phi);
   return Eigen::Matrix<Scalar,3,1>{x,y,z};

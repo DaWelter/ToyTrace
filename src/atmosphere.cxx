@@ -386,7 +386,7 @@ void TabulatedConstituents::ComputeCollisionCoefficients(double altitude, Spectr
     sigma_a = sigma_s = Spectral3::Zero();
     return;
   }
-  int idx = real_index; // Cutting the fractional part amounts to going to the grid site which is lower in altitude.
+  auto idx = (int)real_index; // Cutting the fractional part amounts to going to the grid site which is lower in altitude.
   if (idx >= 0)
   {
     double f = real_index - idx; // The fractional part.
@@ -408,7 +408,7 @@ void TabulatedConstituents::ComputeCollisionCoefficients(double altitude, Spectr
 void TabulatedConstituents::ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent, const Index3& lambda_idx) const
 {
   double real_index = RealTableIndex(altitude);
-  int idx = real_index;
+  auto idx = (int)real_index;
   if (idx >= 0 && idx < AltitudeTableSize()-1)
   {
     double f = real_index - idx; // The fractional part.
@@ -432,7 +432,7 @@ double TabulatedConstituents::ComputeSigmaTMajorante(double altitude, const Inde
 {
   int lambda_idx_primary = LambdaSelectionStrategy::PrimaryIndex(lambda_idx);
   double real_index = RealTableIndex(altitude);
-  int idx = real_index;
+  auto idx = (int)real_index;
   if (idx >= 0 && idx < AltitudeTableSize()-1)
   {
     double f = real_index - idx; // The fractional part.

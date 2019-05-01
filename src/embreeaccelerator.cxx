@@ -3,6 +3,12 @@
 #include "ray.hxx"
 #include "vec3f.hxx"
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4244)  // Float to double conversion. I don't care. There are too many of them, and it is too much of a mess to try to make it right.
+#endif
+
+
 EmbreeAccelerator::EmbreeAccelerator()
 {
   rtdevice = rtcNewDevice(nullptr);
@@ -301,3 +307,7 @@ Box EmbreeAccelerator::GetSceneBounds() const
   }
   return b;
 }
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif

@@ -57,6 +57,10 @@ struct Material
 
 class Scene
 {
+public:
+  using index_t = scene_index_t;
+
+private:
   friend class NFFParser;
   friend struct Scope;
   friend class EmbreeAccelerator;
@@ -92,12 +96,12 @@ public:
   void ParseNFFString(const std::string &scenestr, RenderingParameters *render_params = nullptr);
   void ParseNFF(std::istream &is, RenderingParameters *render_params = nullptr);
    
-  int GetNumLights() const
+  index_t GetNumLights() const
   {
-    return lights.size();
+    return (index_t)lights.size();
   }
   
-  const Light& GetLight(int i) const
+  const Light& GetLight(index_t i) const
   {
     return *lights[i];
   }
@@ -127,7 +131,7 @@ public:
     return camera!=nullptr;
   }
   
-  const Material& GetMaterialOf(int geom_idx, int prim_idx) const;
+  const Material& GetMaterialOf(index_t geom_idx, index_t prim_idx) const;
   
   const Material& GetMaterialOf(const PrimRef ref) const;
     
@@ -145,22 +149,22 @@ public:
   
   void Append(const Spheres &other_spheres);
   
-  inline int GetNumGeometries() const
+  inline index_t GetNumGeometries() const
   {
     return 2;
   }
   
-  inline const Geometry& GetGeometry(int i) const
+  inline const Geometry& GetGeometry(index_t i) const
   {
     return *new_primitives[i];
   }
   
-  inline int GetNumMaterials() const
+  inline index_t GetNumMaterials() const
   {
-    return materials.size();
+    return (index_t)materials.size();
   }
   
-  inline const Material& GetMaterial(int i) const
+  inline const Material& GetMaterial(index_t i) const
   {
     return materials[i];
   }

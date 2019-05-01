@@ -3,7 +3,15 @@
 
 namespace RadianceOrImportance 
 {
-  
+ 
+TotalEnvironmentalRadianceField::TotalEnvironmentalRadianceField(const IndividualLights &envlights_) 
+  : envlights{ envlights_ } 
+{
+  if (envlights.size() > std::numeric_limits<int>::max())
+    throw std::range_error("Cannot handle that many env lights!");
+}
+
+
 inline const EnvironmentalRadianceField& TotalEnvironmentalRadianceField::get(int i) const 
 { 
   return *envlights[i];
@@ -11,7 +19,7 @@ inline const EnvironmentalRadianceField& TotalEnvironmentalRadianceField::get(in
 
 inline int TotalEnvironmentalRadianceField::size() const 
 { 
-  return envlights.size(); 
+  return (int)envlights.size(); 
 }
   
 DirectionalSample TotalEnvironmentalRadianceField::TakeDirectionSample(Sampler& sampler, const PathContext& context) const
@@ -111,8 +119,9 @@ std::pair<int,int> EnvMapLight::MapToImage(const Double3 &dir_out) const
 DirectionalSample EnvMapLight::TakeDirectionSample(Sampler &sampler, const PathContext &context) const
 {
 #if ENV_MAP_IMPORTANCE_SAMPLING // No importance sampling
-    int pixel_index = TowerSamplingBisection(AsSpan(cmf), sampler.Uniform01());
-    int x, y; std::tie(x,y) = RowMajorPixel(pixel_index, texture->Width(), texture->Height());
+    auto pixel_index = TowerSamplingBisection(AsSpan(cmf), sampler.Uniform01());
+    assert(pixel_index <= texture->Width()*texture->Height());
+    int x, y; std::tie(x,y) = RowMajorPixel((int)pixel_index, texture->Width(), texture->Height());
     auto uv_bounds = PixelToUvBounds(*texture,{x, y});
     Float2 angles_lower = Projections::UvToSpherical(uv_bounds.first);
     Float2 angles_upper = Projections::UvToSpherical(uv_bounds.second);

@@ -5,7 +5,7 @@
 #include "util.hxx"
 #include "box.hxx"
 
-
+using scene_index_t = std::int32_t;
 static constexpr int INVALID_PRIM_INDEX {-1};
 
 struct PrimRef // Reference to Primitive
@@ -34,6 +34,7 @@ struct HitId : public PrimRef
 class Geometry
 {
 public:
+  using index_t = scene_index_t;
   unsigned int identifier = { (unsigned int)-1 }; // Used by embree. It's the geometry identifier.
   enum Type {
     PRIMITIVES_TRIANGLES,
@@ -43,9 +44,9 @@ public:
   
   Geometry(Type _t) : type{_t} {}
   virtual ~Geometry() = default;
-  virtual HitId SampleUniformPosition(int index, Sampler &sampler) const = 0;
-  virtual double Area(int index) const = 0;
-  virtual int Size() const = 0;
+  virtual HitId SampleUniformPosition(index_t index, Sampler &sampler) const = 0;
+  virtual double Area(index_t index) const = 0;
+  virtual index_t Size() const = 0;
   virtual void GetLocalGeometry(SurfaceInteraction &interaction) const = 0;
 };
 
@@ -65,17 +66,17 @@ class Mesh : public Geometry
     Vectors3d normals; // Per vertex.
     Vectors2d uvs; // Per vertex.
 
-    Mesh(int num_triangles, int num_vertices);
+    Mesh(index_t num_triangles, index_t num_vertices);
     
     void Append(const Mesh &other);
     void MakeFlatNormals();
     
-    inline int NumVertices() const { return vertices.rows(); }
-    inline int NumTriangles() const { return vert_indices.rows(); }
+    inline index_t NumVertices() const { return (index_t)vertices.rows(); }
+    inline index_t NumTriangles() const { return (index_t)vert_indices.rows(); }
     
-    HitId SampleUniformPosition(int index, Sampler &sampler) const override;
-    double Area(int index) const override;
-    int Size() const override { return int{NumTriangles()}; }
+    HitId SampleUniformPosition(index_t index, Sampler &sampler) const override;
+    double Area(index_t index) const override;
+    index_t Size() const override { return NumTriangles(); }
     void GetLocalGeometry(SurfaceInteraction &interaction) const override;
 };
 
@@ -92,11 +93,11 @@ class Spheres : public Geometry
     Spheres();
     void Append(const Float3 pos, const float radius, MaterialIndex material_index);
     void Append(const Spheres &other);
-    inline int NumSpheres() const { return spheres.size(); }
-    inline std::pair<Float3, float> Get(int i) const;
-    HitId SampleUniformPosition(int index, Sampler &sampler) const override;
-    double Area(int index) const override;
-    int Size() const override { return int{NumSpheres()}; }
+    inline index_t NumSpheres() const { return (index_t)spheres.size(); }
+    inline std::pair<Float3, float> Get(index_t i) const;
+    HitId SampleUniformPosition(index_t index, Sampler &sampler) const override;
+    double Area(index_t index) const override;
+    int Size() const override { return NumSpheres(); }
     void GetLocalGeometry(SurfaceInteraction &interaction) const override;
 };
 

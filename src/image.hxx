@@ -88,7 +88,7 @@ private:
   }  priv;
   
   uchar col[3];
-  double opacity;
+  float opacity;
 };
 
 

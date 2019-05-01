@@ -8,8 +8,11 @@
 template<class T>
 class Span
 {
-  using size_t = std::size_t;
-  
+public:
+  using size_t = std::ptrdiff_t;
+  using index_t = std::ptrdiff_t;
+
+private:
   T* _begin;
   size_t _size;
 
@@ -18,13 +21,13 @@ public:
     : _begin{begin}, _size{size}
   {}
   
-  T operator[](const int idx) const 
+  T operator[](const size_t idx) const 
   {
     assert (idx >= 0 && (size_t)idx < _size);
     return _begin[idx];
   }
   
-  T& operator[](const int idx)
+  T& operator[](const size_t idx)
   {
     assert (idx >= 0 && (size_t)idx < _size);
     return _begin[idx];
@@ -55,7 +58,7 @@ inline Span<T> AsSpan(std::vector<T, Alloc> &v)
 }
 
 template<class T>
-inline Span<T> Subspan(Span<T> s, int offset, int size)
+inline Span<T> Subspan(Span<T> s, typename Span<T>::index_t offset, typename Span<T>::size_t size)
 {
   assert((offset >= 0) && (offset + size <= s.size()));
   return Span<T>(s.begin() + offset, size);

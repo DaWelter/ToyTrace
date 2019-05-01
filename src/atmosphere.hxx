@@ -74,7 +74,7 @@ struct TabulatedConstituents
   double upper_altitude_cutoff;
   double delta_h, inv_delta_h;
   
-  inline int AltitudeTableSize() const { return sigma_t_majorante.size(); }
+  inline int AltitudeTableSize() const { return (int)sigma_t_majorante.size(); }
   inline double RealTableIndex(double altitude) const { return (altitude - lower_altitude_cutoff)*inv_delta_h; }
   
   TabulatedConstituents(const TabulatedConstituents &other) = default;

@@ -5,10 +5,10 @@ TrivialLightPicker::TrivialLightPicker(const Scene& _scene)
 {
   FindAreaLightGeometry();
   FindVolumeLightGeometry();
-  const double nl = scene.GetNumLights();
-  const double ne = scene.HasEnvLight() ? 1 : 0;
-  const double na = arealight_refs.size();
-  const double nv = volume_light_refs.size();
+  const auto nl = (double)scene.GetNumLights();
+  const auto ne = (double)(scene.HasEnvLight() ? 1 : 0);
+  const auto na = (double)(arealight_refs.size());
+  const auto nv = (double)(volume_light_refs.size());
   // Why do I need to initialize like this to not get a negative number in IDX_PROB_POINT?
   // I mean when nl is zero and I assign an initializer list, the last entry is going to be like -something.e-42. Why???
   const double normalize_factor = 1. / (nl + ne + na + nv);

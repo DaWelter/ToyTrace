@@ -298,7 +298,7 @@ class TotalEnvironmentalRadianceField : public EnvironmentalRadianceField
   const EnvironmentalRadianceField& get(int i) const;
   int size() const;
 public:
-  TotalEnvironmentalRadianceField(const IndividualLights &envlights_) : envlights{envlights_} {}
+  TotalEnvironmentalRadianceField(const IndividualLights &envlights_);
   DirectionalSample TakeDirectionSample(Sampler &sampler, const PathContext &context) const override;
   Spectral3 Evaluate(const Double3 &emission_dir, const PathContext &context) const override;
   double EvaluatePdf(const Double3 &dir_out, const PathContext &context) const override;

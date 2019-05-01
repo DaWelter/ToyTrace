@@ -46,8 +46,8 @@ inline std::pair<int, int> UvToPixel(const Texture &tex, Float2 uv)
   if (v < 0.f) v = 1.f + v;
   if (u > 1.f - EpsilonFloat) u -= EpsilonFloat;
   if (v > 1.f - EpsilonFloat) v -= EpsilonFloat;
-  int x = u * w;
-  int y = v * h;
+  int x = (int)(u * w);
+  int y = (int)(v * h);
   y = h - y - 1;
   assert (x>=0 && x<tex.Width());
   assert (y>=0 && y<tex.Height());

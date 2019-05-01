@@ -152,7 +152,7 @@ void Image::set_pixel(int x, int y, Image::uchar r, Image::uchar g, Image::uchar
 
 void Image::SetOpacity( double a )
 {
-  opacity = a;
+  opacity = (float)a;
 }
 
 // bool Image::WritePNM( const std::string &filename ) const
@@ -224,7 +224,7 @@ void Image::DrawPoint( int x, int y, int w )
 
 void Image::MyDrawText( int x, int y, const char* text, const Image::uchar* colbg )
 {
-	TOCIMG(priv)->draw_text(x, y, text, col, colbg, 11, opacity );
+	TOCIMG(priv)->draw_text(x, y, text, col, colbg, opacity, 11);
 }
 
 #if 1

@@ -140,21 +140,24 @@ inline int TowerSampling(const T *probs, T r)
 
 
 template<class T>
-inline int BisectionSearch(Span<const T> vals, T r)
+inline auto BisectionSearch(Span<const T> vals, T r)
 {
+  using index_t = decltype(vals)::index_t;
+  static_assert(index_t(-1) < 0); // Should be signed type
+
   //         p0       (p0+p1)       (p0+p1+p2) ...                   (p0+...+pn-1==1)
   // |  i=0   |    i=1   |      i=2      |     ...   |        i=n-1          |
   //          0          1               2                                  n-1
   assert (vals.size() > 0);
   if (r < vals[0])
-    return 0;
+    return (index_t)0;
   if (r >= vals[vals.size()-1])
-    return vals.size();
-  int first = 0;
-  int last = vals.size()-1;
+    return (index_t)vals.size();
+  index_t first = 0;
+  index_t last = (index_t)vals.size()-1;
   while (last > first+1)
   {
-    int center = (first+last)/2;
+    index_t center = (first+last)/2;
     if  (r<vals[center])
       last = center;
     else
@@ -166,9 +169,9 @@ inline int BisectionSearch(Span<const T> vals, T r)
 
 
 template<class T>
-inline int TowerSamplingBisection(Span<const T> cmf, T r)
+inline auto TowerSamplingBisection(Span<const T> cmf, T r)
 {
-  int upper = BisectionSearch(cmf, r);
+  auto upper = BisectionSearch(cmf, r);
   // E.g. if upper is zero, then r<p0, and we have to return upper to 
   // indicate that the random sample has fallen into the zero-th bin.
   upper = upper>=cmf.size() ? cmf.size()-1 : upper;
@@ -179,19 +182,20 @@ inline int TowerSamplingBisection(Span<const T> cmf, T r)
 template<class T>
 inline void TowerSamplingComputeNormalizedCumSum(Span<T> weights)
 {
-  for (int i=1; i<weights.size(); ++i)
+  using index_t = decltype(weights.size());
+  for (index_t i=1; i<weights.size(); ++i)
   {
     weights[i] += weights[i-1];
   }
   T inv_sum = T(1)/weights[weights.size()-1];
-  for (int i=0; i<weights.size(); ++i)
+  for (index_t i=0; i<weights.size(); ++i)
   {
     weights[i] *= inv_sum;
   }
 }
 
 template<class T>
-inline T TowerSamplingProbabilityFromCmf(Span<T> cmf, int idx)
+inline T TowerSamplingProbabilityFromCmf(Span<T> cmf, typename Span<T>::index_t idx)
 {
   return cmf[idx] - (idx>0 ? cmf[idx-1] : T(0));
 }

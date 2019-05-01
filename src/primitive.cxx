@@ -7,7 +7,7 @@
 // {}
 
 
-Mesh::Mesh(int num_triangles, int num_vertices)
+Mesh::Mesh(index_t num_triangles, index_t num_vertices)
   : Geometry{Geometry::PRIMITIVES_TRIANGLES}
 {
   // Using Eigen::NoChange because number of columns is fixed by compile time constant.
@@ -48,12 +48,12 @@ void Mesh::MakeFlatNormals()
 {
   auto old_vertices = vertices;
   auto old_uvs      = uvs;
-  int num_vertices = NumTriangles()*3;
+  auto num_vertices = NumTriangles()*3;
   vertices.resize(num_vertices, Eigen::NoChange);
   normals.resize(num_vertices, Eigen::NoChange);
   uvs.resize(num_vertices, Eigen::NoChange);
-  int k = 0;
-  for (int i=0; i<NumTriangles(); ++i)
+  index_t k = 0;
+  for (index_t i=0; i<NumTriangles(); ++i)
   {
     auto a = vert_indices(i, 0);
     auto b = vert_indices(i, 1);
@@ -61,7 +61,7 @@ void Mesh::MakeFlatNormals()
     Float3 d1 = old_vertices.row(b)-old_vertices.row(a);
     Float3 d2 = old_vertices.row(c)-old_vertices.row(a);
     Float3 n = Normalized(Cross(d1, d2));
-    for (int j=0; j<3; ++j)
+    for (index_t j=0; j<3; ++j)
     {
       auto v_idx = vert_indices(i, j);
       vertices.row(k) = old_vertices.row(v_idx);
@@ -88,13 +88,18 @@ static void AppendVertical(M &a, const M &b)
 
 void  Mesh::Append(const Mesh &other)
 {
-  int tri_start = vert_indices.rows();
-  int vert_start = vertices.rows();
+  // a + b > overflow => b > overflow - a
+  if (other.NumTriangles() > std::numeric_limits<decltype(NumTriangles())>::max() - NumTriangles())
+    throw std::range_error("Cannot handle that many triangles in a mesh.");
+  if (other.NumVertices() > std::numeric_limits<decltype(NumVertices())>::max() - NumVertices())
+    throw std::range_error("Cannot handle that many vertices in a mesh.");
+  auto tri_start = vert_indices.rows();
+  auto vert_start = vertices.rows();
   AppendVertical(vertices, other.vertices);
   AppendVertical(normals, other.normals);
   AppendVertical(uvs, other.uvs);
   AppendVertical(vert_indices, other.vert_indices);
-  for (int i=tri_start; i<vert_indices.rows(); ++i)
+  for (auto i=tri_start; i<vert_indices.rows(); ++i)
   {
     vert_indices(i, 0) += vert_start;
     vert_indices(i, 1) += vert_start;
@@ -110,9 +115,9 @@ void Mesh::GetLocalGeometry(SurfaceInteraction& ia) const
 {
   assert(ia.hitid.geom == this);
   assert(ia.hitid.index >= 0 && ia.hitid.index < Size());
-  const int a = vert_indices(ia.hitid.index, 0),
-            b = vert_indices(ia.hitid.index, 1),
-            c = vert_indices(ia.hitid.index, 2);
+  const auto a = vert_indices(ia.hitid.index, 0),
+             b = vert_indices(ia.hitid.index, 1),
+             c = vert_indices(ia.hitid.index, 2);
   const Float3 f = ia.hitid.barry.cast<float>();
   const Float3 pos =  f[0] * vertices.row(a) +
                       f[1] * vertices.row(b) +
@@ -134,7 +139,7 @@ void Mesh::GetLocalGeometry(SurfaceInteraction& ia) const
 }
 
 
-HitId Mesh::SampleUniformPosition(int index, Sampler &sampler) const
+HitId Mesh::SampleUniformPosition(index_t index, Sampler &sampler) const
 {
   return HitId{
     this,
@@ -144,12 +149,12 @@ HitId Mesh::SampleUniformPosition(int index, Sampler &sampler) const
 }
 
 
-double Mesh::Area(int index) const
+double Mesh::Area(index_t index) const
 {
   assert(index >= 0 && index < Size());
-  const int a = vert_indices(index, 0),
-            b = vert_indices(index, 1),
-            c = vert_indices(index, 2);
+  const auto a = vert_indices(index, 0),
+             b = vert_indices(index, 1),
+             c = vert_indices(index, 2);
   const Float3 n(Cross(vertices.row(b)-vertices.row(a),vertices.row(c)-vertices.row(a)));
   return 0.5*Length(n);
 }
@@ -177,6 +182,8 @@ Spheres::Spheres()
 
 void Spheres::Append(const Float3 pos, const float radius, MaterialIndex material_index)
 {
+  if (Size() >= std::numeric_limits<decltype(Size())>::max())
+    throw std::range_error("Cannot handle that many spheres in a geometry.");
   spheres.push_back(Vector4f{pos[0], pos[1], pos[2], radius});
   material_indices.push_back(material_index);
 }
@@ -184,13 +191,16 @@ void Spheres::Append(const Float3 pos, const float radius, MaterialIndex materia
 
 void Spheres::Append(const Spheres& other)
 {
+  if (other.Size() > std::numeric_limits<decltype(Size())>::max() - Size())
+    throw std::range_error("Cannot handle that many spheres in a geometry.");
   spheres.insert(spheres.end(), other.spheres.begin(), other.spheres.end());
   material_indices.insert(material_indices.end(), other.material_indices.begin(), other.material_indices.end());
 }
 
 
-HitId Spheres::SampleUniformPosition(int index, Sampler &sampler) const
+HitId Spheres::SampleUniformPosition(index_t index, Sampler &sampler) const
 {
+  assert(index >= 0 && index < spheres.size());
   float rad     = spheres[index][3];
   Double3 barry = rad*SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
   return HitId{
@@ -201,8 +211,9 @@ HitId Spheres::SampleUniformPosition(int index, Sampler &sampler) const
 }
 
 
-double Spheres::Area(int index) const
+double Spheres::Area(index_t index) const
 {
+  assert(index >= 0 && index < spheres.size());
   float radius = spheres[index][3];
   return Sqr(radius)*UnitSphereSurfaceArea;
 }
