@@ -78,6 +78,7 @@ else()
     include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
     add_compile_options(-std:c++17)
     add_definitions(-DNOMINMAX -D_CRT_SECURE_NO_WARNINGS -D_NOEXCEPT=noexcept)
+    add_definitions(-D_SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING) # Mostly for YAML-Cpp
     conan_basic_setup()
 endif(NOT WIN32)
     
