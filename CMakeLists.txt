@@ -79,6 +79,7 @@ else()
     add_compile_options(-std:c++17)
     add_definitions(-DNOMINMAX -D_CRT_SECURE_NO_WARNINGS -D_NOEXCEPT=noexcept)
     add_definitions(-D_SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING) # Mostly for YAML-Cpp
+    add_definitions(-DNOGDI -DWIN32_LEAN_AND_MEAN) # Don't let windows api pollute the global namespace with silly macros. windows.h is included by TBB. Nothing else I can do about that.
     conan_basic_setup()
 endif(NOT WIN32)
     
@@ -110,6 +111,12 @@ if(NOT WIN32)
     endif(BuildTests)
 else()
     target_link_libraries(toytrace ${CONAN_LIBS})
+    if (BuildTests)
+      foreach(EXE tests tests2)
+        target_include_directories(${EXE} PUBLIC ${GTEST_INCLUDE_DIRS} ${Cubature_DIR})
+        target_link_libraries(${EXE} ${CONAN_LIBS})
+      endforeach()
+    endif(BuildTests)
 endif()
     
 # # For qtcreator to display all header files. (https://stackoverflow.com/questions/28384935/qtcreator-cmake-project-how-to-show-all-project-files)

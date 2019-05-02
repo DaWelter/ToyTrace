@@ -1,6 +1,8 @@
 #include "gtest/gtest.h"
 
+#ifdef HAVE_JSON
 #include <rapidjson/document.h>
+#endif
 
 #include "cubature_wrapper.hxx"
 #include "cubemap.hxx"

@@ -5,10 +5,11 @@
 #include <iostream>
 #include <fstream>
 
-
+#ifdef HAVE_JSON
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/prettywriter.h>
+#endif
 
 #include "cubature_wrapper.hxx"
 #include "cubemap.hxx"

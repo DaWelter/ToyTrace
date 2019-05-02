@@ -6,6 +6,7 @@
 #define cimg_use_jpeg 1
 #define cimg_debug 0
 #ifdef _MSC_VER 
+#undef NOGDI // Make API available.
 #define cimg_OS 2
 #else
 #define cimg_OS 1
