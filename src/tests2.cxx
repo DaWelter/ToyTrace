@@ -747,7 +747,7 @@ struct JustDataDerived : public JustDataBase
 TEST(Boost, VariantPolymorphic)
 {
   using namespace VariantTestDetail;
-  using StorageType = boost::variant<PolyBase, PolyDerived1, PolyDerived2, PolyDerived21>;
+  using StorageType = boost::variant<PolyDerived1, PolyDerived2, PolyDerived21>;
   StorageType stack_based_storage{PolyDerived2{}};
   EXPECT_EQ(boost::polymorphic_get<PolyBase>(stack_based_storage).anumber(), 2);
   
