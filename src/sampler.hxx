@@ -142,7 +142,7 @@ inline int TowerSampling(const T *probs, T r)
 template<class T>
 inline auto BisectionSearch(Span<const T> vals, T r)
 {
-  using index_t = decltype(vals)::index_t;
+  using index_t = typename decltype(vals)::index_t;
   static_assert(index_t(-1) < 0); // Should be signed type
 
   //         p0       (p0+p1)       (p0+p1+p2) ...                   (p0+...+pn-1==1)

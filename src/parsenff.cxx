@@ -175,6 +175,7 @@ private:
   void ParseMesh(const fs::path &filename, Scope &scope);
   MaterialIndex GetMaterialIndexOfCurrentParams(const Scope &scope);
   MaterialIndex MaterialInsertAndOrGetIndex(const Material &m);
+  void AddModel(const Mesh &m, const Scope &scope);
   void InsertAndActivate(const char*, Scope &scope, std::unique_ptr<Medium> x);
   void InsertAndActivate(const char*, Scope &scope, std::unique_ptr<Shader> x);
   bool NextLine();
@@ -359,7 +360,8 @@ void NFFParser::Parse(Scope &scope)
       {
           pos = scope.currentTransform*pos;
           MaterialIndex current_material_index = GetMaterialIndexOfCurrentParams(scope);
-          scene->spheres->Append(pos.cast<float>(), rad, current_material_index);
+          auto* spheres = scope.areaemitters() ? scene->spheres_emissive.get() : scene->spheres.get();
+          spheres->Append(pos.cast<float>(), rad, current_material_index);
       }
       else throw MakeException("Error");
       continue;
@@ -412,7 +414,7 @@ void NFFParser::Parse(Scope &scope)
         mesh.MakeFlatNormals();
       
       // TODO: This is O(n*n)! Collect all meshes and concatenate them all at once in the end.
-      scene->Append(mesh);
+      AddModel(mesh, scope);
       continue;
     }
     
@@ -1245,7 +1247,7 @@ private:
     for (int i=0; i<mesh.NumTriangles(); ++i)
       mesh.material_indices[i] = mat_idx;
     
-    scene.Append(mesh);
+    parser.AddModel(mesh, scope);
   }
   
   
@@ -1352,6 +1354,12 @@ MaterialIndex NFFParser::MaterialInsertAndOrGetIndex(const Material& m)
     scene->materials.push_back(m);
     return MaterialIndex(scene->materials.size()-1);
   });
+}
+
+
+void NFFParser::AddModel(const Mesh &m, const Scope &scope)
+{
+  scene->Append(m);
 }
 
 

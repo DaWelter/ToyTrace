@@ -59,7 +59,8 @@ class Scene
 {
 public:
   using index_t = scene_index_t;
-
+  static constexpr MaterialIndex DEFAULT_MATERIAL_INDEX{0};
+  
 private:
   friend class NFFParser;
   friend struct Scope;
@@ -71,21 +72,22 @@ private:
 
   EmbreeAccelerator embreeaccelerator;
   std::unique_ptr<Camera> camera;
-  std::vector<Material> materials;
-  // TODO: seperate emissive geometries to make things a little simpler?
+  ToyVector<Material> materials;
   std::unique_ptr<Mesh> triangles;
+  std::unique_ptr<Mesh> triangles_emissive;
   std::unique_ptr<Spheres> spheres;
-  Geometry* new_primitives[2];
+  std::unique_ptr<Spheres> spheres_emissive;
+  std::array<Geometry*,4> new_primitives;
   Medium* empty_space_medium;
   Shader* invisible_shader;
   Shader* default_shader;
   MaterialIndex default_material_index;
   MaterialIndex vacuum_material_index;
-  std::vector<std::unique_ptr<Shader>> shaders;
-  std::vector<std::unique_ptr<Medium>> media;
-  std::vector<std::unique_ptr<EnvironmentalRadianceField>> envlights;
-  std::vector<std::unique_ptr<Light>> lights; // point lights
-  std::vector<std::shared_ptr<Texture>> textures;
+  ToyVector<std::unique_ptr<Shader>> shaders;
+  ToyVector<std::unique_ptr<Medium>> media;
+  ToyVector<std::unique_ptr<EnvironmentalRadianceField>> envlights;
+  ToyVector<std::unique_ptr<Light>> lights; // point lights
+  ToyVector<std::shared_ptr<Texture>> textures;
   Box boundingBox;
   std::unique_ptr<EnvironmentalRadianceField> envlight;
   
@@ -145,17 +147,20 @@ public:
     return *this->invisible_shader;
   }
 
-  void Append(const Mesh &other_mesh);
+  //void Append(const Mesh &other_mesh);
   
-  void Append(const Spheres &other_spheres);
+  //void Append(const Spheres &other_spheres);
+
+  void Append(const Geometry &geo);
   
   inline index_t GetNumGeometries() const
   {
-    return 2;
+    return new_primitives.size();
   }
   
   inline const Geometry& GetGeometry(index_t i) const
   {
+    assert(i >= 0 && i < GetNumGeometries());
     return *new_primitives[i];
   }
   

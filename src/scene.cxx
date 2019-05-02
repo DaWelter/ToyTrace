@@ -5,12 +5,17 @@
 #include "light.hxx"
 
 Scene::Scene()
-    : camera(nullptr),
-      triangles{new Mesh{0, 0}},
-      spheres{new Spheres{}}
+    : camera(nullptr)
 {
+    triangles = std::make_unique<Mesh>(0, 0);
+    triangles_emissive = std::make_unique<Mesh>(0, 0);
+    spheres = std::make_unique<Spheres>();
+    spheres_emissive = std::make_unique<Spheres>();
+
     new_primitives[0] = triangles.get();
     new_primitives[1] = spheres.get();
+    new_primitives[2] = triangles_emissive.get();
+    new_primitives[3] = spheres_emissive.get();
   
     auto vac_medium = std::make_unique<VacuumMedium>();
     auto inv_shader = std::make_unique<InvisibleShader>();
@@ -55,20 +60,57 @@ const Material& Scene::GetMaterialOf(const PrimRef ref) const
 }
 
 
-void Scene::Append(const Mesh &other_mesh)
+void Scene::Append(const Geometry & geo)
 {
-  triangles->Append(other_mesh);
+  if (geo.Size() <= 0)
+  {
+    assert(geo.Size() > 0); // Why might this happen?
+    return;
+  }
+  const bool no_light = materials[value(geo.material_indices[0])].emitter == nullptr;
+#ifndef NDEBUG
+  // Check if this is all-lights or no lights at all.
+  for (int i = 1; i < geo.Size(); ++i)
+  {
+    assert((materials[value(geo.material_indices[0])].emitter == nullptr) == no_light);
+  }
+#endif
+
+  if (geo.type == Geometry::PRIMITIVES_TRIANGLES)
+  {
+    const Mesh &m = static_cast<Mesh const &>(geo);
+    if (no_light)
+      triangles->Append(m);
+    else
+      triangles_emissive->Append(m);
+  }
+  else if (geo.type == Geometry::PRIMITIVES_SPHERES)
+  {
+    const Spheres &m = static_cast<Spheres const &>(geo);
+    if (no_light)
+      spheres->Append(m);
+    else
+      spheres_emissive->Append(m);
+  }
 }
 
-void Scene::Append(const Spheres &other_spheres)
-{
-  spheres->Append(other_spheres);
-}
+
+//void Scene::Append(const Mesh &other_mesh)
+//{
+//  triangles->Append(other_mesh);
+//}
+//
+//void Scene::Append(const Spheres &other_spheres)
+//{
+//  spheres->Append(other_spheres);
+//}
 
 void Scene::BuildAccelStructure()
 {   
   embreeaccelerator.Add(*triangles);
+  embreeaccelerator.Add(*triangles_emissive);
   embreeaccelerator.Add(*spheres);
+  embreeaccelerator.Add(*spheres_emissive);
   embreeaccelerator.Build();
   this->boundingBox = embreeaccelerator.GetSceneBounds();
 }

@@ -1,6 +1,7 @@
 #include "primitive.hxx"
 #include "sampler.hxx"
 #include "ray.hxx"
+#include "scene.hxx"
 
 // Mesh::Mesh()
 //   : Geometry{Geometry::PRIMITIVES_TRIANGLES}
@@ -15,7 +16,7 @@ Mesh::Mesh(index_t num_triangles, index_t num_vertices)
   vert_indices.resize(num_triangles, Eigen::NoChange);
   normals.resize(num_vertices, Eigen::NoChange);
   uvs.resize(num_vertices, Eigen::NoChange);
-  material_indices.resize(num_triangles, MaterialIndex{-1});
+  material_indices.resize(num_triangles, Scene::DEFAULT_MATERIAL_INDEX);
 }
 
 
@@ -186,6 +187,12 @@ void Spheres::Append(const Float3 pos, const float radius, MaterialIndex materia
     throw std::range_error("Cannot handle that many spheres in a geometry.");
   spheres.push_back(Vector4f{pos[0], pos[1], pos[2], radius});
   material_indices.push_back(material_index);
+}
+
+
+void Spheres::Append(const Float3 pos, const float radius)
+{
+  Append(pos, radius, Scene::DEFAULT_MATERIAL_INDEX);
 }
 
 

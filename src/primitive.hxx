@@ -40,7 +40,7 @@ public:
     PRIMITIVES_TRIANGLES,
     PRIMITIVES_SPHERES
   } const type;
-  ToyVector<MaterialIndex> material_indices; // Per primitive    
+  ToyVector<MaterialIndex> material_indices; // Per primitive
   
   Geometry(Type _t) : type{_t} {}
   virtual ~Geometry() = default;
@@ -92,6 +92,7 @@ class Spheres : public Geometry
     
     Spheres();
     void Append(const Float3 pos, const float radius, MaterialIndex material_index);
+    void Append(const Float3 pos, const float radius); // Use default material
     void Append(const Spheres &other);
     inline index_t NumSpheres() const { return (index_t)spheres.size(); }
     inline std::pair<Float3, float> Get(index_t i) const;

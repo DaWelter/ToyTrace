@@ -293,7 +293,7 @@ public:
 
 class TotalEnvironmentalRadianceField : public EnvironmentalRadianceField
 {
-  using IndividualLights = std::vector<std::unique_ptr<EnvironmentalRadianceField>>;
+  using IndividualLights = ToyVector<std::unique_ptr<EnvironmentalRadianceField>>;
   const IndividualLights &envlights;
   const EnvironmentalRadianceField& get(int i) const;
   int size() const;

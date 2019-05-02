@@ -362,7 +362,7 @@ inline RaySegment MakeSegmentAt(const SurfaceInteraction &intersection, const Do
 TEST_F(EmbreePrimitives, Sphere)
 {
   this->Initialize([](Scene &scene) {
-    Spheres s; s.Append({0., 0., 2.}, 2., MaterialIndex{-1});  
+    Spheres s; s.Append({0., 0., 2.}, 2.);  
     scene.Append(s);
   });
   Intersect({{0., 0., -1.},{0., 0., 1.}});
@@ -451,7 +451,7 @@ TEST(Embree, SphereIntersectionMadness)
   Double3 sphere_org{0., 0., 2};
   double sphere_rad = 6300;
   Spheres geom;
-  geom.Append(sphere_org.cast<float>(), (float)sphere_rad, MaterialIndex{-1});
+  geom.Append(sphere_org.cast<float>(), (float)sphere_rad);
   EmbreeAccelerator world;
   world.Add(geom);
   world.Build();
@@ -499,7 +499,7 @@ TEST(Embree, SphereIntersectionMadness2)
   Double3 sphere_org{0., 0., 2};
   double sphere_rad = 6300;
   Spheres geom;
-  geom.Append(sphere_org.cast<float>(), (float)sphere_rad, MaterialIndex{-1});
+  geom.Append(sphere_org.cast<float>(), (float)sphere_rad);
   EmbreeAccelerator world;
   world.Add(geom);
   world.Build();
@@ -531,8 +531,8 @@ TEST(Embree, SphereIntersectionMadness3)
   Spheres geom;
   double rad1 = 6300.;
   double rad2 = 6350.;
-  geom.Append({0.f, 0.f, 0.f}, (float)rad1, MaterialIndex{-1});
-  geom.Append({0.f, 0.f, 0.f}, (float)rad2, MaterialIndex{-1});
+  geom.Append({0.f, 0.f, 0.f}, (float)rad1);
+  geom.Append({0.f, 0.f, 0.f}, (float)rad2);
   EmbreeAccelerator world;
   world.Add(geom);
   world.Build();
@@ -724,7 +724,7 @@ namespace
   
 void CheckSceneParsedWithScopes(const Scene &scene)
 {
-  ASSERT_EQ(scene.GetNumGeometries(), 2);
+  ASSERT_EQ(scene.GetNumGeometries(), 4);
   ASSERT_TRUE(scene.GetGeometry(1).type == Geometry::PRIMITIVES_SPHERES);
   const auto &spheres = static_cast<const Spheres &>(scene.GetGeometry(1));
   auto Getter = [&spheres](int i) -> Float3 
@@ -775,7 +775,7 @@ m testing/scenes/unitcube.dae
   Box inside;
   inside.Extend({-0.5+tol, -0.5+tol, -0.5+tol});
   inside.Extend({0.5-tol, 0.5-tol, 0.5-tol});
-  ASSERT_EQ(scene.GetNumGeometries(), 2);
+  ASSERT_EQ(scene.GetNumGeometries(), 4);
   ASSERT_TRUE(scene.GetGeometry(0).type == Geometry::PRIMITIVES_TRIANGLES);
   ASSERT_TRUE(scene.GetBoundingBox().InBox(outside));
   ASSERT_FALSE(scene.GetBoundingBox().InBox(inside));
