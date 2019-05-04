@@ -767,10 +767,17 @@ TEST(Boost, VariantPolymorphic)
 
 TEST(StrFormat, Test)
 {
-  EXPECT_EQ(strformat("a%b%c", 1, 2), "a1b2c");
-  EXPECT_EQ(strformat("%%%", 1), "%1");
+  EXPECT_EQ(strformat("a%sb%sc", 1, 2), "a1b2c");
+  EXPECT_EQ(strformat("%%%s", 1), "%1");
+  EXPECT_EQ(strformat("%s%%", 1), "1%");
+  EXPECT_EQ(strformat("%%%%"), "%%");
   EXPECT_EQ(strformat("nothing"), "nothing");
-  EXPECT_EQ(strformat("%bar%", "foo", "baz"), "foobarbaz");
+  EXPECT_EQ(strformat("%sbar%s", "foo", "baz"), "foobarbaz");
+  EXPECT_ANY_THROW(strformat("wrong%"));
+  EXPECT_ANY_THROW(strformat("wrong%", 1));
+  EXPECT_ANY_THROW(strformat("wrong", 1));
+  EXPECT_ANY_THROW(strformat("wro%ng", 1));
+  EXPECT_ANY_THROW(strformat("wro%ng"));
 }
 
 //////////////////////////////////////////////

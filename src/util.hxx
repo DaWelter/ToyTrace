@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <vector>
 #include <unordered_map>
+#include <string_view>
 
 #include <boost/functional/hash.hpp>
 #include <boost/align/aligned_allocator.hpp>
@@ -167,47 +168,66 @@ namespace strformat_internal
 namespace
 {
 
+#ifdef __GNUC__
 #pragma GCC diagnostic push
 // The compiler complains that this function is not used. But it really is or else my 
 // strformat would not compile at all because the compile time(!) recursion could not be terminated.
 #pragma GCC diagnostic ignored "-Wunused-function"  // GCC does not even care ...
+#endif
+
+// Forward declaration of 'main' routine.
+template<class ... Args>
+inline void impl(std::stringstream &ss, const std::string_view &format, Args&& ... args);
   
 // Terminate recursion. All arguments were sunk.
-void impl(std::stringstream &ss, const std::string &format, int start)
+inline void impl_emit(std::stringstream &ss, const std::string_view &format)
 {
-  auto pos = format.find('%', start);
-  
-  if (pos != std::string::npos)
-    throw std::invalid_argument("Too few arguments for strformat");
-  
-  ss << format.substr(start, format.size()-start);
+  throw std::invalid_argument("Too few arguments for strformat");
 }
 
-#pragma GCC diagnostic pop // Restore command line options.
-
-
 template<class T, class ... Args>
-void impl(std::stringstream &ss, const std::string &format, int start, const T& x, Args&& ... args)
+inline void impl_emit(std::stringstream &ss, const std::string_view &format, const T &x, Args&& ... args)
 {
-  // Note: "for a non-empty substring, if pos >= size(), the function always returns npos."
-  // Ref: http://en.cppreference.com/w/cpp/string/basic_string/find
-  auto pos = format.find('%', start);
-  
-  if (pos == std::string::npos)
-    throw std::invalid_argument("Too many arguments for strformat");
-  
-  ss << format.substr(start, pos-start);
-  
-  if (pos < format.size()-1 && format[pos+1]=='%') // Escaped %% 
-  {
-    ss << '%';
-    impl(ss, format, pos+2, x, args...);
-    return;
-  }      
-  
   ss << x;
-  
-  impl(ss, format, pos+1, args...);
+  impl(ss, format, args...);
+}
+
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop // Restore command line options.
+#endif
+
+// Printf style formatting. Supports only %s. But this means, in contrast to printf, that the input is converted to string using the << operator and c++ streams.
+template<class ... Args>
+inline void impl(std::stringstream &ss, const std::string_view &format, Args&& ... args)
+{
+  for (std::string_view::size_type i = 0; i<format.size(); ++i)
+  {
+    // Detect printf style format specifier.
+    if (format[i] == '%')
+    {
+      // %% means to just put % char.
+      if (i+1 <= format.size() && format[i+1] == '%')
+      {
+        ss.put('%');
+        ++i;
+      }
+      // Recurse into subroutine to take care of the next argument in 'args'. 
+      // Is there a non-recursive way to extract the first parameter of a pack?
+      else if (i+1 <= format.size() && format[i+1] == 's')
+      {
+        impl_emit(ss, format.substr(i+2), args...);
+        return;
+      }
+      // Anything else is an error.
+      else
+        throw std::invalid_argument("Invalid string format specifier encountered in "+std::string(format)+", position "+std::to_string(i));
+    }
+    else
+      ss.put(format[i]);
+  }
+  if (sizeof...(args) > 0)
+    throw std::invalid_argument("Too many arguments for strformat");
 }
 
 }
@@ -219,7 +239,7 @@ template<class ... Args>
 inline std::string strformat(const std::string &format, Args&& ...args)
 {
   std::stringstream ss;
-  strformat_internal::impl(ss, format, 0, args...);
+  strformat_internal::impl(ss, format, args...);
   return ss.str();
 }
 

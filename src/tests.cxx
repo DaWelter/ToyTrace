@@ -701,9 +701,9 @@ s 11 12 13 0.5
   }
   const char* scenestr_fmt = R"""(
 s 1 2 3 0.5
-include %
+include %s
 {
-include %
+include %s
 }
 s 14 15 16 0.5
 )""";
@@ -847,7 +847,7 @@ protected:
     {
       RGB tex_col = tex.GetPixel(x, y);
       RGB expected_col = expected[y*tex.Width()+x];
-      std::cerr << strformat("<%, %, %>", tex_col[0], tex_col[1], tex_col[2])  << ", ";
+      std::cerr << strformat("<%s, %s, %s>", tex_col[0], tex_col[1], tex_col[2])  << ", ";
       EXPECT_TRUE(((tex_col-expected_col).abs() < 1.e-3_rgb).all());
     }
     std::cerr << "\n";
