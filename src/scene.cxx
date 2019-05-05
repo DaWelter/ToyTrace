@@ -95,16 +95,6 @@ void Scene::Append(const Geometry & geo)
 }
 
 
-//void Scene::Append(const Mesh &other_mesh)
-//{
-//  triangles->Append(other_mesh);
-//}
-//
-//void Scene::Append(const Spheres &other_spheres)
-//{
-//  spheres->Append(other_spheres);
-//}
-
 void Scene::BuildAccelStructure()
 {   
   embreeaccelerator.Add(*triangles);

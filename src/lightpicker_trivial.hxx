@@ -71,10 +71,10 @@ public:
       break;
       case IDX_PROB_POINT:
       {
-        const int n = scene.GetNumLights();
+        const int n = scene.GetNumPointLights();
         int idx = sampler.UniformInt(0, n-1);
         double prob = emitter_type_selection_probabilities[which_kind]/n;
-        visitor(scene.GetLight(idx), prob);
+        visitor(scene.GetPointLight(idx), prob);
       }
       break;
       case IDX_PROB_AREA:
@@ -103,7 +103,7 @@ public:
 
   double PmfOfLight(const ROI::PointEmitter &) const
   {
-    return emitter_type_selection_probabilities[IDX_PROB_POINT]/scene.GetNumLights();
+    return emitter_type_selection_probabilities[IDX_PROB_POINT]/scene.GetNumPointLights();
   }
 
   double PmfOfLight(const ROI::AreaEmitter &) const

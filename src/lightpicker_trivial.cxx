@@ -5,7 +5,7 @@ TrivialLightPicker::TrivialLightPicker(const Scene& _scene)
 {
   FindAreaLightGeometry();
   FindVolumeLightGeometry();
-  const auto nl = (double)scene.GetNumLights();
+  const auto nl = (double)scene.GetNumPointLights();
   const auto ne = (double)(scene.HasEnvLight() ? 1 : 0);
   const auto na = (double)(arealight_refs.size());
   const auto nv = (double)(volume_light_refs.size());

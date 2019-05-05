@@ -98,12 +98,12 @@ public:
   void ParseNFFString(const std::string &scenestr, RenderingParameters *render_params = nullptr);
   void ParseNFF(std::istream &is, RenderingParameters *render_params = nullptr);
    
-  index_t GetNumLights() const
+  index_t GetNumPointLights() const
   {
     return (index_t)lights.size();
   }
   
-  const Light& GetLight(index_t i) const
+  const Light& GetPointLight(index_t i) const
   {
     return *lights[i];
   }
@@ -146,10 +146,6 @@ public:
   {
     return *this->invisible_shader;
   }
-
-  //void Append(const Mesh &other_mesh);
-  
-  //void Append(const Spheres &other_spheres);
 
   void Append(const Geometry &geo);
   
