@@ -137,3 +137,37 @@ bool Scene::HasLights() const
   }
   return false;
 }
+
+
+Scene::index_t Scene::GetNumAreaLights() const
+{
+  return triangles_emissive->Size() + spheres_emissive->Size();
+}
+
+
+
+Scene::index_t Scene::GetAreaLightIndex(const PrimRef ref) const
+{
+  assert (ref.geom == triangles_emissive.get() || ref.geom == spheres_emissive.get());
+  assert (ref.index >= 0 && ref.geom->Size());
+  index_t ret = ref.index;
+  // Index range combines spheres and triangles. First come triangles, then spheres.
+  if (ref.geom == spheres_emissive.get())
+    ret += triangles_emissive->Size();
+  return ret;
+}
+
+PrimRef Scene::GetPrimitiveFromAreaLightIndex(Scene::index_t light) const
+{
+  assert(light >= 0);
+  if (light >= triangles_emissive->Size())
+  {
+    light -= triangles_emissive->Size();
+    assert(light < spheres_emissive->Size());
+    return PrimRef{spheres_emissive.get(), light};
+  }
+  else
+  {
+    return PrimRef{triangles_emissive.get(), light};
+  }
+}

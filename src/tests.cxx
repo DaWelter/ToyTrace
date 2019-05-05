@@ -782,6 +782,39 @@ m testing/scenes/unitcube.dae
 }
 
 
+TEST(Parser, LightIndices)
+{
+  const char* scenestr = R"""(
+{
+larea arealight2 uniform 1 1 1 1
+diffuse black  1 1 1 0.
+m testing/scenes/unitcube.dae
+}
+{
+larea arealight2 uniform 1 1 1 1
+diffuse black  1 1 1 0.
+s 0 0 0 1
+}
+{
+m testing/scenes/unitcube.dae
+}
+{
+s 0 0 0 1
+}
+)""";
+  Scene scene;
+  scene.ParseNFFString(scenestr);
+  const auto n = scene.GetNumAreaLights();
+  ASSERT_EQ(n, 13); // Cube has 12 triangles, plus 1 sphere.
+  for (Scene::index_t i = 0; i<n; ++i)
+  {
+    PrimRef pr = scene.GetPrimitiveFromAreaLightIndex(i);
+    auto reverse = scene.GetAreaLightIndex(pr);
+    EXPECT_EQ(i, reverse);
+  }
+}
+
+
 TEST(Parser, ImportCompleteSceneWithDaeBearingMaterials)
 {
   const char* scenestr = R"""(

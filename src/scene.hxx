@@ -133,6 +133,12 @@ public:
     return camera!=nullptr;
   }
   
+  index_t GetNumAreaLights() const;
+  
+  index_t GetAreaLightIndex(const PrimRef ref) const; // Return invalid index if has no light.
+  
+  PrimRef GetPrimitiveFromAreaLightIndex(index_t light) const;
+  
   const Material& GetMaterialOf(index_t geom_idx, index_t prim_idx) const;
   
   const Material& GetMaterialOf(const PrimRef ref) const;
