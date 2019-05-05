@@ -930,7 +930,7 @@ void CameraRenderWorker::MaybeAddEmission(const Ray& ray, const SurfaceInteracti
     double mis_weight = 1.0;
     if (last_scatter_pdf_value) // Should be set if this is secondary ray.
     {
-        const double prob_select = light_picker.PmfOfLight(*emitter);
+        const double prob_select = light_picker.PmfOfLight(interaction.hitid);
         const double area_pdf = emitter->EvaluatePdf(interaction.hitid, context);
         const double pdf_cvt = PdfConversion::AreaToSolidAngle(Length(ray.org-interaction.pos), ray.dir, interaction.normal);
         mis_weight = MisWeight(*last_scatter_pdf_value, prob_select*area_pdf*pdf_cvt);

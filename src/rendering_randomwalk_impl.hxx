@@ -659,7 +659,7 @@ public:
       const SurfaceInteraction &interaction = node.interaction.surface;
       const auto &emitter = *ASSERT_NOT_NULL(GetMaterialOf(interaction, scene).emitter);
       double pdf = emitter.EvaluatePdf(node.interaction.surface.hitid, context);
-      pdf *= light_picker.PmfOfLight(emitter);
+      pdf *= light_picker.PmfOfLight(interaction.hitid);
       return pdf;
     }
     else if(node.node_type == RW::NodeType::VOLUME_EMITTER)

@@ -86,7 +86,7 @@ public:
     return emitter_type_selection_probabilities[IDX_PROB_POINT]/scene.GetNumPointLights();
   }
 
-  double PmfOfLight(const ROI::AreaEmitter &) const
+  double PmfOfLight(const PrimRef &) const
   {
     return emitter_type_selection_probabilities[IDX_PROB_AREA]/arealight_refs.size();
   }
