@@ -99,7 +99,10 @@ public:
 
 
 
-#if 0
+#if 1
+namespace UcbLightPickerImpl
+{
+
 class LightRef
 {
   std::uint32_t type : 2;
@@ -109,19 +112,27 @@ class LightRef
 };
 static_assert(sizeof(LightRef) == 8);
 
-class UCBStyleSampler
+class Stats
 {
 public:
-  void Init(int arm_count); // Arm as in Multi-Armed-Bandit
+  Stats();
+  Stats(int num_arms);
+  void ShareWith(Stats &other);
   void ObserveReturn(int arm, double value);
-  void UpdateProbs();
+  //static void Update(Span<Stats*> stats);
+  void UpdateAllShared(); // Call this on one of the element in the group. Will combine statistics and update all of them.
   Span<const double> GetCummulativeProbs();
 private:
+  // Per Thread
   Eigen::ArrayXd mean;
   Eigen::ArrayXd sqr_sum;
   Eigen::ArrayXi count;
-  Eigen::ArrayXd cummulative_probs;
+  // Shared for all threads
+  // For convencience and speed(?)
+  Eigen::Map<Eigen::ArrayXd> cummulative_probs;
+  std::shared_ptr<Eigen::ArrayXd> shared_cummulative_probs;
   int step_count = 0;
+  Stats* next = nullptr; // Circular Link list
 };
 
 
@@ -138,39 +149,22 @@ public:
   };
 
   UcbLightPicker(const Scene &scene);
+  void ShareStatsWith(UcbLightPicker &other);
   void PickLight(Sampler &sampler, PickCallbacks &cb) const;
   void ObserveLightContribution(const LightRef &lr, const Spectral3 &radiance);
-
-  double PmfOfLight(const ROI::EnvironmentalRadianceField &) const
-  {
-    assert(!"Not Implemented");
-    return emitter_type_selection_probabilities[IDX_PROB_ENV];
-  }
-
-  double PmfOfLight(const ROI::PointEmitter &) const
-  {
-    assert(!"Not Implemented");
-    return emitter_type_selection_probabilities[IDX_PROB_POINT] / scene.GetNumLights();
-  }
-
-  double PmfOfLight(const ROI::AreaEmitter &) const
-  {
-    assert(!"Not Implemented");
-    return emitter_type_selection_probabilities[IDX_PROB_AREA] / arealight_refs.size();
-  }
-
-  double PmfOfLight(const Medium &) const
-  {
-    assert(!"Not Implemented");
-    return emitter_type_selection_probabilities[IDX_PROB_VOLUME] / volume_light_refs.size();
-  }
+  //static void Update(Span<UcbLightPicker*> pickers);
+  void UpdateAllShared();
+  double PmfOfLight(const ROI::EnvironmentalRadianceField &) const;
+  double PmfOfLight(const ROI::PointEmitter &) const;
+  double PmfOfLight(const PrimRef &) const;
+  double PmfOfLight(const Medium &) const;
 
 private:
-  const Scene &scene;
-  ToyVector<std::pair<int, int>> arealight_refs; // Indices into geometry list, then into primitives list.
-  ToyVector<int> volume_light_refs;  // Indices into materials which have emissive volume
-
-  UCBStyleSampler light_sampler[NUM_LIGHT_TYPES];
-  std::array<double, 4> emitter_type_selection_probabilities;
+  Stats light_sampler[NUM_LIGHT_TYPES];
+  std::array<double, NUM_LIGHT_TYPES> emitter_type_selection_probabilities;
 };
+
+}
+
+using UcbLightPickerImpl::UcbLightPicker;
 #endif

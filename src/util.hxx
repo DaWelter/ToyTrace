@@ -47,7 +47,7 @@ inline float Rcp(float x)
 template<class T, typename std::enable_if_t<std::is_floating_point<T>{}, int> = 0>
 inline T Sign(const T &x)
 {
-  return std::copysign(1., x);
+  return std::copysign(T(1.), x);
 }
 
 
