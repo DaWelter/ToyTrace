@@ -3,19 +3,24 @@
 #include <assert.h>
 #include <type_traits>
 #include <boost/iterator/iterator_facade.hpp>
+#include <boost/none_t.hpp>
 
-template<class Node>
+// Use CRTP
+template<class Node, class Tag = boost::none_t>
 class LinkListBase;
 
-template<class Node>
+// This struct only collects operations on the list nodes.
+// It is not meant to be derived from or composed into client objects.
+template<class Node, class Tag = boost::none_t>
 struct CircularLinkList
 {
-  static_assert(std::is_base_of<LinkListBase<Node>, Node>::value);
+  static_assert(std::is_base_of<LinkListBase<Node, Tag>, Node>::value);
 
   static void append(Node& a_, Node& b_)
   {
-    auto* a = static_cast<LinkListBase<Node>*>(&a_);
-    auto* b = static_cast<LinkListBase<Node>*>(&b_);
+    // The cast selects which of the potentially many LinkListBase's I want to use.
+    auto* a = static_cast<LinkListBase<Node,Tag>*>(&a_);
+    auto* b = static_cast<LinkListBase<Node,Tag>*>(&b_);
     assert(b->next == b);
     auto* tmp = a->next;
     a->next = &b_;
@@ -34,7 +39,7 @@ struct CircularLinkList
 
   static Node* next(const Node& a_)
   {
-    auto* a = static_cast<LinkListBase<Node> const *>(&a_);
+    auto* a = static_cast<LinkListBase<Node, Tag> const *>(&a_);
     return a->next;
   }
 
@@ -52,11 +57,11 @@ struct CircularLinkList
       : cur{ &a_ }, wasIncremented{ end }
     {}
 
-    friend class CircularLinkList<Node>;
+    friend struct CircularLinkList<Node, Tag>;
 
     void increment()
     {
-      cur = CircularLinkList<Node>::next(*cur);
+      cur = CircularLinkList<Node, Tag>::next(*cur);
       wasIncremented = true;
     }
     bool equal(const iterator &other) const
@@ -79,11 +84,11 @@ struct CircularLinkList
 };
 
 
-template<class Node>
+template<class Node, class Tag>
 class LinkListBase
 {
 public:
-  friend struct CircularLinkList<Node>;
+  friend struct CircularLinkList<Node, Tag>;
   LinkListBase()
     : next{ static_cast<Node*>(this) }
   {}

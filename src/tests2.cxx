@@ -899,6 +899,42 @@ TEST(Intrusive,MyLinkedList)
   }
 }
 
+// Test items that have multiple list points allowing them to be in more than one list.
+struct First {};
+struct Second {};
+
+struct MultiListNode : public LinkListBase<MultiListNode, First>, public LinkListBase<MultiListNode, Second>
+{
+  int i1 = -1;
+  int i2 = -1;
+};
+
+TEST(Intrusive, MyMultiLinkedList)
+{
+  MultiListNode nodes[4];
+  using LL1 = CircularLinkList<MultiListNode,First>;
+  using LL2 = CircularLinkList<MultiListNode, Second>;
+  // First list head, one list of all things.
+  LL1::append(nodes[0], nodes[1]);
+  LL1::append(nodes[1], nodes[2]);
+  LL1::append(nodes[2], nodes[3]);
+  // Second head. Two smaller lists.
+  LL2::append(nodes[0], nodes[1]);
+  LL2::append(nodes[2], nodes[3]);
+
+  for (MultiListNode &n : LL1::rangeStartingAt(nodes[0]))
+    n.i1 = 42;
+  for (MultiListNode &n : LL2::rangeStartingAt(nodes[0]))
+    n.i2 = 1;
+  for (MultiListNode &n : LL2::rangeStartingAt(nodes[2]))
+    n.i2 = 2;
+  for (int i = 0; i < 4; ++i)
+  {
+    ASSERT_EQ(nodes[i].i1, 42);
+    ASSERT_EQ(nodes[i].i2, i <= 1 ? 1 : 2);
+  }
+}
+
 }
 
 //////////////////////////////////////////////
