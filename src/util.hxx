@@ -207,14 +207,14 @@ inline void impl(std::stringstream &ss, const std::string_view &format, Args&& .
     if (format[i] == '%')
     {
       // %% means to just put % char.
-      if (i+1 <= format.size() && format[i+1] == '%')
+      if (i+1 < format.size() && format[i+1] == '%')
       {
         ss.put('%');
         ++i;
       }
       // Recurse into subroutine to take care of the next argument in 'args'. 
       // Is there a non-recursive way to extract the first parameter of a pack?
-      else if (i+1 <= format.size() && format[i+1] == 's')
+      else if (i+1 < format.size() && format[i+1] == 's')
       {
         impl_emit(ss, format.substr(i+2), args...);
         return;
