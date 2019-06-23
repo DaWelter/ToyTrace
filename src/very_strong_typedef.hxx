@@ -23,8 +23,11 @@ struct very_strong_typedef : public \
 {
     using strong_type = very_strong_typedef<T,N>;
     using type = T; // the wrapped type
+
+private:
     T value_;
 
+public:
     // Constexpr should make that construction with a literal argument 
     // leads to conversion to the appropriate base type at compile time.
     constexpr explicit very_strong_typedef(T val): value_(val){};
