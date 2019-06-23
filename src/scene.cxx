@@ -171,3 +171,13 @@ PrimRef Scene::GetPrimitiveFromAreaLightIndex(Scene::index_t light) const
     return PrimRef{triangles_emissive.get(), light};
   }
 }
+
+//Scene::index_t Scene::GetNumVolumeLights() const
+//{
+//  return index_t();
+//}
+//
+//const Material & Scene::GetVolumeLight(index_t i) const
+//{
+//  // TODO: insert return statement here
+//}

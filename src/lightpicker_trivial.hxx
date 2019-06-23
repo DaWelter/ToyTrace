@@ -10,8 +10,6 @@ class LightPickerCommon
 {
 protected:
   const Scene &scene;
-  ToyVector<std::pair<int, int>> arealight_refs;
-  ToyVector<int> volume_light_refs;
   
   inline static constexpr int IDX_PROB_ENV = 0;
   inline static constexpr int IDX_PROB_AREA = 1;
@@ -20,8 +18,6 @@ protected:
   inline static constexpr int NUM_LIGHT_TYPES = 4;
 
   LightPickerCommon(const Scene &scene);
-  void FindAreaLightGeometry();
-  void FindVolumeLightGeometry();
 };
 
 
@@ -32,7 +28,7 @@ namespace ROI = RadianceOrImportance;
 class TrivialLightPicker : public LightPickerCommon
 {
   std::array<double, 4> emitter_type_selection_probabilities;
-  
+  std::array<double, 4> in_class_probabilities;
 public:
   TrivialLightPicker(const Scene &_scene);
   
@@ -51,7 +47,7 @@ public:
       break;
       case IDX_PROB_POINT:
       {
-        const int n = scene.GetNumPointLights();
+        const auto n = scene.GetNumPointLights();
         int idx = sampler.UniformInt(0, n-1);
         double prob = emitter_type_selection_probabilities[which_kind]/n;
         visitor(scene.GetPointLight(idx), prob);
@@ -59,18 +55,20 @@ public:
       break;
       case IDX_PROB_AREA:
       {
-        const int n = isize(arealight_refs);
-        auto [geom_idx, prim_idx] = arealight_refs[sampler.UniformInt(0, n-1)];
+        const auto n = scene.GetNumAreaLights();
+        Scene::index_t i = sampler.UniformInt(0, n - 1);
+        auto prim_ref = scene.GetPrimitiveFromAreaLightIndex(i);
         double prob = emitter_type_selection_probabilities[which_kind]/n;
-        visitor(PrimRef{&scene.GetGeometry(geom_idx),prim_idx}, prob);
+        visitor(prim_ref, prob);
       }
       break;
       case IDX_PROB_VOLUME:
       {
-          const int n = isize(volume_light_refs);
-        auto idx = volume_light_refs[sampler.UniformInt(0, n-1)];
-        double prob = emitter_type_selection_probabilities[which_kind]/n;
-        return visitor(*ASSERT_NOT_NULL(scene.GetMaterial(idx).medium), prob);
+        assert(!"not implemented");
+        //const int n = isize(volume_light_refs);
+        //auto idx = volume_light_refs[sampler.UniformInt(0, n-1)];
+        //double prob = emitter_type_selection_probabilities[which_kind]/n;
+        //return visitor(*ASSERT_NOT_NULL(scene.GetMaterial(idx).medium), prob);
       }
       break;
     }
@@ -83,17 +81,17 @@ public:
 
   double PmfOfLight(const ROI::PointEmitter &) const
   {
-    return emitter_type_selection_probabilities[IDX_PROB_POINT]/scene.GetNumPointLights();
+    return emitter_type_selection_probabilities[IDX_PROB_POINT] * in_class_probabilities[IDX_PROB_POINT];
   }
 
   double PmfOfLight(const PrimRef &) const
   {
-    return emitter_type_selection_probabilities[IDX_PROB_AREA]/arealight_refs.size();
+    return emitter_type_selection_probabilities[IDX_PROB_AREA] * in_class_probabilities[IDX_PROB_AREA];
   }
   
   double PmfOfLight(const Medium &) const
   {
-    return emitter_type_selection_probabilities[IDX_PROB_VOLUME]/volume_light_refs.size();
+    return emitter_type_selection_probabilities[IDX_PROB_VOLUME] * in_class_probabilities[IDX_PROB_VOLUME];
   }
 };
 

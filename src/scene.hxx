@@ -91,6 +91,8 @@ private:
   Box boundingBox;
   std::unique_ptr<EnvironmentalRadianceField> envlight;
   
+  void Append(const Geometry &geo);
+
 public:
   Scene();
   ~Scene();
@@ -98,26 +100,7 @@ public:
   void ParseNFFString(const std::string &scenestr, RenderingParameters *render_params = nullptr);
   void ParseNFF(std::istream &is, RenderingParameters *render_params = nullptr);
    
-  index_t GetNumPointLights() const
-  {
-    return static_cast<index_t>(lights.size());
-  }
-  
-  const Light& GetPointLight(index_t i) const
-  {
-    return *lights[i];
-  }
-  
-  bool HasLights() const;
- 
-  bool HasEnvLight() const { return envlights.size()>0; }
 
-  const RadianceOrImportance::EnvironmentalRadianceField& GetTotalEnvLight() const
-  {
-    assert(envlight.get() != nullptr);
-    return *envlight;
-  }
-  
   const Camera& GetCamera() const
   {
     return *camera;
@@ -133,12 +116,38 @@ public:
     return camera!=nullptr;
   }
   
+
+  bool HasLights() const;
+
+  bool HasEnvLight() const { return envlights.size() > 0; }
+
+  // TODO: Remove
+  const RadianceOrImportance::EnvironmentalRadianceField& GetTotalEnvLight() const
+  {
+    assert(envlight.get() != nullptr);
+    return *envlight;
+  }
+
+  index_t GetNumPointLights() const
+  {
+    return isize(lights);
+  }
+
+  const Light& GetPointLight(index_t i) const
+  {
+    return *lights[i];
+  }
+
   index_t GetNumAreaLights() const;
   
   index_t GetAreaLightIndex(const PrimRef ref) const; // Return invalid index if has no light.
-  
+
   PrimRef GetPrimitiveFromAreaLightIndex(index_t light) const;
-  
+
+  //index_t GetNumVolumeLights() const;
+
+  //const Material& GetVolumeLight(index_t i) const;
+
   const Material& GetMaterialOf(index_t geom_idx, index_t prim_idx) const;
   
   const Material& GetMaterialOf(const PrimRef ref) const;
@@ -153,8 +162,7 @@ public:
     return *this->invisible_shader;
   }
 
-  void Append(const Geometry &geo);
-  
+
   inline index_t GetNumGeometries() const
   {
     return static_cast<index_t>(new_primitives.size());
