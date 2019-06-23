@@ -10,6 +10,7 @@
 #include <boost/variant/polymorphic_get.hpp>
 #include <boost/align/aligned_allocator.hpp>
 #include <boost/any.hpp>
+#include <boost/intrusive/circular_slist_algorithms.hpp>
 
 #include "gtest/gtest.h"
 #include "spectral.hxx"
@@ -17,6 +18,7 @@
 #include "util.hxx"
 #include "very_strong_typedef.hxx"
 #include "span.hxx"
+#include "linklist.hxx"
 
 
 TEST(BasicAssumptions, InheritCtor)
@@ -801,6 +803,103 @@ TEST(Span, Test)
   //span2[0] = 42; Expectedly, does not compile.
 }
 
+
+//////////////////////////////////////////////
+// Boosts Intrusive Containers
+// Also, my own intrusive linked list code
+//////////////////////////////////////////////
+
+/*
+Try the linked list code from boost.
+https://www.boost.org/doc/libs/1_38_0/doc/html/intrusive/node_algorithms.html
+https://www.boost.org/doc/libs/1_38_0/doc/html/boost/intrusive/circular_slist_algorithms.html
+*/
+
+namespace IntrusiveContainerTest
+{
+
+// Attempt to encapsulate the link pointer in a class which will be put
+// as member in the actual node. But traits class needs access. How to define friend?
+template<class Derived>
+struct ListLink
+{
+  Derived* next_;
+};
+
+// Describes how to access the link variable. A node could be part of multiple lists using
+// a different link pointer for each one. That is what the second template argument is for.
+// It is a member function pointer, bound to a specific member variable at compile time!
+template<class Node, ListLink<Node> Node::* ptr_to_member> struct SListNodeTraits
+{
+  typedef Node                                 node;
+  typedef Node *                               node_ptr;
+  typedef const Node *                         const_node_ptr;
+  static node_ptr get_next(const_node_ptr n) 
+  { 
+    return n->*ptr_to_member.next_; 
+  }
+  static void set_next(node_ptr n, node_ptr next) 
+  { 
+    (n->*ptr_to_member).next_ = next;
+  }
+};
+
+struct Node
+{
+  int i;
+  ListLink<Node> link;
+};
+
+using algo = boost::intrusive::circular_slist_algorithms<SListNodeTraits<Node, &Node::link>>;
+
+// Just testing if it compiles ... 
+void Test()
+{
+  Node one;
+  algo::init_header(&one);
+}
+
+}
+
+
+namespace LinkListTest
+{
+
+struct ListNode : public LinkListBase<ListNode>
+{
+  int i = -1;
+};
+
+TEST(Intrusive,MyLinkedList)
+{
+  ListNode nodes[4];
+  using LL = CircularLinkList<ListNode>;
+  for (ListNode &n : LL::rangeStartingAt(nodes[0]))
+    n.i = 42;
+  // Ensure that iterating over one-element list works.
+  ASSERT_EQ(nodes[0].i, 42);
+  // Concatenate all the element
+  LL::append(nodes[0], nodes[2]);
+  LL::append(nodes[0], nodes[1]);
+  LL::append(nodes[2], nodes[3]);
+  // Test next method
+  ASSERT_EQ(LL::next(nodes[0]), &nodes[1]);
+  ASSERT_EQ(LL::next(nodes[1]), &nodes[2]);
+  ASSERT_EQ(LL::next(nodes[2]), &nodes[3]); 
+  ASSERT_EQ(LL::next(nodes[3]), &nodes[0]);
+  // Iteration over larger list. Stopping condition works?
+  int i = 0;
+  for (ListNode &n : LL::rangeStartingAt(nodes[0]))
+  {
+    n.i = i++;
+  }
+  for (int i = 0; i < 4; ++i)
+  {
+    ASSERT_EQ(nodes[i].i, i);
+  }
+}
+
+}
 
 //////////////////////////////////////////////
 ////// Demoing Parameterized Tests
