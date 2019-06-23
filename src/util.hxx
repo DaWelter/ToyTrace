@@ -356,3 +356,17 @@ inline std::pair<int, int> RowMajorPixel(int offset, int size_x, int size_y)
   int x = offset - y*size_x;
   return std::make_pair(x,y);
 }
+
+
+template<class T>
+struct enable_if_has_size_member
+{
+    using type = decltype(std::declval<T&>().size());
+};
+
+
+template<class Container>
+inline int isize(const Container &c, typename enable_if_has_size_member<Container>::type = 0)
+{
+    return static_cast<int>(c.size());
+}

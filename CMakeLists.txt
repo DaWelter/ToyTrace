@@ -79,7 +79,11 @@ else()
     add_compile_options(-std:c++17)
     add_definitions(-DNOMINMAX -D_CRT_SECURE_NO_WARNINGS -D_NOEXCEPT=noexcept)
     add_definitions(-D_SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING) # Mostly for YAML-Cpp
+    add_definitions(-D_SILENCE_CXX17_ADAPTOR_TYPEDEFS_DEPRECATION_WARNING) # For Eigen
     add_definitions(-DNOGDI -DWIN32_LEAN_AND_MEAN) # Don't let windows api pollute the global namespace with silly macros. windows.h is included by TBB. Nothing else I can do about that.
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4244 /wd4305")  # float <-> double conversion. Until I get that mess sorted out.
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4068")  # Unkown pragma
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4099")  # pdb file not found
     conan_basic_setup()
 endif(NOT WIN32)
     

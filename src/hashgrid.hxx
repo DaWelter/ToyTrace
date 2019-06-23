@@ -25,7 +25,7 @@ public:
         double cell_size = 2.f * search_radius;
         inv_cell_size = 1.f / cell_size;
 
-        const int item_count = items.size();
+        const int item_count = isize(items);
 
         cell_count = item_count + 1;  // +1 Prevents taking modulo 0 in GetCellIndex if there are no items.
         std::vector<int> cell_counts(cell_count, 0);

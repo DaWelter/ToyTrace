@@ -59,7 +59,7 @@ public:
       break;
       case IDX_PROB_AREA:
       {
-        const int n = arealight_refs.size();
+        const int n = isize(arealight_refs);
         auto [geom_idx, prim_idx] = arealight_refs[sampler.UniformInt(0, n-1)];
         double prob = emitter_type_selection_probabilities[which_kind]/n;
         visitor(PrimRef{&scene.GetGeometry(geom_idx),prim_idx}, prob);
@@ -67,7 +67,7 @@ public:
       break;
       case IDX_PROB_VOLUME:
       {
-        const int n = volume_light_refs.size();
+          const int n = isize(volume_light_refs);
         auto idx = volume_light_refs[sampler.UniformInt(0, n-1)];
         double prob = emitter_type_selection_probabilities[which_kind]/n;
         return visitor(*ASSERT_NOT_NULL(scene.GetMaterial(idx).medium), prob);

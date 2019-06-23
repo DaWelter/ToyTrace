@@ -124,7 +124,7 @@ public:
   {
     for (int i=0; i<std::max(1, this->render_params.num_threads); ++i)
       workers.push_back(AllocateWorker(i));
-    num_threads = workers.size();
+    num_threads = isize(workers);
     int pass = 0;
     while (!stop_flag.load() && spp_schedule.GetPerIteration() > 0)
     {

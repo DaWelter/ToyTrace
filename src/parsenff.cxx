@@ -47,7 +47,7 @@ public:
   
   int size() const
   {
-    return things.size();
+    return isize(things);
   }
   
   void activate(const std::string &name)
@@ -1165,15 +1165,15 @@ private:
   {
     if (face->mNumIndices != 3)
       throw std::runtime_error("Face has too many vertices. Assimp should have converted to triangle, though ...");    
-    int vidx[3] = {
-      (int)face->mIndices[0],
-      (int)face->mIndices[1],
-      (int)face->mIndices[2] 
+    unsigned vidx[3] = {
+      face->mIndices[0],
+      face->mIndices[1],
+      face->mIndices[2] 
     };
     Double3 verts[3];
     for (int i=0; i<3; ++i)
     {
-      if (vidx[i]<0 || vidx[i]>=aimesh->mNumVertices)
+      if (vidx[i]>=aimesh->mNumVertices)
         throw std::runtime_error("Invalid face. Vertex index beyond bounds.");
       verts[i] = aiVector3_to_myvector(aimesh->mVertices[vidx[i]]);
     }
@@ -1201,11 +1201,12 @@ private:
       }
     }
     
-    Mesh mesh(vert_indices.size(), aimesh->mNumVertices);
+    Mesh mesh(static_cast<Mesh::index_t>(vert_indices.size()), 
+              static_cast<Mesh::index_t>(aimesh->mNumVertices));
     for (int i=0; i<vert_indices.size(); ++i)
       mesh.vert_indices.row(i) = vert_indices[i];
     
-    for (int i=0; i<aimesh->mNumVertices; ++i)
+    for (unsigned i=0; i<aimesh->mNumVertices; ++i)
     {
       Double3 v = 
             scope.currentTransform *
@@ -1216,7 +1217,7 @@ private:
 
     if (hasnormals)
     {
-      for (int i=0; i<aimesh->mNumVertices; ++i)
+      for (unsigned i=0; i<aimesh->mNumVertices; ++i)
       {
         Double3 n =
           TransformNormal(scope.currentTransform,
@@ -1230,7 +1231,7 @@ private:
     
     if (hasuv)
     {
-      for (int i=0; i<aimesh->mNumVertices; ++i)
+      for (unsigned i=0; i<aimesh->mNumVertices; ++i)
       {
         Double3 uv = 
               aiVector3_to_myvector(
@@ -1350,9 +1351,11 @@ bool NFFParser::NextLine()
 
 MaterialIndex NFFParser::MaterialInsertAndOrGetIndex(const Material& m)
 {
+    if (scene->materials.size() >= MAX_NUM_MATERIALS)
+        throw std::runtime_error("Maximal number of materials exceeded");
   return GetOrInsertFromFactory(to_material_index, m, [this, &m]() {
     scene->materials.push_back(m);
-    return MaterialIndex(scene->materials.size()-1);
+    return MaterialIndex(static_cast<MaterialIndex::type>(scene->materials.size()-1));
   });
 }
 

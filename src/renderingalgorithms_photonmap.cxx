@@ -243,7 +243,7 @@ public:
       photonmap_workers.emplace_back(this);
       camerarender_workers.emplace_back(this);
     } 
-    num_threads = photonmap_workers.size();
+    num_threads = isize(photonmap_workers);
     while (!stop_flag.load() && spp_schedule.GetPerIteration() > 0)
     {
       // Full sweep across spectrum counts as one pass.

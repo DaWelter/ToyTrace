@@ -506,7 +506,7 @@ public:
       sample_count.push_back(p.sample_count);
       probabilities.push_back(p.pr);
     }
-    double chi_sqr_probability = ChiSquaredProbability(&bin_sample_count[0], &bin_probabilities[0], bin_probabilities.size());
+    double chi_sqr_probability = ChiSquaredProbability(bin_sample_count.data(), bin_probabilities.data(), isize(bin_probabilities));
     EXPECT_GE(chi_sqr_probability, p_threshold);
   }
   

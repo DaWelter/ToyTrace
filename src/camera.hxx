@@ -138,8 +138,8 @@ public:
     }
     x /= z;
     y /= z;
-    int pix_x = (x-xmin)/xperpixel;
-    int pix_y = (y-ymin)/yperpixel;
+    auto pix_x = static_cast<int>((x-xmin)/xperpixel);
+    auto pix_y = static_cast<int>((y-ymin)/yperpixel);
     if (pix_x<0 || pix_x>=xres || pix_y<0 || pix_y>=yres)
     {
       if (pdf_direction) *pdf_direction = 0.;

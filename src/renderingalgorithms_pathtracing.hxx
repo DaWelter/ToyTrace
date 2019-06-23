@@ -63,7 +63,7 @@ public:
   void AddSegment(const RW::PathNode &end_node, const Spectral3 &_weight, Pdf pdf_prev_scatter, Pdf pdf_prev_rev_scatter, const VolumePdfCoefficients &volume_pdf_coeff, const RaySegment &segment)
   {
     nodes.push_back(end_node);
-    const int idx = nodes.size()-1;
+    const int idx = isize(nodes)-1;
     Spectral3  beta_at_node = betas.back()*_weight;
     betas.push_back(beta_at_node);
     pdfs.push_back(pdf_prev_scatter);
@@ -103,7 +103,7 @@ public:
   
   int NumNodes() const
   {
-    return nodes.size();
+    return isize(nodes);
   }
 
   const RW::PathNode& Node(int i) const
@@ -118,7 +118,7 @@ public:
   
   const RW::PathNode& NodeFromBack(int i) const
   {
-    return nodes[nodes.size()-i-1];
+    return nodes[isize(nodes)-i-1];
   }
   
   const Spectral3& Beta(int i) const

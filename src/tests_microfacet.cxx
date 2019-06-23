@@ -183,7 +183,7 @@ TEST(Microfacet, Beckmann)
 //   {
 //     std::cout << strconcat(i,": p=", probs[i], ", cnt=", sample_counts[i]) << std::endl;
 //   }
-  double chi_sqr_probability = ChiSquaredProbability(&sample_counts[0], &probs[0], probs.size());
+  double chi_sqr_probability = ChiSquaredProbability(sample_counts.data(), probs.data(), isize(probs));
   EXPECT_GE(chi_sqr_probability, 0.05);
 }
 
@@ -239,7 +239,7 @@ TEST_P(ReflectTest, Outdirection)
   
   std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);
   std::vector<int> sample_counts = SampleOverCubemap(sample_gen, cubemap, 1000);
-  double chi_sqr_probability = ChiSquaredProbability(&sample_counts[0], &probs[0], probs.size());
+  double chi_sqr_probability = ChiSquaredProbability(sample_counts.data(), probs.data(), isize(probs));
   EXPECT_GE(chi_sqr_probability, 0.05);
   // Integral of the density over all solid angles should be normalized to 1.
   double total_prob = std::accumulate(probs.begin(), probs.end(), 0.);
@@ -263,7 +263,7 @@ TEST_P(RefractTest, OutDirection)
     [&]() { return density.Sample(sampler.UniformUnitSquare(), sampler.Uniform01()); }, 
     cubemap, 10000);
 
-  double chi_sqr_probability = ChiSquaredProbability(&sample_counts[0], &probs[0], probs.size());
+  double chi_sqr_probability = ChiSquaredProbability(sample_counts.data(), probs.data(), isize(probs));
   EXPECT_GE(chi_sqr_probability, 0.05);
   // Integral of the density over all solid angles should be normalized to 1.
   double total_prob = std::accumulate(probs.begin(), probs.end(), 0.);
@@ -294,7 +294,7 @@ TEST_P(ReflectTest, VNDFSampling)
   
   std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);
   std::vector<int> sample_counts = SampleOverCubemap(sample_gen, cubemap, 1000);
-  double chi_sqr_probability = ChiSquaredProbability(&sample_counts[0], &probs[0], probs.size());
+  double chi_sqr_probability = ChiSquaredProbability(sample_counts.data(), probs.data(), isize(probs));
   EXPECT_GE(chi_sqr_probability, 0.05);
   double total_prob = std::accumulate(probs.begin(), probs.end(), 0.);
   EXPECT_NEAR(total_prob, 1., 1.e-2);
@@ -327,7 +327,7 @@ TEST_P(ReflectTest, VNDFSamplingOutDirection)
   
   std::vector<double> probs = IntegralOverCubemap(density_func, cubemap, 1.e-3, 1.e-2, 100000);
   std::vector<int> sample_counts = SampleOverCubemap(sample_gen, cubemap, 1000);
-  double chi_sqr_probability = ChiSquaredProbability(&sample_counts[0], &probs[0], probs.size());
+  double chi_sqr_probability = ChiSquaredProbability(sample_counts.data(), probs.data(), isize(probs));
   EXPECT_GE(chi_sqr_probability, 0.05);
   double total_prob = std::accumulate(probs.begin(), probs.end(), 0.);
   EXPECT_NEAR(total_prob, 1., 1.e-2);

@@ -100,7 +100,7 @@ public:
    
   index_t GetNumPointLights() const
   {
-    return (index_t)lights.size();
+    return static_cast<index_t>(lights.size());
   }
   
   const Light& GetPointLight(index_t i) const
@@ -157,7 +157,7 @@ public:
   
   inline index_t GetNumGeometries() const
   {
-    return new_primitives.size();
+    return static_cast<index_t>(new_primitives.size());
   }
   
   inline const Geometry& GetGeometry(index_t i) const
