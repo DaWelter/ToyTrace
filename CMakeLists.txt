@@ -89,18 +89,25 @@ endif(NOT WIN32)
     
 set(Cubature_DIR "external/cubature")
 
-    
-set(SOURCES src/image.cxx  src/parsenff.cxx  src/shader.cxx src/ray.cxx src/sampler.cxx
-            src/phasefunctions.cxx src/atmosphere.cxx src/spectral.cxx src/primitive.cxx src/renderingalgorithms.cxx 
-            src/light.cxx src/texture.cxx src/embreeaccelerator.cxx src/scene.cxx src/lightpicker_trivial.cxx src/renderingalgorithms_photonmap.cxx 
-            src/rendering_util.cxx src/pathlogger.cxx src/photonintersector.cxx)
-add_executable(toytrace src/toytrace.cxx ${SOURCES})
+add_library(commonstuff STATIC)
+target_sources(commonstuff PRIVATE
+  src/image.cxx  src/parsenff.cxx  src/shader.cxx src/ray.cxx src/sampler.cxx
+  src/phasefunctions.cxx src/atmosphere.cxx src/spectral.cxx src/primitive.cxx src/renderingalgorithms.cxx 
+  src/light.cxx src/texture.cxx src/embreeaccelerator.cxx src/scene.cxx src/lightpicker_trivial.cxx src/renderingalgorithms_photonmap.cxx 
+  src/rendering_util.cxx src/pathlogger.cxx src/photonintersector.cxx)
+file(GLOB headers RELATIVE ${CMAKE_SOURCE_DIR} "src/*.hxx")
+target_sources(commonstuff PRIVATE ${headers})
+
+add_executable(toytrace src/toytrace.cxx)
+target_link_libraries(toytrace commonstuff)
 
 
 if(BuildTests)
-    add_executable(tests src/tests.cxx src/tests3.cxx src/tests_sampling.cxx src/tests_microfacet.cxx src/tests_stats.cxx ${Cubature_DIR}/hcubature.c ${SOURCES})
+    add_executable(tests src/tests.cxx src/tests3.cxx src/tests_sampling.cxx src/tests_microfacet.cxx src/tests_stats.cxx ${Cubature_DIR}/hcubature.c)
     add_executable(tests2 src/tests2.cxx)
     add_executable(tests_tbb src/tests_tbb.cxx)
+    target_link_libraries(tests commonstuff)
+    target_link_libraries(tests2 commonstuff)
     target_link_libraries(tests_tbb tbb)
 endif(BuildTests)
 
