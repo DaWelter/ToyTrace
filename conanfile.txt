@@ -9,13 +9,15 @@ Embree/3.5.0@dawelter/testing
 OIIO/2.0@dawelter/testing
 TBB/2019.3@dawelter/testing
 openexr/2.3.0@dawelter/testing
-Assimp/4.1@dawelter/testing
+#Assimp/4.1@dawelter/testing
+Assimp/4.1.0@jacmoe/testing
 eigen/3.3.5@dawelter/testing
 
 [options]
 Assimp:shared=True
 openexr:shared=True
 yaml-cpp:shared=False
+oiio:shared=True
 
 [generators]
 cmake
