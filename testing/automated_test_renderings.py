@@ -433,6 +433,10 @@ class Various(object):
         self.scenes['various_refractive_sphere_caustics'] = 'refractive_sphere_caustics.nff'
         self.scenes['various_refract_beam_at_cube'] = 'refract_beam_at_cube.nff'
         self.scenes['various_refractive_sphere_caustics_wo_medium'] = 'refractive_sphere_caustics_wo_medium.nff'
+        self.scenes['various_cornelbox_steelbunny'] = 'cornelbox_steelbunny.nff'
+        self.scenes['various_cornelbox_translucentbunny'] = 'cornelbox_translucentbunny.nff'
+        self.scenes['various_cornelbox_translucentmeshsphere'] = 'cornelbox_translucentmeshsphere.nff'
+        self.scenes['various_cornelbox_translucentsphere'] = 'cornelbox_translucentsphere.nff'
         # self.common_opt = defaultdict(lambda : {'-w': 480, '-h': 320})
         # self.common_opt['various_cornel_parallel_arealight'] = {'-w': 320, '-h': 320}
         # self.common_opt['various_cornelbox_parabolic_reflector'] = {'-w': 320, '-h': 320}
