@@ -17,7 +17,7 @@ private:
   size_t _size;
 
 public:
-  Span(T* begin, size_t size)
+  Span(T* begin = nullptr, size_t size = 0)
     : _begin{begin}, _size{size}
   {}
   
