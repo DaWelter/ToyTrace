@@ -20,6 +20,14 @@ double ChiSquaredProbability(const int *counts, const double *weights, int num_b
 // for large number of samples.
 double StddevOfAverage(double sample_stddev, int num_samples);
 
+// The standard estimator of the sample standard deviation is itself
+// a random variable because it is composed of random variables.
+// So it has a probability distribution. The distribution is
+// a "scaled chi-squared distribution".
+// See https://en.wikipedia.org/w/index.php?title=Variance&oldid=735567901#Distribution_of_the_sample_variance
+// This function returns the standard deviation of this distribution.
+double StddevOfStddev(double sample_stddev, int num_samples);
+
 double StudentsTValue(double sample_avg, double avg_stddev, double true_mean);
 
 double StudentsTDistributionOutlierProbability(double t, double num_samples);

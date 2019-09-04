@@ -134,11 +134,15 @@ double ChiSquaredProbability(const int *counts, const double *weights, int num_b
 }
 
 
-// By https://en.wikipedia.org/wiki/Central_limit_theorem
-// for large number of samples.
 double StddevOfAverage(double sample_stddev, int num_samples)
 {
   return sample_stddev / std::sqrt(num_samples);
+}
+
+
+double StddevOfStddev(double sample_stddev, int num_samples)
+{
+  return std::sqrt(2. / (num_samples - 1))*Sqr(sample_stddev);
 }
 
 

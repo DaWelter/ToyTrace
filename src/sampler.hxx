@@ -264,6 +264,52 @@ class Accumulator
 };
 
 
+template<class T>
+class ArrayAccumulator
+{
+public:
+  using ArrayXd = Eigen::Array<T, Eigen::Dynamic, 1>;
+  ArrayAccumulator(int size);
+  void Add(int i, const T &new_x);
+  void Add(const ArrayAccumulator<T> &other);
+  const ArrayXd &Mean() const { return mean; }
+  ArrayXd Var() const;
+  int Size() const { return mean.rows(); }
+private:
+  ArrayXd mean, sqr_dev;
+  Eigen::ArrayXi counts;
+};
+
+
+template<class T>
+inline ArrayAccumulator<T>::ArrayAccumulator(int size)
+  : mean(size), sqr_dev(size), counts(size)
+{
+  mean.setZero();
+  sqr_dev.setZero();
+  counts.setZero();
+}
+
+template<class T>
+inline void OnlineVariance::ArrayAccumulator<T>::Add(int i, const T & new_x)
+{
+  OnlineVariance::Update(mean[i], sqr_dev[i], counts[i], new_x);
+}
+
+template<class T>
+inline void OnlineVariance::ArrayAccumulator<T>::Add(const ArrayAccumulator<T>& other)
+{
+  mean = (mean * counts.cast<double>() + other.mean * other.counts.cast<double>()) / (counts + other.counts).cast<double>();
+  counts += other.counts;
+  sqr_dev += other.sqr_dev;
+}
+
+template<class T>
+inline typename OnlineVariance::ArrayAccumulator<T>::ArrayXd OnlineVariance::ArrayAccumulator<T>::Var() const
+{
+  return (counts >= 2).select(sqr_dev / (counts - 1).cast<double>(), ArrayXd::Constant(Size(),NaN));
+}
+
 }
 
 

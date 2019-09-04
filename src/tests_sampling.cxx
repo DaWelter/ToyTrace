@@ -5,6 +5,8 @@
 #include <iostream>
 #include <fstream>
 
+#include <boost/container/small_vector.hpp>
+
 #ifdef HAVE_JSON
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -78,6 +80,56 @@ void Write(rj::Document &doc, const std::string &filename)
 
 }
 #endif
+
+
+
+TEST(OnlineVariance, ArrayAccumulator)
+{
+  static constexpr int Narms = 3;
+  static constexpr int Nsamples = 100;
+  std::mt19937 gen;
+  OnlineVariance::ArrayAccumulator<double> accum1(Narms);
+  OnlineVariance::ArrayAccumulator<double> accum2(Narms);
+  
+  const double means[Narms] = {
+    10., 20., 30.
+  };
+  const double stddev[Narms] = {
+    1., 33., 7.
+  };
+  boost::container::small_vector<std::normal_distribution<double>, Narms> dist;
+  for (int i = 0; i < Narms; ++i)
+    dist.emplace_back(means[i], stddev[i]);
+
+  for (int isample = 0; isample < Nsamples; ++isample)
+  {
+    for (int iarm = 0; iarm < Narms; ++iarm)
+    {
+      accum1.Add(iarm, dist[iarm](gen));
+      accum2.Add(iarm, dist[iarm](gen));
+    }
+  }
+
+  accum2.Add(accum1);
+
+  auto Check = [means,stddev](OnlineVariance::ArrayAccumulator<double> &accum)
+  {
+    auto sample_means = accum.Mean();
+    auto sample_var = accum.Var();
+    auto sample_stddev = sample_var.sqrt().eval();
+    for (int i = 0; i < accum.Size(); ++i)
+    {
+      // Allow at most two standard deviations of error
+      double mean_stddev = StddevOfAverage(sample_means[i], Nsamples);
+      EXPECT_LT(std::abs(sample_means[i] - means[i]), mean_stddev*2);
+      double stddev_stddev = StddevOfStddev(sample_stddev[i], Nsamples);
+      EXPECT_LE(std::abs(sample_stddev[i] - stddev[i]), stddev_stddev*2);
+    }
+  };
+
+  Check(accum1);
+  Check(accum2);
+}
 
 
 
