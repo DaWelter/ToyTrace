@@ -158,7 +158,9 @@ target_include_directories(commonstuff PUBLIC
 #################################################
 
 add_executable(toytrace src/toytrace.cxx)
-target_link_libraries(toytrace commonstuff ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE})
+target_link_libraries(toytrace commonstuff 
+                      optimized ${Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE}
+                      debug ${Boost_PROGRAM_OPTIONS_LIBRARY_DEBUG})
 
 if(BuildTests)
     add_executable(tests src/tests.cxx src/tests3.cxx src/tests_sampling.cxx src/tests_microfacet.cxx src/tests_stats.cxx)
