@@ -92,6 +92,10 @@ public:
   LinkListBase()
     : next{ static_cast<Node*>(this) }
   {}
+
+  LinkListBase(const LinkListBase &) = delete;
+  LinkListBase(LinkListBase &&) = delete;
+
 private:
   Node* next = nullptr;
 };

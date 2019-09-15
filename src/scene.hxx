@@ -91,8 +91,6 @@ private:
   Box boundingBox;
   std::unique_ptr<EnvironmentalRadianceField> envlight;
   
-  void Append(const Geometry &geo);
-
 public:
   Scene();
   ~Scene();
@@ -191,4 +189,6 @@ public:
   void PrintInfo() const;
   
   Box GetBoundingBox() const;
+
+  void Append(const Geometry &geo);
 };

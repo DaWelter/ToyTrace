@@ -24,6 +24,7 @@
 #include "photonintersector.hxx"
 #include "shader_util.hxx"
 #include "shader_physics.hxx"
+#include "lightpicker_ucb.hxx"
 
 
 TEST(TestRaySegment, ExprTemplates)
@@ -1203,6 +1204,102 @@ TEST(Photonintersector, Photonintersector)
     }
   }
 }
+
+///////////////////////////////////////////////
+////   Light Picker
+///////////////////////////////////////////////
+
+TEST(LightPickerUcb, SelectionProbabilities)
+{
+  const char* scenestr = R"""(
+{
+larea arealight2 uniform 1 1 1 1
+diffuse black  1 1 1 0.
+m testing/scenes/unitrectangle.obj
+}
+
+l 0 0.75 0  1 1 1 1
+
+lddome 0 1 0  0.02 0.02 0.5
+)""";
+
+  Scene scene;
+  scene.ParseNFFString(scenestr);
+  scene.BuildAccelStructure();
+
+  const int NUM_PICKERS = 4;
+  const int NUM_LIGHTS = 4;
+  const int NUM_ITERS = 2;
+  const int NUM_INNER_ITERS = 4;
+
+  std::array<UcbLightPicker, NUM_PICKERS> pickers{
+    scene, scene, scene, scene
+  };
+  pickers[0].Init();
+  for (int i=1; i<NUM_PICKERS; ++i)
+    pickers[i].InitSharedWith(pickers[0]);
+  pickers[0].UpdateAllShared();
+
+  auto CheckDistributionProbabilities = [&](const UcbLightPicker &picker, Span<const double> desired_probs)
+  {
+    const double p_env = picker.PmfOfLight(scene.GetTotalEnvLight());
+    const double p_area1 = picker.PmfOfLight(scene.GetPrimitiveFromAreaLightIndex(0));
+    const double p_area2 = picker.PmfOfLight(scene.GetPrimitiveFromAreaLightIndex(1));
+    const double p_point = picker.PmfOfLight(scene.GetPointLight(0));
+    const double prob_array[4] = {
+      p_env, p_area1, p_area2, p_point
+    };
+    for (int i = 0; i < NUM_LIGHTS; ++i)
+      ASSERT_LE(std::abs(prob_array[i] - desired_probs[i]), 0.1);
+  };
+
+  const auto UNIFORM_PROBS =
+    Eigen::Array<double, NUM_LIGHTS, 1>::Constant(1. / NUM_LIGHTS).eval();
+  const double TARGET_PROBS[NUM_LIGHTS] = {
+    1. / 10., 2. / 10., 3. / 10., 4. / 10.
+  };
+
+  for (const auto &picker : pickers)
+    CheckDistributionProbabilities(picker, AsSpan(UNIFORM_PROBS));
+
+  struct Callback
+  {
+    UcbLightPicker &picker;
+    void operator()(const ROI::EnvironmentalRadianceField &, double prob, LightRef ref)
+    {
+      picker.ObserveLightContribution(ref, Spectral3{ 1. });
+    }
+    void operator()(const ROI::PointEmitter &, double prob, LightRef ref)
+    {
+      picker.ObserveLightContribution(ref, Spectral3{ 4. });
+    }
+    void operator()(const PrimRef &prim, double prob, LightRef ref)
+    {
+      const double val = prim.index == 0 ? 2. : 3.;
+      picker.ObserveLightContribution(ref, Spectral3{ val });
+    }
+    void operator()(const Medium &, double prob, LightRef ref) 
+    {
+      picker.ObserveLightContribution(ref, Spectral3::Zero());
+    }
+  };
+
+  Sampler sampler;
+  int picker_idx = 0;
+  for (int iter = 0; iter < NUM_ITERS; ++iter)
+  {
+    for (int inner = 0; inner < NUM_INNER_ITERS; ++inner)
+    {
+      pickers[picker_idx].PickLight(sampler, Callback{ pickers[picker_idx] });
+      picker_idx = (picker_idx + 1) % NUM_PICKERS;
+    }
+    pickers[0].UpdateAllShared();
+  }
+
+  for (const auto &picker : pickers)
+    CheckDistributionProbabilities(picker, Span<const double>(TARGET_PROBS, NUM_LIGHTS));
+}
+
 
 
 //////////////////////////////////////////////

@@ -179,20 +179,37 @@ inline auto TowerSamplingBisection(Span<const T> cmf, T r)
   return upper;
 }
 
+
+template<class T>
+inline void TowerSamplingInplaceCumSum(Span<T> weights)
+{
+  using index_t = decltype(weights.size());
+  for (index_t i = 1; i < weights.size(); ++i)
+  {
+    weights[i] += weights[i - 1];
+  }
+}
+
+
+template<class T>
+inline void TowerSamplingNormalize(Span<T> cumsum)
+{
+  using index_t = decltype(cumsum.size());
+  T inv_sum = T(1) / cumsum[cumsum.size() - 1];
+  for (index_t i = 0; i < cumsum.size(); ++i)
+  {
+    cumsum[i] *= inv_sum;
+  }
+}
+
+
 template<class T>
 inline void TowerSamplingComputeNormalizedCumSum(Span<T> weights)
 {
-  using index_t = decltype(weights.size());
-  for (index_t i=1; i<weights.size(); ++i)
-  {
-    weights[i] += weights[i-1];
-  }
-  T inv_sum = T(1)/weights[weights.size()-1];
-  for (index_t i=0; i<weights.size(); ++i)
-  {
-    weights[i] *= inv_sum;
-  }
+  TowerSamplingInplaceCumSum(weights);
+  TowerSamplingNormalize(weights);
 }
+
 
 template<class T>
 inline T TowerSamplingProbabilityFromCmf(Span<T> cmf, typename Span<T>::index_t idx)
@@ -272,8 +289,9 @@ public:
   ArrayAccumulator(int size);
   void Add(int i, const T &new_x);
   void Add(const ArrayAccumulator<T> &other);
-  const ArrayXd &Mean() const { return mean; }
-  ArrayXd Var() const;
+  const auto &Mean() const { return mean; }
+  const auto &Counts() const { return counts; }
+  ArrayXd Var(T fill_value = NaN) const;
   int Size() const { return mean.rows(); }
 private:
   ArrayXd mean, sqr_dev;
@@ -299,15 +317,18 @@ inline void OnlineVariance::ArrayAccumulator<T>::Add(int i, const T & new_x)
 template<class T>
 inline void OnlineVariance::ArrayAccumulator<T>::Add(const ArrayAccumulator<T>& other)
 {
-  mean = (mean * counts.cast<double>() + other.mean * other.counts.cast<double>()) / (counts + other.counts).cast<double>();
+  mean = (counts + other.counts > 0).select(
+    (mean * counts.cast<double>() + other.mean * other.counts.cast<double>()) / (counts + other.counts).cast<double>(),
+    0.
+  );
   counts += other.counts;
   sqr_dev += other.sqr_dev;
 }
 
 template<class T>
-inline typename OnlineVariance::ArrayAccumulator<T>::ArrayXd OnlineVariance::ArrayAccumulator<T>::Var() const
+inline typename OnlineVariance::ArrayAccumulator<T>::ArrayXd OnlineVariance::ArrayAccumulator<T>::Var(T fill_value) const
 {
-  return (counts >= 2).select(sqr_dev / (counts - 1).cast<double>(), ArrayXd::Constant(Size(),NaN));
+  return (counts >= 2).select(sqr_dev / (counts - 1).cast<double>(), ArrayXd::Constant(Size(),fill_value));
 }
 
 }

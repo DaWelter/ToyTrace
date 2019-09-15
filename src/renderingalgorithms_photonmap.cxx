@@ -19,6 +19,7 @@
 #include "renderingalgorithms_interface.hxx"
 #include "renderingalgorithms_simplebase.hxx"
 #include "lightpicker_trivial.hxx"
+#include "lightpicker_ucb.hxx"
 
 
 
@@ -92,9 +93,10 @@ inline double EvalKernel(const K &k, const Double3 &a, const Double3 &b)
 struct Photon
 {
   Double3 position;
-  Spectral3 weight;
+  Spectral3f weight;
+  int path_index;
   Float3 direction;
-  short node_number; // Starts at 2. First node is on the light source.
+  short node_number; // Starts at no 2. First node is on the light source.
   bool monochromatic;
 };
 
@@ -103,17 +105,18 @@ class PhotonmappingWorker
 {
   friend struct EmitterSampleVisitor;
   PhotonmappingRenderingAlgo *master;
-  TrivialLightPicker light_picker;
+  UcbLightPicker& light_picker;
   MediumTracker medium_tracker;
   Sampler sampler;
   int current_node_count = 0;
   Spectral3 current_emission;
+  LightRef current_light_ref;
   LambdaSelection lambda_selection;
   PathContext context;
   RayTermination ray_termination;
   bool monochromatic = false;
 private:
-  Ray GeneratePrimaryRay(Spectral3 &path_weight);
+  Ray GeneratePrimaryRay();
   bool TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &weight_accum);
   bool ScatterAt(Ray &ray, const SurfaceInteraction &interaction, const Spectral3 &track_weigh, Spectral3 &weight_accum);
   bool ScatterAt(Ray &ray, const VolumeInteraction &interaction, const Spectral3 &track_weigh, Spectral3 &weight_accum);
@@ -123,6 +126,7 @@ public:
   // from these members. Then destroy the instance.
   ToyVector<Photon> photons_volume;
   ToyVector<Photon> photons_surface;
+  ToyVector<LightRef> emitter_refs; // Of entire photon path.
   int num_photons_traced = 0;
   SpectralN max_throughput_weight{0};
   double max_bsdf_correction_weight{0};
@@ -132,7 +136,7 @@ public:
   static constexpr double log_path_weight_threshold = 1000.;
   Pathlogger logger;
 #endif
-  PhotonmappingWorker(PhotonmappingRenderingAlgo *master);
+  PhotonmappingWorker(PhotonmappingRenderingAlgo *master, int worker_index);
   void StartNewPass(const LambdaSelection &lambda_selection);
   void TracePhotons(int count);
 };
@@ -142,7 +146,8 @@ class CameraRenderWorker
 {
   friend struct EmitterDirectLightingVisitor;
   PhotonmappingRenderingAlgo *master;
-  TrivialLightPicker light_picker;
+  UcbLightPicker& light_picker;
+  UcbLightPicker& light_picker_photons;
   MediumTracker medium_tracker;
   Sampler sampler;
   LambdaSelection lambda_selection;
@@ -154,6 +159,7 @@ class CameraRenderWorker
   Kernel2d kernel2d;
   Kernel3d kernel3d;
   boost::optional<Pdf> last_scatter_pdf_value; // For MIS.
+  int num_camera_rays_traced = 0;
 private:
   Ray GeneratePrimaryRay(Spectral3 &path_weight);
   bool TrackToNextInteractionAndRecordPixel(Ray &ray, Spectral3 &weight_accum);
@@ -167,11 +173,12 @@ private:
   void AddPhotonBeamContributions(const RaySegment &segment, const Medium &medium, const PiecewiseConstantTransmittance &pct, const Spectral3 &track_weight);
   void MaybeAddDirectLighting(const Double3 &travel_dir, const SurfaceInteraction &interaction, const Spectral3& weight_accum);
   void AddToImageBuffer(const Spectral3 &measurement_estimate);
+  void AddLightPickerPhotonReturn(const Photon &photon, const Spectral3 &radiance_estimate);
 #ifdef DEBUG_BUFFERS
   void AddToDebugBuffer(int id, int level, const Spectral3 &measurement_estimate);
 #endif
 public:
-  CameraRenderWorker(PhotonmappingRenderingAlgo *master);
+  CameraRenderWorker(PhotonmappingRenderingAlgo *master, int worker_index);
   void StartNewPass(const LambdaSelection &lambda_selection);
   void Render(int pixel_index, int batch_size, int samples_per_pixel);
 
@@ -190,7 +197,8 @@ private:
   std::unique_ptr<PhotonIntersector> beampointaccel;
   ToyVector<Photon> photons_volume;
   ToyVector<Photon> photons_surface;
-  int num_threads = 1;
+  ToyVector<LightRef> emitter_refs;
+  int num_workers = 1;
   int num_pixels = 0;
   int pass_index = 0;
   int num_photons_traced = 0;
@@ -206,6 +214,9 @@ private:
   LambdaSelectionStrategyShuffling lambda_selection_factory;
   ToyVector<PhotonmappingWorker> photonmap_workers;
   ToyVector<CameraRenderWorker> camerarender_workers;
+  ToyVector<std::unique_ptr<UcbLightPicker>> light_pickers_nee; // For next event estimation
+  std::unique_ptr<UcbLightPicker> light_pickers_photons; // For photon emissions
+  ToyVector<std::atomic<float>> ucb_photon_path_returns;
 #ifdef DEBUG_BUFFERS  
   ToyVector<Spectral3ImageBuffer> debugbuffers;
   static constexpr int DEBUGBUFFER_DEPTH = 10;
@@ -222,9 +233,10 @@ public:
 public:
   PhotonmappingRenderingAlgo(const Scene &scene_, const RenderingParameters &render_params_)
     : RenderingAlgo{}, buffer{render_params_.width, render_params_.height}, 
-       num_threads{0}, spp_schedule{render_params_},  render_params{render_params_}, scene{scene_}
+       spp_schedule{render_params_},  render_params{render_params_}, scene{scene_}
       
   {
+    num_workers = std::max(1, this->render_params.num_threads);
     num_pixels = render_params.width * render_params.height;
     current_surface_photon_radius = render_params.initial_photon_radius;
     current_volume_photon_radius = render_params.initial_photon_radius;
@@ -234,18 +246,19 @@ public:
       debugbuffers.emplace_back(render_params.width, render_params.height);
     }
 #endif
+    InitializeLightPickers();
+    InitializeWorkers();
   }
   
   void Run() override
   {
-    for (int i=0; i<std::max(1, this->render_params.num_threads); ++i)
-    {
-      photonmap_workers.emplace_back(this);
-      camerarender_workers.emplace_back(this);
-    } 
-    num_threads = isize(photonmap_workers);
     while (!stop_flag.load() && spp_schedule.GetPerIteration() > 0)
     {
+      UpdateLightPickers();
+      std::cout << "NEE LP: ";
+      light_pickers_nee.front()->Print(std::cout);
+      std::cout << "PHOTON LP: ";
+      light_pickers_photons->Print(std::cout);
       // Full sweep across spectrum counts as one pass.
       // But one sweep will require multiple photon mapping passes since 
       // each pass only covers part of the spectrum.
@@ -272,7 +285,7 @@ public:
           {
             return !(this->stop_flag.load());
           },
-          num_threads, the_task_group);
+          num_workers, the_task_group);
         
         PrepareGlobalPhotonMap();
 
@@ -298,13 +311,14 @@ public:
             this->CallInterruptCb(false);
             return true;
           },
-          num_threads, the_task_group);      
-      }
+          num_workers, the_task_group);      
+      } // For spectrum sweep
       std::cout << "Sweep " << spp_schedule.GetTotal() << " finished" << std::endl;
       CallInterruptCb(true);
       spp_schedule.UpdateForNextPass();
       ++pass_index;
       UpdatePhotonRadii();
+      ObserveLightPickerReturns();
     } // Pass iteration
   }
   
@@ -363,24 +377,60 @@ private:
   void PrepareGlobalPhotonMap();
   
   void UpdatePhotonRadii();
+
+  void InitializeLightPickers();
+
+  void UpdateLightPickers();
+  void ObserveLightPickerReturns();
+
+  void InitializeWorkers();
 };
+
+
+void Photonmapping::PhotonmappingRenderingAlgo::InitializeWorkers()
+{
+  for (int i = 0; i < num_workers; ++i)
+  {
+    photonmap_workers.emplace_back(this, i);
+    camerarender_workers.emplace_back(this, i);
+  }
+}
 
 
 void PhotonmappingRenderingAlgo::PrepareGlobalPhotonMap()
 {
-  photons_volume.clear();
+  photons_volume.clear(); 
   photons_surface.clear();
-  num_photons_traced = 0;
+  emitter_refs.clear();
+  
+  auto AppendPhotons = [&](ToyVector<Photon> &dst, const ToyVector<Photon> &src) -> void
+  {
+    auto start = dst.size();
+    dst.insert(dst.end(), src.begin(), src.end());
+    if (num_photons_traced <= 0)
+      return;
+    for (auto i = start; i < dst.size(); ++i)
+    {
+      dst[i].path_index += num_photons_traced;
+    }
+  };
 
+  num_photons_traced = 0;
   for(auto &worker : photonmap_workers)
   {
-    photons_volume.insert(photons_volume.end(), worker.photons_volume.begin(), worker.photons_volume.end());
-    photons_surface.insert(photons_surface.end(), worker.photons_surface.begin(), worker.photons_surface.end());
+    AppendPhotons(photons_volume, worker.photons_volume);
+    AppendPhotons(photons_surface, worker.photons_surface);
+    Append(emitter_refs, worker.emitter_refs);
     num_photons_traced += worker.num_photons_traced;
+
     max_throughput_weight = max_throughput_weight.cwiseMax(worker.max_throughput_weight);
     max_bsdf_correction_weight = std::max(max_bsdf_correction_weight,worker.max_bsdf_correction_weight);
     max_uncorrected_bsdf_weight = max_uncorrected_bsdf_weight.cwiseMax(worker.max_uncorrected_bsdf_weight);
   }
+
+  // Reallocate because copy c'tor for resizing is not available.
+  ucb_photon_path_returns = decltype(ucb_photon_path_returns)(num_photons_traced);
+
   std::cout << "Max throughput = " << max_throughput_weight << std::endl;
   std::cout << "max_bsdf_correction_weight = " << max_bsdf_correction_weight << std::endl;
   std::cout << "max_uncorrected_bsdf_weight= " << max_uncorrected_bsdf_weight << std::endl;
@@ -408,46 +458,87 @@ void PhotonmappingRenderingAlgo::UpdatePhotonRadii()
 }
 
 
+void Photonmapping::PhotonmappingRenderingAlgo::InitializeLightPickers()
+{
+  for (int i = 0; i < num_workers; ++i)
+  {
+    light_pickers_nee.emplace_back(std::make_unique<UcbLightPicker>(scene));
+  }
+  light_pickers_photons = std::make_unique<UcbLightPicker>(scene);
+  light_pickers_nee.front()->Init();
+  light_pickers_photons->Init();
+  for (int i = 1; i < num_workers; ++i)
+  {
+    light_pickers_nee[i]->InitSharedWith(*light_pickers_nee.front());
+  }
+}
+
+
+void Photonmapping::PhotonmappingRenderingAlgo::UpdateLightPickers()
+{
+  light_pickers_nee.front()->UpdateAllShared();
+  light_pickers_photons->UpdateAllShared();
+}
+
+
+void Photonmapping::PhotonmappingRenderingAlgo::ObserveLightPickerReturns()
+{
+  // Not working because photons can fly out of the scene.
+  // Also not working because can bounce around multiple times.
+
+  assert(
+    num_photons_traced == emitter_refs.size() &&
+    num_photons_traced == ucb_photon_path_returns.size());
+  for (int i = 0; i < num_photons_traced; ++i)
+  {
+    light_pickers_photons->ObserveLightContribution(
+      emitter_refs[i], ucb_photon_path_returns[i]);
+  }
+}
+
+
 struct EmitterSampleVisitor
 {
   PhotonmappingWorker* this_;
   PhotonmappingRenderingAlgo *master;
   Ray out_ray;
-  Spectral3 weight;
   EmitterSampleVisitor(PhotonmappingWorker* this_) : this_{this_}, master{this_->master} {}
   
-  void operator()(const ROI::EnvironmentalRadianceField &env, double prob)
+  void operator()(const ROI::EnvironmentalRadianceField &env, double prob, const LightRef &ref)
   {
     auto smpl = env.TakeDirectionSample(this_->sampler, this_->context);
     EnvLightPointSamplingBeyondScene gen{master->scene};
     double pdf = gen.Pdf(smpl.coordinates);
     Double3 org = gen.Sample(smpl.coordinates, this_->sampler);
-    weight = smpl.value / (prob*(double)smpl.pdf_or_pmf*(double)pdf);
+    this_->current_emission = smpl.value / (prob*(double)smpl.pdf_or_pmf*(double)pdf);
     out_ray = Ray{org, smpl.coordinates};
+    this_->current_light_ref = ref;
     this_->medium_tracker.initializePosition(org);
   }
-  void operator()(const ROI::PointEmitter &light, double prob)
+  void operator()(const ROI::PointEmitter &light, double prob, const LightRef &ref)
   {
     Double3 org = light.Position();
     auto smpl = light.TakeDirectionSampleFrom(org, this_->sampler, this_->context);
-    weight = smpl.value / (prob*(double)smpl.pdf_or_pmf);
+    this_->current_emission = smpl.value / (prob*(double)smpl.pdf_or_pmf);
     out_ray = Ray{org, smpl.coordinates};
+    this_->current_light_ref = ref;
     this_->medium_tracker.initializePosition(org);
   }
-  void operator()(const PrimRef& prim_ref, double prob)
+  void operator()(const PrimRef& prim_ref, double prob, const LightRef &ref)
   {
     const auto &mat = master->scene.GetMaterialOf(prim_ref);
     assert(mat.emitter); // Otherwise would would not have been selected.
     auto area_smpl = mat.emitter->TakeAreaSample(prim_ref, this_->sampler, this_->context);
     auto dir_smpl = mat.emitter->TakeDirectionSampleFrom(area_smpl.coordinates, this_->sampler, this_->context);
-    weight = dir_smpl.value / ((double)area_smpl.pdf_or_pmf*(double)dir_smpl.pdf_or_pmf*prob);
+    this_->current_emission = dir_smpl.value / ((double)area_smpl.pdf_or_pmf*(double)dir_smpl.pdf_or_pmf*prob);
     SurfaceInteraction interaction{area_smpl.coordinates};
-    weight *= DFactorPBRT(interaction, dir_smpl.coordinates);
+    this_->current_emission *= DFactorPBRT(interaction, dir_smpl.coordinates);
     out_ray = Ray{interaction.pos, dir_smpl.coordinates};
     out_ray.org += AntiSelfIntersectionOffset(interaction, out_ray.dir);
+    this_->current_light_ref = ref;
     this_->medium_tracker.initializePosition(out_ray.org);
   }
-  void operator()(const Medium &medium, double prob)
+  void operator()(const Medium &medium, double prob, const LightRef &ref)
   {
 //     Medium::VolumeSample smpl = medium.SampleEmissionPosition(sampler, context);
 //     double pdf_which_cannot_be_delta = 0;
@@ -455,6 +546,7 @@ struct EmitterSampleVisitor
 //     node.node_type = RW::NodeType::VOLUME_EMITTER;
 //     node.interaction.volume = VolumeInteraction(smpl.pos, medium, radiance, Spectral3{0.});
 //     // The reason sigma_s is set to 0 in the line above, is that the initial light node will never be used for scattering.
+//     this_->current_light_ref = ref;
 //     pdf = prob*pdf_which_cannot_be_delta;
   }
 };
@@ -464,15 +556,16 @@ struct EmitterSampleVisitor
 
 
 
-PhotonmappingWorker::PhotonmappingWorker(PhotonmappingRenderingAlgo *master)
+PhotonmappingWorker::PhotonmappingWorker(PhotonmappingRenderingAlgo *master, int worker_index)
   : master{master},
-    light_picker{master->scene},
+    light_picker{*master->light_pickers_photons},
     medium_tracker{master->scene},
     context{},
     ray_termination{master->render_params}
 {
   photons_surface.reserve(1024);
   photons_volume.reserve(1024);
+  emitter_refs.reserve(1024);
 }
 
 void PhotonmappingWorker::StartNewPass(const LambdaSelection &lambda_selection)
@@ -483,16 +576,16 @@ void PhotonmappingWorker::StartNewPass(const LambdaSelection &lambda_selection)
 //   photon_surface_blur_weight = 1.0/(UnitDiscSurfaceArea*Sqr(master->current_surface_photon_radius));
   photons_surface.clear();
   photons_volume.clear();
+  emitter_refs.clear();
   num_photons_traced = 0;
   max_throughput_weight.setConstant(0.);
 }
 
 
-Ray PhotonmappingWorker::GeneratePrimaryRay(Spectral3 &path_weight)
+Ray PhotonmappingWorker::GeneratePrimaryRay()
 {
   EmitterSampleVisitor emission_visitor{this};
   light_picker.PickLight(sampler, emission_visitor);
-  path_weight *= emission_visitor.weight;
   return emission_visitor.out_ray;
 }
 
@@ -504,8 +597,7 @@ void PhotonmappingWorker::TracePhotons(int count)
     current_node_count = 2;
     monochromatic = false;
     // Weights due to wavelength selection is accounted for in view subpath weights.
-    current_emission.setConstant(1.);
-    Ray ray = GeneratePrimaryRay(current_emission);
+    Ray ray = GeneratePrimaryRay();
 #ifdef LOGGING
     {
       should_log_path = false;
@@ -516,6 +608,7 @@ void PhotonmappingWorker::TracePhotons(int count)
       l.weight_after = Spectral3::Ones();
     }
 #endif    
+    emitter_refs.push_back(current_light_ref);
     bool keepgoing = true;
     Spectral3 weight_accum{1.}; 
     do
@@ -551,7 +644,8 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
       {
         photons_surface.push_back({
           interaction.pos,
-          /*photon_surface_blur_weight**/weight_accum*current_emission,
+          (weight_accum*current_emission).cast<float>(),
+          /*photon_path_index = */num_photons_traced,
           ray.dir.cast<float>(),
           (short)current_node_count,
           monochromatic
@@ -566,7 +660,8 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
       weight_accum *= track_weight;
       photons_volume.push_back({
         interaction.pos,
-        /*photon_volume_blur_weight**/weight_accum*current_emission,
+        (weight_accum*current_emission).cast<float>(),
+        /*photon_path_index = */num_photons_traced,
         ray.dir.cast<float>(),
         (short)current_node_count,
         monochromatic
@@ -652,9 +747,10 @@ bool PhotonmappingWorker::ScatterAt(Ray& ray, const VolumeInteraction& interacti
 
 
 
-CameraRenderWorker::CameraRenderWorker(Photonmapping::PhotonmappingRenderingAlgo* master)
+CameraRenderWorker::CameraRenderWorker(Photonmapping::PhotonmappingRenderingAlgo* master, int worker_index)
   : master{master}, 
-    light_picker{master->scene},
+    light_picker{*master->light_pickers_nee[worker_index]},
+    light_picker_photons{*master->light_pickers_photons},
     medium_tracker{master->scene}, context{}, 
     ray_termination{master->render_params}
 {
@@ -691,11 +787,6 @@ void CameraRenderWorker::Render(int pixel_index_, int batch_size, int samples_pe
 }
 
 
-void CameraRenderWorker::RecordMeasurementToCurrentPixel(const Spectral3 &measurement)
-{
-  auto color = Color::SpectralSelectionToRGB(measurement, lambda_selection.indices);
-  master->buffer.Insert(pixel_index, color);
-}
 
 
 Ray CameraRenderWorker::GeneratePrimaryRay(Spectral3& path_weight)
@@ -707,6 +798,7 @@ Ray CameraRenderWorker::GeneratePrimaryRay(Spectral3& path_weight)
     path_weight *= dir.value / dir.pdf_or_pmf;
     medium_tracker.initializePosition(pos.coordinates);
     last_scatter_pdf_value = boost::none;
+    num_camera_rays_traced++;
     return Ray{pos.coordinates, dir.coordinates};
 }
 
@@ -774,27 +866,29 @@ struct EmitterDirectLightingVisitor
   RaySegment segment_to_light;
   Spectral3 weight;
   Pdf pdf;
+  LightRef light_ref;
   
   EmitterDirectLightingVisitor(CameraRenderWorker* this_, const Double3 &reverse_incident_dir, const SurfaceInteraction &surface) 
     : this_{this_}, master{this_->master}, surface{surface}, reverse_incident_dir{reverse_incident_dir} {}
   
-  void operator()(const ROI::EnvironmentalRadianceField &env, double prob)
+  void operator()(const ROI::EnvironmentalRadianceField &env, double prob, const LightRef &light_ref)
   {
     auto smpl = env.TakeDirectionSample(this_->sampler, this_->context);
     this->weight = smpl.value / (prob*(double)smpl.pdf_or_pmf);
     this->pdf = smpl.pdf_or_pmf;
     this->segment_to_light = SegmentToEnv(smpl.coordinates);
-
+    this->light_ref = light_ref;
   }
-  void operator()(const ROI::PointEmitter &light, double prob)
+  void operator()(const ROI::PointEmitter &light, double prob, const LightRef &light_ref)
   {
     this->segment_to_light = SegmentToPoint(light.Position());
     this->weight = light.Evaluate(light.Position(), -this->segment_to_light.ray.dir, this_->context, nullptr);
     this->weight /= prob;
     this->weight /= Sqr(this->segment_to_light.length);
     this->pdf = Pdf::MakeFromDelta(1.);
+    this->light_ref = light_ref;
   }
-  void operator()(const PrimRef& prim_ref, double prob)
+  void operator()(const PrimRef& prim_ref, double prob, const LightRef &light_ref)
   {
     const auto &mat = master->scene.GetMaterialOf(prim_ref);
     assert(mat.emitter); // Otherwise would would not have been selected.
@@ -805,8 +899,9 @@ struct EmitterDirectLightingVisitor
     this->weight *= 1.0 / (prob * Sqr(this->segment_to_light.length) * (double)area_smpl.pdf_or_pmf);
     this->weight *= DFactorPBRT(surface, -segment_to_light.ray.dir);
     this->pdf = PdfConversion::AreaToSolidAngle(segment_to_light.length, segment_to_light.ray.dir, light_surf.normal)*area_smpl.pdf_or_pmf;
+    this->light_ref = light_ref;
   }
-  void operator()(const Medium &medium, double prob)
+  void operator()(const Medium &medium, double prob, const LightRef &light_ref)
   {
       assert(!"Not implemented!");
 //     Medium::VolumeSample smpl = medium.SampleEmissionPosition(sampler, context);
@@ -816,6 +911,7 @@ struct EmitterDirectLightingVisitor
 //     node.interaction.volume = VolumeInteraction(smpl.pos, medium, radiance, Spectral3{0.});
 //     // The reason sigma_s is set to 0 in the line above, is that the initial light node will never be used for scattering.
 //     pdf = prob*pdf_which_cannot_be_delta;
+//     this->light_ref = light_ref;
   }
 
 private:
@@ -894,7 +990,10 @@ void CameraRenderWorker::MaybeAddDirectLighting(const Double3 &travel_dir, const
 #ifdef DEBUG_BUFFERS 
     AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_DIRECT, 0, path_weight*lighting_visitor.weight);
 #endif
-    AddToImageBuffer(mis_weight*path_weight*lighting_visitor.weight);
+    Spectral3 measurement_estimator = mis_weight * path_weight*lighting_visitor.weight;
+
+    light_picker.ObserveLightContribution(lighting_visitor.light_ref, measurement_estimator);
+    AddToImageBuffer(measurement_estimator);
 }
 
 
@@ -985,6 +1084,7 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
   const auto &shader = GetShaderOf(interaction,master->scene);
   if (shader.prefer_path_tracing_over_photonmap)
     return;
+  auto path_factors = (path_weight * (1.0 / master->num_photons_traced)).eval();
   Spectral3 reflect_estimator{0.};
   master->hashgrid_surface->Query(interaction.pos, [&](int photon_idx)
   {
@@ -1006,8 +1106,9 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
       // See also Eq. 19 in Jarosz (2008) "The Beam Radiance Estimate for Volumetric Photon Mapping"
       bsdf_val *= shading_correction*kernel_val;
     }
-    Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight*bsdf_val, photon.monochromatic | monochromatic);
+    Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight.cast<double>()*bsdf_val, photon.monochromatic | monochromatic);
     reflect_estimator += weight;
+    AddLightPickerPhotonReturn(photon, weight*path_factors);
 #ifdef DEBUG_BUFFERS 
     {
       Spectral3 w = path_weight*weight/master->num_photons_traced;
@@ -1017,13 +1118,14 @@ void CameraRenderWorker::AddPhotonContributions(const SurfaceInteraction& intera
     }
 #endif
   });
-  Spectral3 weight = path_weight*reflect_estimator*(1.0/master->num_photons_traced);
+  Spectral3 weight = reflect_estimator*path_factors;
   AddToImageBuffer(weight);
 }
 
 
 void CameraRenderWorker::AddPhotonContributions(const VolumeInteraction& interaction, const Double3 &incident_dir, const Spectral3& path_weight)
 {
+  const auto path_factors = (interaction.sigma_s*path_weight*(1.0 / master->num_photons_traced)).eval();
   Spectral3 inscatter_estimator{0.};
   master->hashgrid_volume->Query(interaction.pos, [&](int photon_idx){
     const auto &photon = master->photons_volume[photon_idx];
@@ -1034,8 +1136,9 @@ void CameraRenderWorker::AddPhotonContributions(const VolumeInteraction& interac
     if (kernel_val <= 0.)
       return;
     Spectral3 scatter_val = interaction.medium().EvaluatePhaseFunction(-incident_dir, interaction.pos, -photon.direction.cast<double>(), context, nullptr);
-    Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight*scatter_val*kernel_val, photon.monochromatic | monochromatic);
+    Spectral3 weight = MaybeReWeightToMonochromatic(photon.weight.cast<double>()*scatter_val*kernel_val, photon.monochromatic | monochromatic);
     inscatter_estimator += weight;
+    AddLightPickerPhotonReturn(photon, weight*path_factors);
 #ifdef DEBUG_BUFFERS
     {
       Spectral3 w = interaction.sigma_s*path_weight*weight/master->num_photons_traced;
@@ -1045,13 +1148,13 @@ void CameraRenderWorker::AddPhotonContributions(const VolumeInteraction& interac
     }
 #endif
   });
-  Spectral3 weight = interaction.sigma_s*path_weight*inscatter_estimator*(1.0/master->num_photons_traced);
-  AddToImageBuffer(weight);
+  AddToImageBuffer(path_factors * inscatter_estimator);
 }
 
 
 void CameraRenderWorker::AddPhotonBeamContributions(const RaySegment &segment, const Medium &medium, const PiecewiseConstantTransmittance &pct, const Spectral3 &path_weight)
 {
+  const auto path_factors = (path_weight * (1.0 / master->num_photons_traced)).eval();
   Spectral3 inscatter_estimator{0.}; // Integral over the query ray.
   int photon_idx[1024];
   float photon_distance[1024];
@@ -1065,8 +1168,9 @@ void CameraRenderWorker::AddPhotonBeamContributions(const RaySegment &segment, c
     Spectral3 scatter_val = medium.EvaluatePhaseFunction(-segment.ray.dir, photon.position, -photon.direction.cast<double>(), context, nullptr);
     auto [sigma_s, _] = medium.EvaluateCoeffs(photon.position, context);
     const double kernel_value = EvalKernel(kernel2d, photon.position, segment.ray.PointAt(photon_distance[i]));
-    Spectral3 weight = MaybeReWeightToMonochromatic(kernel_value*scatter_val*sigma_s*photon.weight*pct(photon_distance[i]), photon.monochromatic | monochromatic);
+    Spectral3 weight = MaybeReWeightToMonochromatic(kernel_value*scatter_val*sigma_s*photon.weight.cast<double>()*pct(photon_distance[i]), photon.monochromatic | monochromatic);
     inscatter_estimator += weight;
+    AddLightPickerPhotonReturn(photon, weight*path_factors);
 #ifdef DEBUG_BUFFERS
     {
       Spectral3 w = weight/master->num_photons_traced;
@@ -1076,7 +1180,7 @@ void CameraRenderWorker::AddPhotonBeamContributions(const RaySegment &segment, c
     }
 #endif
   }
-  inscatter_estimator *= path_weight*(1.0/master->num_photons_traced);
+  inscatter_estimator *= path_factors;
   AddToImageBuffer(inscatter_estimator);
 }
 
@@ -1086,6 +1190,21 @@ void CameraRenderWorker::AddToImageBuffer(const Spectral3& measurement_estimate)
   auto color = Color::SpectralSelectionToRGB(measurement_estimate, lambda_selection.indices);
   master->buffer.Insert(pixel_index, color);
 }
+
+
+void CameraRenderWorker::RecordMeasurementToCurrentPixel(const Spectral3 &measurement)
+{
+  auto color = Color::SpectralSelectionToRGB(measurement, lambda_selection.indices);
+  master->buffer.Insert(pixel_index, color);
+}
+
+
+void CameraRenderWorker::AddLightPickerPhotonReturn(const Photon &photon, const Spectral3 &radiance_estimate)
+{
+  AtomicAdd(master->ucb_photon_path_returns[photon.path_index],
+    light_picker_photons.RadianceToObservationValue(radiance_estimate));
+}
+
 
 #ifdef DEBUG_BUFFERS
 void CameraRenderWorker::AddToDebugBuffer(int id, int level, const Spectral3 &measurement_estimate)

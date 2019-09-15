@@ -181,6 +181,7 @@ private:
   bool NextLine();
   std::runtime_error MakeException(const std::string &msg) const;
   fs::path MakeFullPath(const fs::path &filename) const;
+  void AddPointLight(std::unique_ptr<RadianceOrImportance::PointEmitter> p);
 };
 
 
@@ -850,13 +851,13 @@ void NFFParser::Parse(Scope &scope)
 		if (num == 3) {
 			// light source with position only
 			col = RGB::Constant(1._rgb);
-			scene->lights.push_back(std::make_unique<RadianceOrImportance::PointLight>(
+			AddPointLight(std::make_unique<RadianceOrImportance::PointLight>(
         Color::RGBToSpectrum(col),
         pos
       ));
 		} else if (num == 7) {
 			// light source with position and color
-			scene->lights.push_back(std::make_unique<PointLight>(
+      AddPointLight(std::make_unique<PointLight>(
         Color::RGBToSpectrum(col_multiplier*col),
         pos
       ));	
@@ -1412,3 +1413,9 @@ std::runtime_error NFFParser::MakeException(const std::string &msg) const
   return std::runtime_error(os.str());
 }
 
+
+void NFFParser::AddPointLight(std::unique_ptr<RadianceOrImportance::PointEmitter> p)
+{
+  p->scene_index = scene->lights.size();
+  scene->lights.push_back(std::move(p));
+}

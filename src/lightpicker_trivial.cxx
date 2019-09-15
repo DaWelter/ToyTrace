@@ -1,14 +1,10 @@
 #include "lightpicker_trivial.hxx"
 
-#include <tbb/parallel_for.h>
-#include <tbb/blocked_range.h>
-
 
 LightPickerCommon::LightPickerCommon(const Scene & scene)
   : scene{ scene }
 {
 }
-
 
 
 TrivialLightPicker::TrivialLightPicker(const Scene& _scene)

@@ -38,6 +38,7 @@ using AreaSample = Sample<PosSampleCoordinates, Nothing, TagAreaSample>;
 class PointEmitter : public Emitter
 {
 public:
+  scene_index_t scene_index = -1;
   virtual Double3 Position() const = 0;
   virtual DirectionalSample TakeDirectionSampleFrom(const Double3 &pos, Sampler &sampler, const PathContext &context) const = 0;
   virtual Spectral3 Evaluate(const Double3 &pos, const Double3 &dir_out, const PathContext &context, double *pdf_direction) const = 0;
