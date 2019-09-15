@@ -1,6 +1,7 @@
 #pragma once
 
 #include "util.hxx"
+#include "vec3f.hxx"
 
 // Inspired by Microsofts GSL. I don't use that one because I read that
 // it has runtime checks that are hard to disable, if at all. My version
@@ -42,7 +43,7 @@ public:
   
   const T* begin() const { return _begin; }
   
-  operator Span<const T>() { return Span<const T>(begin(), size()); }
+  operator Span<const T>() const { return Span<const T>(begin(), size()); }
 };
 
 template<class T, class Alloc>
@@ -69,4 +70,19 @@ inline bool IsInRange(Span<T> s, T* p)
 {
   auto offset = p - s.begin();
   return offset>=0 && offset < s.size();
+}
+
+
+template<class Derived>
+inline Span<typename Eigen::internal::traits<Derived>::Scalar>
+AsSpan(Eigen::PlainObjectBase<Derived> &x)
+{
+  return Span<typename Eigen::internal::traits<Derived>::Scalar>(x.data(), (ptrdiff_t)x.size());
+}
+
+template<class Derived>
+inline Span<const typename Eigen::internal::traits<Derived>::Scalar>
+AsSpan(const Eigen::PlainObjectBase<Derived> &x)
+{
+  return Span<const typename Eigen::internal::traits<Derived>::Scalar>(x.data(), (ptrdiff_t)x.size());
 }
