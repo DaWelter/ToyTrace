@@ -47,9 +47,9 @@ if (WIN32)
     # Regular find script cannot find it. On Ubuntu, the config file which
     # imports this nice TBB::tbb target is not available.
     # So I have to get to a common ground here.
-    get_target_property(TBB_DEBUG_LIBRARIES TBB::tbb IMPORTED_LOCATION_DEBUG)
-    get_target_property(TBB_LIBRARIES TBB::tbb IMPORTED_LOCATION_RELEASE)
-    get_target_property(TBB_INCLUDE_DIRS TBB::tbb INTERFACE_INCLUDE_DIRECTORIES)
+    #get_target_property(TBB_DEBUG_LIBRARIES TBB::tbb IMPORTED_LOCATION_DEBUG)
+    #get_target_property(TBB_LIBRARIES TBB::tbb IMPORTED_LOCATION_RELEASE)
+    #get_target_property(TBB_INCLUDE_DIRS TBB::tbb INTERFACE_INCLUDE_DIRECTORIES)
 else()
     find_package(TBB REQUIRED)
     if (NOT TBB_DEBUG_LIBRARIES)
