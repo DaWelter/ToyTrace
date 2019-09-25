@@ -32,6 +32,7 @@ using Spectral3    = Eigen::Array<Scalar, 3, 1>;
 using SpectralN    = Eigen::Array<Scalar, NBINS, 1>;
 using RGB          = Eigen::Array<RGBScalar, 3, 1>;  // Alias of Spectral3 which is not ideal because they can be mixed.
 using Wavelengths3 = Eigen::Array<Scalar, 3, 1>; // The actual wavelengths
+using Spectral3f   = Eigen::Array<float, 3, 1>;
 
 
 inline auto GetWavelengths()
@@ -80,6 +81,7 @@ SpectralN MaxwellBoltzmanDistribution(double temp);
 
 using RGB = Color::RGB;
 using Spectral3 = Color::Spectral3;
+using Spectral3f = Color::Spectral3f;
 using SpectralN = Color::SpectralN;
 using RGBScalar = Color::RGBScalar;
 using Wavelengths3 = Color::Wavelengths3;

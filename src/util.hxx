@@ -9,6 +9,7 @@
 #include <vector>
 #include <unordered_map>
 #include <string_view>
+#include <atomic>
 
 #include <boost/functional/hash.hpp>
 #include <boost/align/aligned_allocator.hpp>
@@ -369,4 +370,37 @@ template<class Container>
 inline int isize(const Container &c, typename enable_if_has_size_member<Container>::type = 0)
 {
     return static_cast<int>(c.size());
+}
+
+
+template<class T>
+struct enable_if_has_insert_member
+{
+  using type = decltype(std::declval<T&>().size());
+};
+
+
+template<class Container>
+inline void Append(Container &a, const Container &b, typename enable_if_has_insert_member<Container>::type = 0)
+{
+  a.insert(a.end(), b.begin(), b.end());
+}
+
+
+/*
+ * Perform an atomic addition to the float via spin-locking
+ * on compare_exchange_weak. Memory ordering is release on write
+ * consume on read
+ *
+ * from https://www.reddit.com/r/cpp/comments/338pcj/atomic_addition_of_floats_using_compare_exchange/
+ */
+inline float AtomicAdd(std::atomic<float> &f, float d) {
+  float old = f.load(std::memory_order_consume);
+  float desired = old + d;
+  while (!f.compare_exchange_weak(old, desired,
+    std::memory_order_release, std::memory_order_consume))
+  {
+    desired = old + d;
+  }
+  return desired;
 }

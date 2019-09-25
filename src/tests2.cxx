@@ -3,6 +3,8 @@
 #include <bitset>
 #include <type_traits>
 #include <unordered_map>
+#include <atomic>
+#include <thread>
 
 #include <boost/serialization/strong_typedef.hpp>
 #include <boost/pool/simple_segregated_storage.hpp>
@@ -801,6 +803,47 @@ TEST(Span, Test)
   auto span2 = f(things);
   EXPECT_EQ(span2[0], 42);
   //span2[0] = 42; Expectedly, does not compile.
+}
+
+
+///////////////////////////////////////////////
+// Atomics
+// Specially atomic add
+///////////////////////////////////////////////
+
+TEST(Atomic, Add)
+{
+  // The test: two threads add to a single float. 
+  // With regular floats, a wrong results is obtained due to 
+  // race conditions in the load-modify-write ops.
+  std::atomic<float> val{ 0. };
+  //float val = 0.f; // Test fails with this.
+  static_assert(std::atomic<float>::is_always_lock_free, "Must be lockfree");
+  static_assert(sizeof(std::atomic<float>) == sizeof(float), "Must not use extra storage");
+  static constexpr int N = 100;
+  std::atomic_bool trigger{ false };
+  auto fun = [&]()
+  {
+    while (!trigger.load()) {} // busy wait
+    for (int i = 0; i < N; ++i)
+      //val += 1.0f;
+      AtomicAdd(val, 1.0f);
+  };
+  std::thread th1{ fun };
+  std::thread th2{ fun };
+  trigger = true; // Start functions here. Thus masking time to start threads.
+  th1.join();
+  th2.join();
+  ASSERT_NEAR(val, 200.f, 1.e-3);
+}
+
+TEST(Atomic, DefaultInitialization)
+{
+  ToyVector<std::atomic<float>> v(1024*1024);
+  ASSERT_EQ(v.size(), 1024*1024);
+  EXPECT_EQ(v[0], 0.0f);
+  EXPECT_EQ(v[1], 0.0f);
+  EXPECT_EQ(v[v.size()-1], 0.0f);
 }
 
 
