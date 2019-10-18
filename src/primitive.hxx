@@ -40,7 +40,8 @@ public:
     PRIMITIVES_TRIANGLES,
     PRIMITIVES_SPHERES
   } const type;
-  ToyVector<MaterialIndex> material_indices; // Per primitive
+  MaterialIndex material_index{ -1 };
+  index_t light_num_offset = -1;
   
   Geometry(Type _t) : type{_t} {}
   virtual ~Geometry() = default;
@@ -48,6 +49,8 @@ public:
   virtual double Area(index_t index) const = 0;
   virtual index_t Size() const = 0;
   virtual void GetLocalGeometry(SurfaceInteraction &interaction) const = 0;
+  virtual void Append(const Geometry &other) = 0;
+  virtual std::unique_ptr<Geometry> Clone() const = 0;
 };
 
 
@@ -69,6 +72,7 @@ class Mesh : public Geometry
     Mesh(index_t num_triangles, index_t num_vertices);
     
     void Append(const Mesh &other);
+    void Append(const Geometry &other) override;
     void MakeFlatNormals();
     
     inline index_t NumVertices() const { return (index_t)vertices.rows(); }
@@ -78,6 +82,7 @@ class Mesh : public Geometry
     double Area(index_t index) const override;
     index_t Size() const override { return NumTriangles(); }
     void GetLocalGeometry(SurfaceInteraction &interaction) const override;
+    std::unique_ptr<Geometry> Clone() const override;
 };
 
 void AppendSingleTriangle(Mesh &mesh,
@@ -91,15 +96,16 @@ class Spheres : public Geometry
     ToyVector<Vector4f> spheres; // position and radius;
     
     Spheres();
-    void Append(const Float3 pos, const float radius, MaterialIndex material_index);
     void Append(const Float3 pos, const float radius); // Use default material
     void Append(const Spheres &other);
+    void Append(const Geometry &other) override;
     inline index_t NumSpheres() const { return (index_t)spheres.size(); }
     inline std::pair<Float3, float> Get(index_t i) const;
     HitId SampleUniformPosition(index_t index, Sampler &sampler) const override;
     double Area(index_t index) const override;
     int Size() const override { return NumSpheres(); }
     void GetLocalGeometry(SurfaceInteraction &interaction) const override;
+    std::unique_ptr<Geometry> Clone() const override;
 };
 
 inline std::pair<Float3, float> Spheres::Get(int i) const 

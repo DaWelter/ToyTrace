@@ -32,7 +32,7 @@ struct RenderingParameters
 struct Material
 {
   Shader* shader = {nullptr};
-  Medium* medium = {nullptr};
+  Medium* medium = {nullptr};  // Within the geometry. I.e. on the other side of where the surface normal points.
   RadianceOrImportance::AreaEmitter *emitter = {nullptr};
   
   struct Hash
@@ -71,18 +71,25 @@ private:
   using AreaLight = RadianceOrImportance::AreaEmitter;
 
   EmbreeAccelerator embreeaccelerator;
+  EmbreeAccelerator embreevolumes;
   std::unique_ptr<Camera> camera;
+  
+  //ToyVector<Mesh> triangle_geometries;
+  //ToyVector<Spheres> sphere_geometries;
+  ToyVector<std::unique_ptr<Geometry>> geometries;
+  ToyVector<Geometry*> emissive_geometries; // Indicies into geometries array
+
+  //ToyVector<Mesh> triangle_volumes;
+  //ToyVector<Spheres> sphere_volumes;
+  ToyVector<std::unique_ptr<Geometry>> volumes;
+
   ToyVector<Material> materials;
-  std::unique_ptr<Mesh> triangles;
-  std::unique_ptr<Mesh> triangles_emissive;
-  std::unique_ptr<Spheres> spheres;
-  std::unique_ptr<Spheres> spheres_emissive;
-  std::array<Geometry*,4> new_primitives;
   Medium* empty_space_medium;
   Shader* invisible_shader;
   Shader* default_shader;
   MaterialIndex default_material_index;
   MaterialIndex vacuum_material_index;
+
   ToyVector<std::unique_ptr<Shader>> shaders;
   ToyVector<std::unique_ptr<Medium>> media;
   ToyVector<std::unique_ptr<EnvironmentalRadianceField>> envlights;
@@ -163,13 +170,13 @@ public:
 
   inline index_t GetNumGeometries() const
   {
-    return static_cast<index_t>(new_primitives.size());
+    return isize(geometries);
   }
   
   inline const Geometry& GetGeometry(index_t i) const
   {
     assert(i >= 0 && i < GetNumGeometries());
-    return *new_primitives[i];
+    return *geometries[i];
   }
   
   inline index_t GetNumMaterials() const
@@ -183,12 +190,16 @@ public:
   }
   
   bool FirstIntersectionEmbree(const Ray &ray, double tnear, double &ray_length, SurfaceInteraction &intersection) const;
-  
+  // TODO: Change this so I don't use raw pointers.
+  //int IntersectionsWithVolumes(const Ray &ray, double tnear, double tfar, int *items, float *distances, const int buffer_size);
+
   void BuildAccelStructure();
   
   void PrintInfo() const;
   
   Box GetBoundingBox() const;
 
-  void Append(const Geometry &geo);
+  void Append(const Geometry &geo, const Material &mat);
+
+  void UpdateEmissiveIndexOffset();
 };

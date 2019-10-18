@@ -68,6 +68,15 @@ void EmbreeAccelerator::Add(Spheres& spheres)
 }
 
 
+void EmbreeAccelerator::Add(Geometry & geo)
+{
+  if (geo.type == Geometry::PRIMITIVES_SPHERES)
+    Add(static_cast<Spheres&>(geo));
+  else if (geo.type == Geometry::PRIMITIVES_TRIANGLES)
+    Add(static_cast<Mesh&>(geo));
+}
+
+
 bool EmbreeAccelerator::FirstIntersection(const Ray &ray, double tnear, double &ray_length, SurfaceInteraction &intersection) const
 {
   RTCIntersectContext context;

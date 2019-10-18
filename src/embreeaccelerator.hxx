@@ -28,6 +28,7 @@ public:
   ~EmbreeAccelerator();
   void Add(Mesh &mesh);
   void Add(Spheres &spheres);
+  void Add(Geometry &geo);
   void Build();
   bool FirstIntersection(const Ray &ray, double tnear, double &ray_length, SurfaceInteraction &intersection) const;
   Box GetSceneBounds() const;

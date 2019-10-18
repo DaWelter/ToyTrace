@@ -93,14 +93,13 @@ struct Scope
   SymbolTable<Shader*> shaders;
   SymbolTable<Medium*> mediums;
   SymbolTable<AreaEmitter*> areaemitters;
-  SymbolTable<Material> materials;
+  std::unordered_map<std::string, Material> materials;
   Eigen::Transform<double,3,Eigen::Affine> currentTransform;
   
   Scope() :
     shaders("Shader"),
     mediums("Medium"),
     areaemitters("AreaEmitter"),
-    materials("Materials"),
     currentTransform(decltype(currentTransform)::Identity())
   {
   }
@@ -110,6 +109,11 @@ struct Scope
 Material MakeMaterialFromActiveThings(const Scope &scope)
 {
   return {scope.shaders(), scope.mediums(), scope.areaemitters()};
+}
+
+void AddNamedMaterialFromActiveThings(const std::string &name, Scope &scope)
+{
+  scope.materials[name] = MakeMaterialFromActiveThings(scope);
 }
 
 
@@ -173,9 +177,9 @@ public:
   Scope CreateScope();
 private:
   void ParseMesh(const fs::path &filename, Scope &scope);
-  MaterialIndex GetMaterialIndexOfCurrentParams(const Scope &scope);
-  MaterialIndex MaterialInsertAndOrGetIndex(const Material &m);
-  void AddModel(const Mesh &m, const Scope &scope);
+  //MaterialIndex GetMaterialIndexOfCurrentParams(const Scope &scope);
+  //MaterialIndex MaterialInsertAndOrGetIndex(const Material &m);
+  //void AddModel(const Mesh &m, const Scope &scope);
   void InsertAndActivate(const char*, Scope &scope, std::unique_ptr<Medium> x);
   void InsertAndActivate(const char*, Scope &scope, std::unique_ptr<Shader> x);
   bool NextLine();
@@ -360,9 +364,9 @@ void NFFParser::Parse(Scope &scope)
       if (n == 4)
       {
           pos = scope.currentTransform*pos;
-          MaterialIndex current_material_index = GetMaterialIndexOfCurrentParams(scope);
-          auto* spheres = scope.areaemitters() ? scene->spheres_emissive.get() : scene->spheres.get();
-          spheres->Append(pos.cast<float>(), rad, current_material_index);
+          auto  sphere = Spheres();
+          sphere.Append(pos.cast<float>(), rad);
+          scene->Append(sphere, MakeMaterialFromActiveThings(scope));
       }
       else throw MakeException("Error");
       continue;
@@ -377,7 +381,7 @@ void NFFParser::Parse(Scope &scope)
       if (num_vertices < 3)
         throw MakeException("Polygon must be specified with at least 3 vertices");
       
-      Mesh mesh(num_vertices-2, num_vertices);
+      auto mesh = Mesh(num_vertices-2, num_vertices);
       bool must_compute_normal = false;
       
       for (int i=0;i<num_vertices;i++)
@@ -401,21 +405,19 @@ void NFFParser::Parse(Scope &scope)
         mesh.uvs.row(i) = uv.cast<float>();
       }
 
-      MaterialIndex current_material_index = GetMaterialIndexOfCurrentParams(scope);
-      
       for (int i=0; i<num_vertices-2; i++) 
       {
         mesh.vert_indices(i, 0) = 0;
         mesh.vert_indices(i, 1) = i+1;
         mesh.vert_indices(i, 2) = i+2;
-        mesh.material_indices[i] = current_material_index;
       }
 
       if (must_compute_normal)
         mesh.MakeFlatNormals();
       
       // TODO: This is O(n*n)! Collect all meshes and concatenate them all at once in the end.
-      AddModel(mesh, scope);
+      //AddModel(mesh, scope);
+      scene->Append(mesh, MakeMaterialFromActiveThings(scope));
       continue;
     }
     
@@ -1090,7 +1092,7 @@ void NFFParser::ParseYamlNode(const std::string &key, const YAML::Node &node, Sc
   else if (key == "material")
   {
     auto name = node["name"].as<std::string>();
-    scope.materials.set_and_activate(name.c_str(), MakeMaterialFromActiveThings(scope));
+    AddNamedMaterialFromActiveThings(name, scope);
   }
 }
 
@@ -1156,7 +1158,6 @@ private:
       const aiMesh* mesh = aiscene->mMeshes[nd->mMeshes[mesh_idx]];
       std::printf("Mesh %i (%s), mat_idx=%i\n", mesh_idx, mesh->mName.C_Str(), mesh->mMaterialIndex);
       Scope scope{outer_scope};
-      DealWithTheMaterialAssignment(scope, mesh);
       ReadMesh(scope, mesh, ndref);
     }
   }
@@ -1185,6 +1186,8 @@ private:
   
   void ReadMesh(Scope &scope, const aiMesh* aimesh, const NodeRef &ndref)
   {
+    Material material = GetMaterial(scope, aimesh);
+
     auto m = ndref.local_to_world;
     bool hasuv = aimesh->GetNumUVChannels()>0;
     bool hasnormals = aimesh->HasNormals();
@@ -1245,17 +1248,12 @@ private:
     else
       mesh.uvs.setConstant(0.);
     
-    MaterialIndex mat_idx = parser.MaterialInsertAndOrGetIndex(scope.materials());
-    for (int i=0; i<mesh.NumTriangles(); ++i)
-      mesh.material_indices[i] = mat_idx;
-    
-    parser.AddModel(mesh, scope);
+    scene.Append(mesh, material);
   }
   
   
-  void DealWithTheMaterialAssignment(Scope &scope, const aiMesh* mesh)
+  Material GetMaterial(Scope &scope, const aiMesh* mesh)
   {
-    bool must_create = true;
     if (mesh->mMaterialIndex < aiscene->mNumMaterials)
     {
       const aiMaterial* mat = aiscene->mMaterials[mesh->mMaterialIndex];
@@ -1272,21 +1270,18 @@ private:
       auto name = std::string(ainame.C_Str());
       if (name != "DefaultMaterial")
       {
-        if (auto mymat = scope.materials[name.c_str()]; mymat)
+        if (auto it = scope.materials.find(name); it != scope.materials.end())
         {
-          scope.materials.activate(name);
-          must_create = false;
+          return it->second;
         }
         else
         {
           scope.shaders.activate(name);
+          return MakeMaterialFromActiveThings(scope);
         }
       }
     }
-    if (must_create)
-    {
-      scope.materials.set_and_activate("", MakeMaterialFromActiveThings(scope));
-    }
+    return MakeMaterialFromActiveThings(scope);
   }
   
 
@@ -1350,21 +1345,11 @@ bool NFFParser::NextLine()
 }
 
 
-MaterialIndex NFFParser::MaterialInsertAndOrGetIndex(const Material& m)
-{
-    if (scene->materials.size() >= MAX_NUM_MATERIALS)
-        throw std::runtime_error("Maximal number of materials exceeded");
-  return GetOrInsertFromFactory(to_material_index, m, [this, &m]() {
-    scene->materials.push_back(m);
-    return MaterialIndex(static_cast<MaterialIndex::type>(scene->materials.size()-1));
-  });
-}
 
-
-void NFFParser::AddModel(const Mesh &m, const Scope &scope)
-{
-  scene->Append(m);
-}
+//void NFFParser::AddModel(const Mesh &m, const Scope &scope)
+//{
+//  scene->Append(m);
+//}
 
 
 void NFFParser::InsertAndActivate(const char* name, Scope& scope, std::unique_ptr< Medium > x)
@@ -1381,10 +1366,10 @@ void NFFParser::InsertAndActivate(const char* name, Scope& scope, std::unique_pt
 }
 
 
-MaterialIndex NFFParser::GetMaterialIndexOfCurrentParams(const Scope &scope)
-{
-  return MaterialInsertAndOrGetIndex(MakeMaterialFromActiveThings(scope));
-}
+//MaterialIndex NFFParser::GetMaterialIndexOfCurrentParams(const Scope &scope)
+//{
+//  return MaterialInsertAndOrGetIndex(MakeMaterialFromActiveThings(scope));
+//}
 
 
 fs::path NFFParser::MakeFullPath(const fs::path &filename) const

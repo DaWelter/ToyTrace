@@ -16,7 +16,6 @@ Mesh::Mesh(index_t num_triangles, index_t num_vertices)
   vert_indices.resize(num_triangles, Eigen::NoChange);
   normals.resize(num_vertices, Eigen::NoChange);
   uvs.resize(num_vertices, Eigen::NoChange);
-  material_indices.resize(num_triangles, Scene::DEFAULT_MATERIAL_INDEX);
 }
 
 
@@ -75,6 +74,14 @@ void Mesh::MakeFlatNormals()
 }
 
 
+void Mesh::Append(const Geometry & other)
+{
+  if (other.type != this->type)
+    throw std::runtime_error("Geometry type mismatch!");
+  this->Append(static_cast<const Mesh&>(other));
+}
+
+
 template<class M>
 static void AppendVertical(M &a, const M &b)
 {
@@ -89,6 +96,8 @@ static void AppendVertical(M &a, const M &b)
 
 void  Mesh::Append(const Mesh &other)
 {
+  if (other.material_index != material_index)
+    throw std::runtime_error("Cannot merge geometries with mismatching materials");
   // a + b > overflow => b > overflow - a
   if (other.NumTriangles() > std::numeric_limits<decltype(NumTriangles())>::max() - NumTriangles())
     throw std::range_error("Cannot handle that many triangles in a mesh.");
@@ -106,9 +115,6 @@ void  Mesh::Append(const Mesh &other)
     vert_indices(i, 1) += vert_start;
     vert_indices(i, 2) += vert_start;
   }
-  material_indices.reserve(material_indices.size() + other.material_indices.size());
-  for (auto i : other.material_indices)
-    material_indices.push_back(i);
 }
 
 
@@ -161,6 +167,12 @@ double Mesh::Area(index_t index) const
 }
 
 
+std::unique_ptr<Geometry> Mesh::Clone() const
+{
+  return std::make_unique<Mesh>(*this);
+}
+
+
 void AppendSingleTriangle(
   Mesh &dst, const Float3 &a, const Float3 &b, const Float3 &c, const Float3 &n)
 {
@@ -181,27 +193,29 @@ Spheres::Spheres()
   
 }
 
-void Spheres::Append(const Float3 pos, const float radius, MaterialIndex material_index)
+void Spheres::Append(const Float3 pos, const float radius)
 {
   if (Size() >= std::numeric_limits<decltype(Size())>::max())
     throw std::range_error("Cannot handle that many spheres in a geometry.");
-  spheres.push_back(Vector4f{pos[0], pos[1], pos[2], radius});
-  material_indices.push_back(material_index);
-}
-
-
-void Spheres::Append(const Float3 pos, const float radius)
-{
-  Append(pos, radius, Scene::DEFAULT_MATERIAL_INDEX);
+  spheres.push_back(Vector4f{ pos[0], pos[1], pos[2], radius });
 }
 
 
 void Spheres::Append(const Spheres& other)
 {
+  if (other.material_index != material_index)
+    throw std::runtime_error("Cannot merge geometries with mismatching materials");
   if (other.Size() > std::numeric_limits<decltype(Size())>::max() - Size())
     throw std::range_error("Cannot handle that many spheres in a geometry.");
   spheres.insert(spheres.end(), other.spheres.begin(), other.spheres.end());
-  material_indices.insert(material_indices.end(), other.material_indices.begin(), other.material_indices.end());
+}
+
+
+void Spheres::Append(const Geometry & other)
+{
+  if (other.type != this->type)
+    throw std::runtime_error("Geometry type mismatch!");
+  this->Append(static_cast<const Spheres&>(other));
 }
 
 
@@ -235,6 +249,11 @@ void Spheres::GetLocalGeometry(SurfaceInteraction& ia) const
   ia.smooth_normal = ia.geometry_normal;
   ia.pos = (center.cast<double>() + ia.hitid.barry);
   FillPosBoundsSphere(ia);
+}
+
+std::unique_ptr<Geometry> Spheres::Clone() const
+{
+  return std::make_unique<Spheres>(*this);
 }
 
 

@@ -6,17 +6,7 @@
 
 Scene::Scene()
     : camera(nullptr)
-{
-    triangles = std::make_unique<Mesh>(0, 0);
-    triangles_emissive = std::make_unique<Mesh>(0, 0);
-    spheres = std::make_unique<Spheres>();
-    spheres_emissive = std::make_unique<Spheres>();
-
-    new_primitives[0] = triangles.get();
-    new_primitives[1] = spheres.get();
-    new_primitives[2] = triangles_emissive.get();
-    new_primitives[3] = spheres_emissive.get();
-  
+{ 
     auto vac_medium = std::make_unique<VacuumMedium>();
     auto inv_shader = std::make_unique<InvisibleShader>();
     auto def_shader = std::make_unique<DiffuseShader>(Color::RGBToSpectrum({0.8_rgb, 0.8_rgb, 0.8_rgb}), nullptr);
@@ -25,9 +15,9 @@ Scene::Scene()
     this->default_shader = def_shader.get();
     
     materials.push_back(Material{def_shader.get(), vac_medium.get()});
-    default_material_index = MaterialIndex(materials.size()-1);
+    default_material_index = MaterialIndex(isize(materials)-1);
     materials.push_back(Material{inv_shader.get(), vac_medium.get()});
-    vacuum_material_index = MaterialIndex(materials.size()-1);
+    vacuum_material_index = MaterialIndex(isize(materials)-1);
 
     media.push_back(std::move(vac_medium));
     shaders.push_back(std::move(inv_shader));      
@@ -48,61 +38,78 @@ bool Scene::FirstIntersectionEmbree(const Ray &ray, double tnear, double &ray_le
 const Material& Scene::GetMaterialOf(int geom_idx, int prim_idx) const
 {
   assert(geom_idx>=0 && geom_idx<GetNumGeometries());
-  auto *geom = new_primitives[geom_idx];
-  assert(prim_idx>=0 && prim_idx<geom->Size());
-  return materials[value(geom->material_indices[prim_idx])];
+  return materials[value(GetGeometry(geom_idx).material_index)];
 }
 
 const Material& Scene::GetMaterialOf(const PrimRef ref) const
 {
   assert((bool)ref);
-  return materials[value(ref.geom->material_indices[ref.index])];
+  return materials[value(ref.geom->material_index)];
+}
+
+namespace {
+
+Geometry* FindMatchingGeo(ToyVector<std::unique_ptr<Geometry>> &v, MaterialIndex searchIndex, Geometry::Type searchType)
+{
+  auto other_geo_it = std::find_if(v.begin(), v.end(), [&](const std::unique_ptr<Geometry> &g)
+  {
+    return g->material_index == searchIndex && g->type == searchType;
+  });
+  return other_geo_it == v.end() ? nullptr : other_geo_it->get();
+}
+
 }
 
 
-void Scene::Append(const Geometry & geo)
+void Scene::Append(const Geometry &geo, const Material &mat)
 {
-  if (geo.Size() <= 0)
-  {
-    assert(geo.Size() > 0); // Why might this happen?
-    return;
-  }
-  const bool no_light = materials[value(geo.material_indices[0])].emitter == nullptr;
-#ifndef NDEBUG
-  // Check if this is all-lights or no lights at all.
-  for (int i = 1; i < geo.Size(); ++i)
-  {
-    assert((materials[value(geo.material_indices[0])].emitter == nullptr) == no_light);
-  }
-#endif
+  const bool is_emissive = mat.emitter != nullptr;
+  const bool is_volume = mat.shader == nullptr;
+  assert(!(is_emissive && is_volume));
 
-  if (geo.type == Geometry::PRIMITIVES_TRIANGLES)
+  Geometry* existing_geom_with_mat = nullptr;
+  MaterialIndex material_index{ -1 };
+
+  // First look if we have a matching material already.
+  auto mat_it = std::find(materials.begin(), materials.end(), mat);
+  if (mat_it == materials.end())
   {
-    const Mesh &m = static_cast<Mesh const &>(geo);
-    if (no_light)
-      triangles->Append(m);
-    else
-      triangles_emissive->Append(m);
+    materials.push_back(mat);
+    material_index = MaterialIndex(isize(materials) - 1);
   }
-  else if (geo.type == Geometry::PRIMITIVES_SPHERES)
+  else
   {
-    const Spheres &m = static_cast<Spheres const &>(geo);
-    if (no_light)
-      spheres->Append(m);
-    else
-      spheres_emissive->Append(m);
+    material_index = MaterialIndex(mat_it - materials.begin());
+    existing_geom_with_mat = FindMatchingGeo(is_volume ? volumes : geometries, material_index, geo.type);
   }
+
+  // Add new geometry or append to existing.
+  if (existing_geom_with_mat)
+  {
+    existing_geom_with_mat->Append(geo);
+  }
+  else
+  {
+    (is_volume ? volumes : geometries).push_back(geo.Clone());
+    if (is_emissive)
+      emissive_geometries.push_back(geometries.back().get());
+  }
+
+  if (is_emissive)
+    UpdateEmissiveIndexOffset();
 }
 
 
 void Scene::BuildAccelStructure()
-{   
-  embreeaccelerator.Add(*triangles);
-  embreeaccelerator.Add(*triangles_emissive);
-  embreeaccelerator.Add(*spheres);
-  embreeaccelerator.Add(*spheres_emissive);
+{
+  for (int i = 0; i < isize(geometries); ++i)
+    embreeaccelerator.Add(*geometries[i]);
   embreeaccelerator.Build();
+  for (int i = 0; i < isize(volumes); ++i)
+    embreevolumes.Add(*volumes[i]);
+  embreevolumes.Build();
   this->boundingBox = embreeaccelerator.GetSceneBounds();
+  this->boundingBox.Extend(embreevolumes.GetSceneBounds());
 }
 
 void Scene::PrintInfo() const
@@ -141,36 +148,42 @@ bool Scene::HasLights() const
 
 Scene::index_t Scene::GetNumAreaLights() const
 {
-  return triangles_emissive->Size() + spheres_emissive->Size();
+  return isize(emissive_geometries);
 }
 
 
 
 Scene::index_t Scene::GetAreaLightIndex(const PrimRef ref) const
 {
-  assert (ref.geom == triangles_emissive.get() || ref.geom == spheres_emissive.get());
-  assert (ref.index >= 0 && ref.geom->Size());
-  index_t ret = ref.index;
-  // Index range combines spheres and triangles. First come triangles, then spheres.
-  if (ref.geom == spheres_emissive.get())
-    ret += triangles_emissive->Size();
-  return ret;
+  assert(ref.geom != nullptr);
+  assert(ref.index >= 0 && ref.geom->Size());
+  return ref.geom->light_num_offset + ref.index;
 }
 
 PrimRef Scene::GetPrimitiveFromAreaLightIndex(Scene::index_t light) const
 {
-  assert(light >= 0);
-  if (light >= triangles_emissive->Size())
+  // find first element that _Val is before
+  auto iter = std::upper_bound(emissive_geometries.begin(), emissive_geometries.end(), light, [&](Scene::index_t light_idx, const Geometry* geo) {
+    return light_idx < geo->light_num_offset;
+  });
+  assert(iter - emissive_geometries.begin() > 0);
+  --iter;
+  light -= (*iter)->light_num_offset;
+  assert(0 <= light && light < (*iter)->Size());
+  return PrimRef{ *iter, light };
+}
+
+void Scene::UpdateEmissiveIndexOffset()
+{
+  index_t value = 0;
+  for (int i = 0; i<isize(emissive_geometries)-1; ++i)
   {
-    light -= triangles_emissive->Size();
-    assert(light < spheres_emissive->Size());
-    return PrimRef{spheres_emissive.get(), light};
-  }
-  else
-  {
-    return PrimRef{triangles_emissive.get(), light};
+    auto &geo = *emissive_geometries[i];
+    geo.light_num_offset = value;
+    value += geo.Size();
   }
 }
+
 
 //Scene::index_t Scene::GetNumVolumeLights() const
 //{
