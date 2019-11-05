@@ -316,23 +316,23 @@ TEST(Spectral, RGBConversionSelection)
 
 
 
-class EmbreePrimitives : public testing::Test
+class IntersectorTests : public testing::Test
 {
-  Scene scene;
+  EmbreeAccelerator scene;
 protected:
   SurfaceInteraction intersection;
   double distance;
   
-  void Initialize(std::function<void(Scene &)> scene_filler)
+  void Initialize(std::function<void(EmbreeAccelerator &)> scene_filler)
   {
     scene_filler(scene);
-    scene.BuildAccelStructure();
+    scene.Build();
   }
   
   void Intersect(const Ray &ray, bool expect_hit = true)
   {
     RaySegment rs{ray, LargeNumber};
-    bool bhit = scene.FirstIntersectionEmbree(rs.ray, 0., rs.length, intersection);
+    bool bhit = scene.FirstIntersection(rs.ray, 0., rs.length, intersection);
     ASSERT_TRUE(bhit == expect_hit);
     distance = rs.length;
   }
@@ -360,11 +360,12 @@ inline RaySegment MakeSegmentAt(const SurfaceInteraction &intersection, const Do
 }
 
 
-TEST_F(EmbreePrimitives, Sphere)
+TEST_F(IntersectorTests, Sphere)
 {
-  this->Initialize([](Scene &scene) {
-    Spheres s; s.Append({0., 0., 2.}, 2.);  
-    scene.Append(s);
+  Spheres s; 
+  this->Initialize([&](EmbreeAccelerator &scene) {
+    s.Append({ 0., 0., 2. }, 2.);
+    scene.InsertRefTo(s);
   });
   Intersect({{0., 0., -1.},{0., 0., 1.}});
   EXPECT_NEAR(distance, 1., 1.e-6);
@@ -373,18 +374,19 @@ TEST_F(EmbreePrimitives, Sphere)
 }
 
 
-TEST_F(EmbreePrimitives, Triangle)
+TEST_F(IntersectorTests, Triangle)
 {
   /*     x
    *   / |
    *  /  |
    * x---x
    * Depiction of the triangle */
-  this->Initialize([](Scene &scene) {
+  Mesh m{ 0,0 };
+  this->Initialize([&](EmbreeAccelerator &scene) {
     float q = 0.5;
-    Mesh m{0,0}; AppendSingleTriangle(m, {-q, -q, 0}, {q, -q, 0}, {q, q, 0}, {0,0,0});
+    AppendSingleTriangle(m, {-q, -q, 0}, {q, -q, 0}, {q, q, 0}, {0,0,0});
     m.MakeFlatNormals();
-    scene.Append(m);
+    scene.InsertRefTo(m);
   });
   Intersect(Ray{{0.1, 0., -1.},{0., 0., 1.}});
   EXPECT_NEAR(distance, 1., 1.e-6);
@@ -393,15 +395,15 @@ TEST_F(EmbreePrimitives, Triangle)
 }
 
 
-TEST_F(EmbreePrimitives, TriangleEdgeCase)
+TEST_F(IntersectorTests, TriangleEdgeCase)
 {
-  this->Initialize([](Scene &scene) {
+  Mesh m{ 0,0 };
+  this->Initialize([&](EmbreeAccelerator &scene) {
     float q = 0.5;
-    Mesh m{0,0}; 
     AppendSingleTriangle(m, {-q, -q, 0}, {q, -q, 0}, {q, q, 0}, {0,0,0});
     AppendSingleTriangle(m, {-q, -q, 0}, {-q, q, 0}, {q, q, 0}, {0,0,0});
     m.MakeFlatNormals();
-    scene.Append(m);
+    scene.InsertRefTo(m);
   });
   Intersect(Ray{{0., 0., -1.},{0., 0., 1.}});
   EXPECT_NEAR(distance, 1., 1.e-6);
@@ -416,31 +418,26 @@ TEST_F(EmbreePrimitives, TriangleEdgeCase)
 
 
 
-TEST(Embree, SelfIntersection)
+TEST_F(IntersectorTests, SelfIntersection)
 {
   // Intersect with primitive far off the origin.
   // Go to intersection point and shoot another ray.
   // Is there self intersection?
-  const char* scenestr = R"""(
-transform 0 0 1.e5
-p 4
-0.5 0.5 -10
--0.5 0.5 10
--0.5 -0.5 10
-0.5 -0.5 -10
-)""";
-  Scene scene;
-  scene.ParseNFFString(scenestr);
-  scene.BuildAccelStructure();
+  Mesh m{ 0,0 };
+  this->Initialize([&](EmbreeAccelerator &scene) {
+    float q = 0.5;
+    const float dz = 10;
+    const float z = 1.e5;
+    AppendSingleTriangle(m, { -q, -q, z+dz }, { q, -q, z-dz }, { q, q, z-dz }, { 0,0,0 });
+    AppendSingleTriangle(m, { -q, -q, z+dz }, { -q, q, z+dz }, { q, q, z-dz }, { 0,0,0 });
+    m.MakeFlatNormals();
+    scene.InsertRefTo(m);
+  });
+
   Ray r{{0, 0, 1.e5 + 1.}, {0, 0, -1}};
-  double tfar = Infinity;
-  SurfaceInteraction intersection;
-  bool is_hit = scene.FirstIntersectionEmbree(r, 0, tfar, intersection);
-  EXPECT_TRUE(is_hit);
+  Intersect(r, true);
   r.org = intersection.pos;
-  tfar = Infinity;
-  is_hit = scene.FirstIntersectionEmbree(r, 0, tfar, intersection);
-  EXPECT_FALSE(is_hit);
+  Intersect(r, false);
 }
 
 
@@ -454,7 +451,7 @@ TEST(Embree, SphereIntersectionMadness)
   Spheres geom;
   geom.Append(sphere_org.cast<float>(), (float)sphere_rad);
   EmbreeAccelerator world;
-  world.Add(geom);
+  world.InsertRefTo(geom);
   world.Build();
   
   const int N = 100;
@@ -502,7 +499,7 @@ TEST(Embree, SphereIntersectionMadness2)
   Spheres geom;
   geom.Append(sphere_org.cast<float>(), (float)sphere_rad);
   EmbreeAccelerator world;
-  world.Add(geom);
+  world.InsertRefTo(geom);
   world.Build();
   
   RaySegment rs{{sphere_org, {1., 0., 0.}}, LargeNumber};
@@ -535,7 +532,7 @@ TEST(Embree, SphereIntersectionMadness3)
   geom.Append({0.f, 0.f, 0.f}, (float)rad1);
   geom.Append({0.f, 0.f, 0.f}, (float)rad2);
   EmbreeAccelerator world;
-  world.Add(geom);
+  world.InsertRefTo(geom);
   world.Build();
   
   Double3 start_point = {0.5*(rad1+rad2), 0., 0.};
@@ -559,6 +556,95 @@ TEST(Embree, SphereIntersectionMadness3)
   EXPECT_GE(max_dist_from_start, rad1*1.e-3);
 }
 
+
+TEST(Embree, FindPlaceIfUnique)
+{
+  ToyVector<int> items{ 1, 3, 5, 7, 9 };
+  auto run = [&](int i) {
+    return EmbreeAcceleratorDetail::FindPlaceIfUnique(
+      items.begin(),
+      items.end(),
+      i, std::less<int>(), std::equal_to<int>());
+  };
+  {
+    auto[it, found] = run(10);
+    EXPECT_FALSE(found);
+    EXPECT_EQ(it, items.end());
+  }
+  {
+    auto[it, found] = run(8);
+    EXPECT_FALSE(found);
+    EXPECT_EQ(it, items.end() - 1);
+  }
+  {
+    auto[it, found] = run(9);
+    EXPECT_TRUE(found);
+    EXPECT_EQ(it, items.end() - 1);
+  }
+  {
+    auto[it, found] = run(0);
+    EXPECT_FALSE(found);
+    EXPECT_EQ(it, items.begin());
+  }
+  {
+    auto[it, found] = run(1);
+    EXPECT_TRUE(found);
+    EXPECT_EQ(it, items.begin());
+  }
+  {
+    auto[it, found] = run(5);
+    EXPECT_TRUE(found);
+    EXPECT_EQ(it, items.begin() + 2);
+  }
+  {
+    auto[it, found] = run(4);
+    EXPECT_FALSE(found);
+    EXPECT_EQ(it, items.begin() + 2);
+  }
+}
+
+
+TEST(Embree, AllIntersections)
+{
+  Spheres geom;
+  geom.Append({ 0.f, 0.f, 0.f }, 1.f);
+  geom.Append({ 0.f, 0.f, 0.f }, 2.f);
+  geom.Append({ 0.f, 0.f, 0.f }, 2.f); // Intentional duplicate
+  EmbreeAccelerator world;
+  world.InsertRefTo(geom);
+  world.Build(true);
+  Ray ray{ {0, 0, -3}, {0, 0, 1} };
+  //ToyVector<double> distances;
+  auto intersections = world.IntersectionsInOrder(ray, 0, 3);
+  for (auto is : intersections)
+  {
+    std::cout << strformat("d=%s, geo=%s, prim=%s", is.t, is.geom, is.prim) << std::endl;
+  }
+}
+
+
+//TEST(Scene, VolumeIntersection)
+//{
+//  const char* scenestr = R"""(
+//medium medium 1 1
+//shader none
+//m testing/scenes/unitcube.dae
+//)""";
+//  Scene scene;
+//  scene.ParseNFFString(scenestr);
+//  scene.BuildAccelStructure();
+//  const Ray r{ {0, 0, -2.}, {0, 0, 1} };
+//  auto is = scene.FirstIntersectionWithVolumes(r, 0, LargeNumber);
+//  ASSERT_TRUE(is);
+//  EXPECT_NEAR(is->t, 1.5, 1.e-6);
+//  EXPECT_TRUE(is->entering);
+//  is = scene.FirstIntersectionWithVolumes(r, is->t, LargeNumber);
+//  ASSERT_TRUE(is);
+//  EXPECT_NEAR(is->t, 2.5, 1.e-6);
+//  EXPECT_FALSE(is->entering);
+//  is = scene.FirstIntersectionWithVolumes(r, is->t, LargeNumber);
+//  ASSERT_FALSE(is);
+//}
 
 
 TEST(Display, Open)
@@ -648,223 +734,6 @@ TEST_F(PerspectiveCameraTesting, Sampling1)
   run(0,0);
   run(10,10);
   run(5,5);
-}
-
-namespace {
-void CheckSceneParsedWithScopes(const Scene &scene);
-}
-
-TEST(Parser, Scopes)
-{
-  const char* scenestr = R"""(
-s 1 2 3 0.5
-transform 5 6 7
-diffuse themat 1 1 1 0.9
-s 0 0 0 0.5
-{
-transform 8 9 10
-diffuse themat 1 1 1 0.3
-s 11 12 13 0.5
-}
-s 14 15 16 0.5
-)""";
-  Scene scene;
-  scene.ParseNFFString(scenestr);
-  CheckSceneParsedWithScopes(scene);
-}
-
-
-TEST(Parser, ScopesAndIncludes)
-{
-  namespace fs = boost::filesystem;
-  auto path1 = fs::temp_directory_path() / fs::unique_path("scene1-%%%%-%%%%-%%%%-%%%%.nff");
-  std::cout << "scenepath1: " << path1.string() << std::endl;
-  const char* scenestr1 = R"""(
-transform 5 6 7
-diffuse themat 1 1 1 0.9
-s 0 0 0 0.5
-)""";
-  {
-    std::ofstream os(path1.string());
-    os.write(scenestr1, strlen(scenestr1));
-  }
-  const char* scenestr2 = R"""(
-transform 8 9 10
-diffuse themat 1 1 1 0.3
-s 11 12 13 0.5
-)""";
-  auto path2 = fs::unique_path("scene2-%%%%-%%%%-%%%%-%%%%.nff"); // Relative filepath.
-  auto path2_full = fs::temp_directory_path() / path2;
-  std::cout << "scenepath2: " << path2.string() << std::endl;
-  {
-    std::ofstream os(path2_full.string());
-    os.write(scenestr2, strlen(scenestr2));
-  }
-  const char* scenestr_fmt = R"""(
-s 1 2 3 0.5
-include %s
-{
-include %s
-}
-s 14 15 16 0.5
-)""";
-  auto path3 = fs::temp_directory_path() / fs::unique_path("scene3-%%%%-%%%%-%%%%-%%%%.nff");
-  std::string scenestr = strformat(scenestr_fmt, path1.string(), path2.string());
-  {
-    std::ofstream os(path3.string());
-    os.write(scenestr.c_str(), scenestr.size());
-  }  
-  Scene scene;
-  scene.ParseNFF(path3);
-  CheckSceneParsedWithScopes(scene);
-}
-
-
-namespace 
-{
-  
-void CheckSceneParsedWithScopes(const Scene &scene)
-{
-  ASSERT_EQ(scene.GetNumGeometries(), 4);
-  ASSERT_TRUE(scene.GetGeometry(1).type == Geometry::PRIMITIVES_SPHERES);
-  const auto &spheres = static_cast<const Spheres &>(scene.GetGeometry(1));
-  auto Getter = [&spheres](int i) -> Float3 
-  { 
-    float rad;
-    Float3 center;
-    std::tie(center, rad) = spheres.Get(i);
-    return center;
-  };
-  auto GetMaterial = [&spheres, &scene](int i) -> auto
-  {
-    return scene.GetMaterialOf({&spheres, i});
-  };
-  ASSERT_EQ(spheres.Size(), 4);
-  std::array<Float3,4> c{ 
-    Getter(0),
-    Getter(1),
-    Getter(2),
-    Getter(3)
-  };
-  // Checking the coordinates for correct application of the transform statements.
-  ASSERT_NEAR(c[0][0], 1., 1.e-3);
-  ASSERT_NEAR(c[1][0], 5., 1.e-3);
-  ASSERT_NEAR(c[2][0], 8.+11., 1.e-3); // Using the child scope transform.
-  ASSERT_NEAR(c[3][0], 14.+5., 1.e-3); // Using the parent scope transform.
-  ASSERT_TRUE(GetMaterial(3) == GetMaterial(1)); // Shaders don't persist beyond scopes.
-  ASSERT_TRUE(!(GetMaterial(2) == GetMaterial(1))); // Shader within the scope was actually created and assigned.
-  ASSERT_TRUE(!(GetMaterial(2) == GetMaterial(0))); // Shader within the scope is not the default.
-}
-  
-}
-
-
-
-TEST(Parser, ImportDAE)
-{
-  const char* scenestr = R"""(
-diffuse DefaultMaterial 1 1 1 0.5
-m testing/scenes/unitcube.dae
-)""";
-  Scene scene;
-  scene.ParseNFFString(scenestr);
-  scene.BuildAccelStructure();
-  constexpr double tol = 1.e-2;
-  Box outside; 
-  outside.Extend({-0.5-tol, -0.5-tol, -0.5-tol}); 
-  outside.Extend({0.5+tol, 0.5+tol, 0.5+tol});
-  Box inside;
-  inside.Extend({-0.5+tol, -0.5+tol, -0.5+tol});
-  inside.Extend({0.5-tol, 0.5-tol, 0.5-tol});
-  ASSERT_EQ(scene.GetNumGeometries(), 4);
-  ASSERT_TRUE(scene.GetGeometry(0).type == Geometry::PRIMITIVES_TRIANGLES);
-  ASSERT_TRUE(scene.GetBoundingBox().InBox(outside));
-  ASSERT_FALSE(scene.GetBoundingBox().InBox(inside));
-}
-
-
-TEST(Parser, LightIndices)
-{
-  const char* scenestr = R"""(
-{
-larea arealight2 uniform 1 1 1 1
-diffuse black  1 1 1 0.
-m testing/scenes/unitcube.dae
-}
-{
-larea arealight2 uniform 1 1 1 1
-diffuse black  1 1 1 0.
-s 0 0 0 1
-}
-{
-m testing/scenes/unitcube.dae
-}
-{
-s 0 0 0 1
-}
-)""";
-  Scene scene;
-  scene.ParseNFFString(scenestr);
-  const auto n = scene.GetNumAreaLights();
-  ASSERT_EQ(n, 13); // Cube has 12 triangles, plus 1 sphere.
-  for (Scene::index_t i = 0; i<n; ++i)
-  {
-    PrimRef pr = scene.GetPrimitiveFromAreaLightIndex(i);
-    auto reverse = scene.GetAreaLightIndex(pr);
-    EXPECT_EQ(i, reverse);
-  }
-}
-
-
-TEST(Parser, ImportCompleteSceneWithDaeBearingMaterials)
-{
-  const char* scenestr = R"""(
-v
-from 0 1.2 -1.3
-at 0 0.6 0
-up 0 1 0
-resolution 128 128
-angle 50
-
-l 0 0.75 0  1 1 1 1
-
-diffuse white  1 1 1 0.5
-diffuse red    1 0 0 0.5
-diffuse green  0 1 0 0.5
-diffuse blue   0 0 1 0.5
-
-m testing/scenes/cornelbox.dae
-)""";
-  Scene scene;
-  scene.ParseNFFString(scenestr);
-  scene.BuildAccelStructure();
-  Box b = scene.GetBoundingBox();
-  double size = Length(b.max - b.min);
-  ASSERT_GE(size, 1.);
-  ASSERT_LE(size, 3.);
-}
-
-
-TEST(Parser, YamlEmbedTransformLoad)
-{
-  const char* scenestr = R"""(
-v
-from 0 1.2 -1.3
-at 0 0.6 0
-up 0 1 0
-resolution 128 128
-angle 50
-
-yaml{
-transform:
-  pos: [ 1, 2, 3]
-  hpb: [ 0, 90, 0]
-  angle_in_degree : true
-}yaml
-s 0 0 0 1.0
-)""";
-  Scene scene;
-  scene.ParseNFFString(scenestr);
 }
 
 

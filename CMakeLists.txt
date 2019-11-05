@@ -163,7 +163,7 @@ target_link_libraries(toytrace commonstuff
                       debug ${Boost_PROGRAM_OPTIONS_LIBRARY_DEBUG})
 
 if(BuildTests)
-    add_executable(tests src/tests.cxx src/tests3.cxx src/tests_sampling.cxx src/tests_microfacet.cxx src/tests_stats.cxx)
+    add_executable(tests src/tests.cxx src/tests3.cxx src/tests_sampling.cxx src/tests_microfacet.cxx src/tests_stats.cxx src/tests_scene.cxx)
     add_executable(tests2 src/tests2.cxx)
     add_executable(tests_tbb src/tests_tbb.cxx)
     

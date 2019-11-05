@@ -3,11 +3,16 @@
 #include "ray.hxx"
 #include "vec3f.hxx"
 
+#include <embree3/rtcore.h>
+
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4244)  // Float to double conversion. I don't care. There are too many of them, and it is too much of a mess to try to make it right.
 #endif
 
+using namespace EmbreeAcceleratorDetail;
+
+thread_local ToyVector<BoundaryIntersection> EmbreeAccelerator::intersections_result;
 
 EmbreeAccelerator::EmbreeAccelerator()
 {
@@ -23,13 +28,15 @@ EmbreeAccelerator::~EmbreeAccelerator()
 }
 
 
-void EmbreeAccelerator::Build()
+void EmbreeAccelerator::Build(bool enable_intersection_in_order_call)
 {
+  if (enable_intersection_in_order_call)
+    rtcSetSceneFlags(rtscene, RTC_SCENE_FLAG_CONTEXT_FILTER_FUNCTION);
   rtcCommitScene (rtscene);
 }
 
 
-void EmbreeAccelerator::Add(Mesh& mesh)
+void EmbreeAccelerator::InsertRefTo(Mesh& mesh)
 {
   RTCGeometry rtmesh = rtcNewGeometry(rtdevice, RTC_GEOMETRY_TYPE_TRIANGLE);
   auto id = rtcAttachGeometry(rtscene, rtmesh);
@@ -53,7 +60,7 @@ void EmbreeAccelerator::Add(Mesh& mesh)
 }
 
 
-void EmbreeAccelerator::Add(Spheres& spheres)
+void EmbreeAccelerator::InsertRefTo(Spheres& spheres)
 {
   RTCGeometry rtgeom = rtcNewGeometry(rtdevice, RTC_GEOMETRY_TYPE_USER);
   unsigned int id = rtcAttachGeometry(rtscene, rtgeom); 
@@ -62,18 +69,18 @@ void EmbreeAccelerator::Add(Spheres& spheres)
   rtcSetGeometryUserPrimitiveCount(rtgeom, spheres.NumSpheres());
   rtcSetGeometryBoundsFunction(rtgeom,SphereBoundsFunc,nullptr);
   rtcSetGeometryIntersectFunction(rtgeom,SphereIntersectFunc);
-  //rtcSetGeometryOccludedFunction (geom,sphereOccludedFunc);
+  rtcSetGeometryOccludedFunction (rtgeom, SphereOccludedFunc);
   rtcCommitGeometry(rtgeom);
   rtcReleaseGeometry(rtgeom);
 }
 
 
-void EmbreeAccelerator::Add(Geometry & geo)
+void EmbreeAccelerator::InsertRefTo(Geometry & geo)
 {
   if (geo.type == Geometry::PRIMITIVES_SPHERES)
-    Add(static_cast<Spheres&>(geo));
+    InsertRefTo(static_cast<Spheres&>(geo));
   else if (geo.type == Geometry::PRIMITIVES_TRIANGLES)
-    Add(static_cast<Mesh&>(geo));
+    InsertRefTo(static_cast<Mesh&>(geo));
 }
 
 
@@ -99,7 +106,10 @@ bool EmbreeAccelerator::FirstIntersection(const Ray &ray, double tnear, double &
   rthit.geomID = RTC_INVALID_GEOMETRY_ID;
   rthit.primID = RTC_INVALID_GEOMETRY_ID;
   rthit.instID[0] = RTC_INVALID_GEOMETRY_ID; 
+  // ----
+  // Here we do the work!!
   rtcIntersect1(rtscene, &context, &rtrayhit);
+  // ----
   if (rthit.geomID == RTC_INVALID_GEOMETRY_ID)
     return false;
   assert(rtray.tfar > rtray.tnear);
@@ -118,6 +128,84 @@ bool EmbreeAccelerator::FirstIntersection(const Ray &ray, double tnear, double &
   ASSERT_NORMALIZED(intersection.smooth_normal);
   intersection.SetOrientedNormals(ray.dir);
   return true;
+}
+
+
+struct RTCIntersectContextWithMyCallback : public RTCIntersectContext
+{
+  mutable ToyVector<BoundaryIntersection> hitRecords;
+
+  // TODO: filter duplicate intersections!
+  static void MyFilterFunction(const struct RTCFilterFunctionNArguments* args)
+  {
+    assert(args->N == 1);
+    assert(args->geometryUserPtr);
+    const auto* hit = (const RTCHit*)args->hit;
+    const auto* ray = (const RTCRay*)args->ray;
+    const auto* context = static_cast<const RTCIntersectContextWithMyCallback*>(args->context);
+    const auto previousHits = AsSpan(context->hitRecords);
+
+    /* ignore inactive rays */
+    if (args->valid[0] != -1) return;
+
+    args->valid[0] = 0;
+
+    const auto* geo = static_cast<const Geometry*>(args->geometryUserPtr);
+
+    const auto current = BoundaryIntersection{
+      geo->index_in_scene,
+      static_cast<scene_index_t>(hit->primID),
+      ray->tfar,
+      { hit->Ng_x, hit->Ng_y, hit->Ng_z }
+    };
+
+    auto [it, found] = FindPlaceIfUnique(context->hitRecords.begin(), context->hitRecords.end(), current, 
+      /*less = */ [](const auto &a, const auto &b) { return a.t < b.t;  },
+      /*eq   = */ [](const auto &a, const auto &b) {
+      // Should I compare the primitive, too, or is this enough.
+      // If I compare the primitive naively it won't work near edges with adjacent triangles.
+      // There the intersector registers both triangles.
+      return (a.geom == b.geom) & (a.t == b.t);
+      //return (a.t == b.t) & (a.prim == b.prim) & (a.geom == b.geom); }
+    }
+    );
+
+    if (!found)
+      context->hitRecords.insert(it, current);
+  }
+};
+
+
+Span<BoundaryIntersection> EmbreeAccelerator::IntersectionsInOrder(const Ray &ray, double tnear, double tfar) const
+{
+  RTCIntersectContextWithMyCallback context;
+  rtcInitIntersectContext(&context);
+  context.hitRecords = std::move(this->intersections_result);
+  context.hitRecords.clear();
+  context.filter = RTCIntersectContextWithMyCallback::MyFilterFunction;
+
+  RTCRay rtray; // = rtrayhit.ray;
+  rtray.org_x = ray.org[0];
+  rtray.org_y = ray.org[1];
+  rtray.org_z = ray.org[2];
+  rtray.tnear = static_cast<float>(tnear);
+  rtray.dir_x = ray.dir[0];
+  rtray.dir_y = ray.dir[1];
+  rtray.dir_z = ray.dir[2];
+  rtray.time = 0.;
+  rtray.tfar = static_cast<float>(tfar);
+  rtray.mask = -1;
+  rtray.id = 0;
+  rtray.flags = 0;
+  // ----
+  // Here we do the work!!
+  rtcOccluded1(rtscene, &context, &rtray);
+
+  //std::sort(context.hitRecords.begin(), context.hitRecords.end(), [](const BoundaryIntersection &a, const BoundaryIntersection &b) { return a.t < b.t;  });
+  
+  this->intersections_result = std::move(context.hitRecords);
+
+  return AsSpan(this->intersections_result);
 }
 
 
@@ -189,6 +277,29 @@ void EmbreeAccelerator::SphereBoundsFunc(const struct RTCBoundsFunctionArguments
 }
 
 
+bool EmbreeAccelerator::IsOccluded(const Ray & ray, double tnear, double tfar) const
+{
+  RTCIntersectContext context;
+  rtcInitIntersectContext(&context);
+  RTCRay rtray;
+  rtray.org_x = ray.org[0];
+  rtray.org_y = ray.org[1];
+  rtray.org_z = ray.org[2];
+  rtray.tnear = (float)tnear;
+  rtray.dir_x = ray.dir[0];
+  rtray.dir_y = ray.dir[1];
+  rtray.dir_z = ray.dir[2];
+  rtray.time = 0.;
+  rtray.tfar = static_cast<float>(tfar);
+  rtray.mask = -1;
+  rtray.id = 0;
+  rtray.flags = 0;
+
+  rtcOccluded1(rtscene, &context, &rtray);
+  return rtray.tfar <= 0.;
+}
+
+
 void EmbreeAccelerator::SphereIntersectFunc(const RTCIntersectFunctionNArguments* args)
 {
   int* valid = args->valid;
@@ -226,6 +337,10 @@ void EmbreeAccelerator::SphereIntersectFunc(const RTCIntersectFunctionNArguments
   potentialHit.instID[0] = args->context->instID[0];
   potentialHit.geomID = spheres->identifier;
   potentialHit.primID = primID;
+
+  // First check the smaller one of the t-values. 
+  // See if it is within the [tnear,tfar] interval.
+  // If it is then this is our first hit.
   if ((rtray.tnear < t0-err0) & (t0+err0 < rtray.tfar))
   {
     int imask;
@@ -241,7 +356,7 @@ void EmbreeAccelerator::SphereIntersectFunc(const RTCIntersectFunctionNArguments
 
     RTCFilterFunctionNArguments fargs;
     fargs.valid = (int*)&imask;
-    fargs.geometryUserPtr = nullptr;
+    fargs.geometryUserPtr = args->geometryUserPtr;
     fargs.context = args->context;
     fargs.ray = (RTCRayN *)args->rayhit;
     fargs.hit = (RTCHitN*)&potentialHit;
@@ -252,12 +367,20 @@ void EmbreeAccelerator::SphereIntersectFunc(const RTCIntersectFunctionNArguments
     rtray.tfar = t0;
     rtcFilterIntersection(args,&fargs);
 
+    // Did the filter function accept the hit?
     if (imask == -1)
+    {
       rtcCopyHitToHitN(rthitn, &potentialHit, args->N, 0);
+    }
     else
+    {
       rtray.tfar = old_t;
+      RTCRayN_tfar(rtrayn, args->N, 0) = old_t;
+    }
   }
 
+  // Check the t-value which is further away.
+  // This can still be a hit, e.g. if the first hit was behind the ray origin.
   if ((rtray.tnear < t1-err1) & (t1+err1 < rtray.tfar))
   {
     int imask;
@@ -273,7 +396,7 @@ void EmbreeAccelerator::SphereIntersectFunc(const RTCIntersectFunctionNArguments
 
     RTCFilterFunctionNArguments fargs;
     fargs.valid = (int*)&imask;
-    fargs.geometryUserPtr = nullptr;
+    fargs.geometryUserPtr = args->geometryUserPtr;
     fargs.context = args->context;
     fargs.ray = (RTCRayN *)args->rayhit;
     fargs.hit = (RTCHitN*)&potentialHit;
@@ -285,12 +408,99 @@ void EmbreeAccelerator::SphereIntersectFunc(const RTCIntersectFunctionNArguments
     rtcFilterIntersection(args,&fargs);
 
     if (imask == -1)
+    {
       rtcCopyHitToHitN(rthitn, &potentialHit, args->N, 0);
+    }
     else
+    {
       rtray.tfar = old_t;
+      RTCRayN_tfar(rtrayn, args->N, 0) = old_t;
+    }
   }
   
   assert(rtray.tfar > rtray.tnear);
+}
+
+
+void EmbreeAccelerator::SphereOccludedFunc(const RTCOccludedFunctionNArguments *args)
+{
+  int* valid = args->valid;
+  assert(args->N == 1);
+  if (!valid[0]) return;
+
+  RTCRay rtray = rtcGetRayFromRayN(args->ray, args->N, 0);
+
+  unsigned int primID = args->primID;
+  const Spheres* spheres = (const Spheres*)args->geometryUserPtr;
+  auto &sphere = spheres->spheres[primID];
+
+  Eigen::Map<const Eigen::Vector3f> ray_dir{ &rtray.dir_x };
+  Eigen::Map<const Eigen::Vector3f> ray_org{ &rtray.org_x };
+  Float3 sphere_p; float sphere_r; std::tie(sphere_p, sphere_r) = spheres->Get(args->primID);
+  Float3 v = ray_org - sphere_p;
+  ASSERT_NORMALIZED(ray_dir);
+  const float A = 1.f; //Dot(ray_dir,ray_dir);
+  const float B = 2.0f*Dot(v, ray_dir);
+  const float C = Dot(v, v) - Sqr(sphere_r);
+  const float Berr = DotAbs(v, ray_dir)*Gamma<float>(3);
+  const float Cerr = (2.f*Dot(v, v) + Sqr(sphere_r))*Gamma<float>(3);
+  float t0, t1, err0, err1;
+  const bool has_solution = Quadratic(A, B, C, 0.f, Berr, Cerr, t0, t1, err0, err1);
+  //   float t0, t1;
+  //   float err0 = 0.f, err1 = 0.f;
+  //   const bool has_solution = Quadratic(A, B, C, t0, t1);
+  if (!has_solution)
+    return;
+  RTCHit potentialHit;
+  potentialHit.u = 0.0f;
+  potentialHit.v = 0.0f;
+  potentialHit.instID[0] = args->context->instID[0];
+  potentialHit.geomID = spheres->identifier;
+  potentialHit.primID = primID;
+
+  auto checkPotentialHit = [&potentialHit, &rtray, &sphere_p, args](float t)
+  {
+    int imask = -1;
+
+    potentialHit.Ng_x = rtray.org_x + t * rtray.dir_x - sphere_p[0];
+    potentialHit.Ng_y = rtray.org_y + t * rtray.dir_y - sphere_p[1];
+    potentialHit.Ng_z = rtray.org_z + t * rtray.dir_z - sphere_p[2];
+
+    RTCFilterFunctionNArguments fargs;
+    fargs.valid = (int*)&imask;
+    fargs.geometryUserPtr = args->geometryUserPtr;
+    fargs.context = args->context;
+    fargs.ray = args->ray;
+    fargs.hit = (RTCHitN*)&potentialHit;
+    fargs.N = 1;
+
+    const float old_t = rtray.tfar;
+    RTCRayN_tfar(args->ray, args->N, 0) = t;
+    rtray.tfar = t;
+    rtcFilterOcclusion(args, &fargs);
+
+    // Did the filter function accept the hit?
+    if (imask == -1)
+    {
+      rtray.tfar = -std::numeric_limits<float>::infinity();
+      RTCRayN_tfar(args->ray, args->N, 0) = -std::numeric_limits<float>::infinity();
+    }
+    else
+    {
+      rtray.tfar = old_t;
+      RTCRayN_tfar(args->ray, args->N, 0) = old_t;
+    }
+  };
+
+  if ((rtray.tnear < t0 - err0) & (t0 + err0 < rtray.tfar))
+  {
+    checkPotentialHit(t0);
+  }
+
+  if ((rtray.tnear < t1 - err1) & (t1 + err1 < rtray.tfar))
+  {
+    checkPotentialHit(t1);
+  }
 }
 
 

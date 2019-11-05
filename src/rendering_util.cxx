@@ -8,48 +8,6 @@ double UpperBoundToBoundingBoxDiameter(const Scene &scene)
 }
 
 
-bool IterateIntersectionsBetween::Next(RaySegment &seg, SurfaceInteraction &intersection)
-{
-#if 0
-  tfar = this->seg.length;
-  auto offset_tnear = 0; 
-  // Not clear how to set the offset because the uncertainty tnear is known if it stems from a previous intersection.
-  // This is because the accuracy of tfar as computed by Embree is unkown. Maybe it is as found in PBRT pg  234. But
-  // still in order to compute that I would have to need all the data about the triangles and do a lot of redundant
-  // computation, essentially having to implement my own ray-triangle intersection routine.
-  // Moreover, Embree reports intersection where tfar<tnear!
-  // Therefore this approach is not feasible.
-  bool hit = scene.FirstIntersectionEmbree(this->seg.ray, offset_tnear, tfar, intersection);
-  seg.ray = this->seg.ray;
-  seg.ray.org += tnear*this->seg.ray.dir;
-  seg.length = tfar - tnear;
-  tnear = tfar;
-  return hit;
-#else
-  // Embree does not appear to report intersections where tfar<0 though. 
-  // So like in my previous approach, I let the origin jump to the last intersection point.
-  seg.ray.org = this->current_org;
-  seg.ray.dir = this->original_seg.ray.dir;
-  seg.length = this->original_seg.length-current_dist;
-  if (seg.length > 0)
-  {
-    bool hit = scene.FirstIntersectionEmbree(seg.ray, 0, seg.length, intersection);
-    if (hit)
-    {
-      auto offset = AntiSelfIntersectionOffset(intersection, this->original_seg.ray.dir);
-      this->current_org = intersection.pos + offset;
-      // The distance taken so far is computed by projection of intersection point.
-      this->current_dist = Dot(this->current_org-this->original_seg.ray.org, this->original_seg.ray.dir);
-      return hit;
-    }
-    else
-      this->current_dist = this->original_seg.length; // Done!
-  }
-  return false;
-#endif
-}
-
-
 MediumTracker::MediumTracker(const Scene& _scene)
   : current{nullptr},
     media{}, // Note: Ctor zero-initializes the media array.
@@ -67,17 +25,19 @@ void MediumTracker::initializePosition(const Double3& pos)
     // The InBox check is important. Otherwise I would not know how long to make the ray.
     if (bb.InBox(pos))
     {
-      double distance_to_go = 2. * (bb.max-bb.min).maxCoeff(); // Times to due to the diagonal.
-      Double3 start = pos;
-      start[0] += distance_to_go;
-      IterateIntersectionsBetween iter{
-        {{start, {-1., 0., 0.}}, distance_to_go}, scene};
-      RaySegment seg;
-      SurfaceInteraction intersection;
-      while (iter.Next(seg, intersection))
-      {
-        goingThroughSurface(seg.ray.dir, intersection);
-      }
+      const double distance_to_go = 2. * (bb.max-bb.min).maxCoeff(); // Times to due to the diagonal.
+      Ray r{ pos, {-1., 0., 0.} };
+      r.org[0] += distance_to_go;
+
+      // Does the order matter? I don't think so because 
+      // goingThroughSurface essentially counts intersections for every encountered 
+      // Medium. The final counter is invariant to the order.
+      auto intersections = scene.IntersectionsWithVolumes(r, 0., distance_to_go);
+      for (auto is : intersections)
+        this->goingThroughSurface(r.dir, is);
+      intersections = scene.IntersectionsWithSurfaces(r, 0., distance_to_go);
+      for (auto is : intersections)
+        this->goingThroughSurface(r.dir, is);
     }
   }
 }
@@ -85,35 +45,27 @@ void MediumTracker::initializePosition(const Double3& pos)
 
 Spectral3 TransmittanceEstimate(const Scene &scene, RaySegment seg, MediumTracker &medium_tracker, const PathContext &context, Sampler &sampler, VolumePdfCoefficients *volume_pdf_coeff)
 {
-    static constexpr int MAX_ITERATIONS = 100; // For safety, in case somethign goes wrong with the intersections ...
     Spectral3 result{1.};
-    SurfaceInteraction intersection;
-    seg.length *= 0.99999; // Dammit!
-    IterateIntersectionsBetween iter{seg, scene};
-    for (int n = 0; n < MAX_ITERATIONS; ++n)
+
+    if (scene.IsOccluded(seg.ray, 0., seg.length))
+      return Spectral3::Zero();
+
+    auto iter = VolumeSegmentIterator(scene, seg.ray, 0., seg.length);
+    for (; iter; iter.Next(seg.ray, medium_tracker))
     {
-        bool hit = iter.Next(seg, intersection);
-        if (hit && scene.GetMaterialOf(intersection.hitid).shader!=&scene.GetInvisibleShader())
-        {
-            result.setZero();
-            break;
-    //         result *= GetShaderOf(intersection, scene).EvaluateBSDF(-seg.ray.dir, intersection, seg.ray.dir, context, nullptr);
-    //         if (result.isZero())
-    //           break;
-        }
-        if (volume_pdf_coeff)
-        {
-            VolumePdfCoefficients local_coeff = medium_tracker.getCurrentMedium().ComputeVolumePdfCoefficients(seg, context);
-            Accumulate(*volume_pdf_coeff, local_coeff, n == 0, !hit);
-        }
-        result *= medium_tracker.getCurrentMedium().EvaluateTransmission(seg, sampler, context);
-        if (hit)
-        {
-            medium_tracker.goingThroughSurface(seg.ray.dir, intersection);
-        }
-        if (!hit)
-        break;
-        assert (n < MAX_ITERATIONS-1);
+      auto[snear, sfar] = iter.Interval();
+      const Medium& medium = medium_tracker.getCurrentMedium();
+      const RaySegment subsegment{ seg.ray, snear, sfar };
+
+      if (volume_pdf_coeff)
+      {
+        VolumePdfCoefficients local_coeff = medium.ComputeVolumePdfCoefficients(subsegment, context);
+        // Note: Float comparisons should be in order here because segment start and end values are propagated into
+        // the callback pristinely.
+        Accumulate(*volume_pdf_coeff, local_coeff, snear==0., sfar==seg.length);
+      }
+      result *= medium.EvaluateTransmission(subsegment, sampler, context);
     }
+
     return result;
 }

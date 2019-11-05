@@ -5,7 +5,7 @@
 
 #include "types.hxx"
 #include "vec3f.hxx"
-#include "scene.hxx"
+//#include "scene.hxx"
 #include "spectral.hxx"
 
 struct Ray
@@ -29,8 +29,14 @@ struct RaySegment
   
   RaySegment() : length(NaN) {}
   RaySegment(const Ray &_ray, double _length) : ray(_ray), length(_length) {}
+  RaySegment(const Ray &ray_, double tnear, double tfar)
+    : ray{ ray_ }, length{ tfar - tnear }
+  {
+    ray.org += tnear * ray.dir;
+  }
+
   static RaySegment FromTo(const Double3 &src, const Double3 &dest);
-  
+
   auto EndPoint() const -> decltype(ray.PointAt(length))
   { 
     // Want to return some expression template construct. Not an actual Double3. To facilitate optimization.
@@ -54,42 +60,3 @@ inline void MoveOrg(RaySegment &seg, float t)
 inline std::ostream &operator<<(std::ostream &o,const Ray &ray)
 { o << "Ray[" << ray.org << "+t*" << ray.dir << "]"; return o; }
 
-
-
-struct InteractionPoint
-{
-  Double3 pos;
-};
-
-
-struct SurfaceInteraction : public InteractionPoint
-{
-  HitId hitid;
-  Double3 geometry_normal;
-  Double3 smooth_normal;
-  Double3 normal;    // Geometry normal, oriented toward the incomming ray, if result of ray-surface intersection.
-  Double3 shading_normal; // Same for smooth normal.
-  Float2 tex_coord;
-  Float3 pos_bounds { 0. }; // Bounds within which the true hitpoint (computed without roundoff errors) lies. See PBRT chapt 3.
-
-  SurfaceInteraction(const HitId &hitid, const RaySegment &_incident_segment);
-  SurfaceInteraction(const HitId &hitid);
-  SurfaceInteraction() = default;
-  void SetOrientedNormals(const Double3 &incident);
-};
-
-
-struct VolumeInteraction : public InteractionPoint
-{
-  const Medium *_medium = nullptr;
-  Spectral3 radiance;
-  Spectral3 sigma_s; // Scattering coefficient. Use in evaluate functions and scatter sampling. Kernel defined as phase function times sigma_s. 
-  VolumeInteraction() = default;
-  VolumeInteraction(const Double3 &_position, const Medium &_medium, const Spectral3 &radiance_, const Spectral3 &sigma_s_)
-    : InteractionPoint{_position}, _medium{&_medium}, radiance{radiance_}, sigma_s{sigma_s_}
-    {}
-  const Medium& medium() const { return *_medium; }
-};
-
-
-Double3 AntiSelfIntersectionOffset(const SurfaceInteraction &interaction, const Double3 &exitant_dir);

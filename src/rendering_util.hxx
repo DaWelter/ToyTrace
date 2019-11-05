@@ -11,26 +11,6 @@
 double UpperBoundToBoundingBoxDiameter(const Scene &scene);
 
 
-class IterateIntersectionsBetween
-{
-#if 0
-  RaySegment seg;
-  double tnear, tfar;
-#else
-  const RaySegment original_seg;
-  Double3 current_org;
-  double current_dist;
-#endif
-  const Scene &scene;
-public:
-  IterateIntersectionsBetween(const RaySegment &seg, const Scene &scene)
-    : original_seg{seg}, current_org{seg.ray.org}, current_dist{0.}, scene{scene}
-  {}
-  bool Next(RaySegment &seg, SurfaceInteraction &intersection);
-  double GetT() const { return current_dist; }
-};
-
-
 /* This thing tracks overlapping media volumes. Since it is a bit complicated
  * to physically correctly handle mixtures of media that would occur
  * in overlapping volumes, I take a simpler approach. This hands over the
@@ -54,6 +34,7 @@ public:
   MediumTracker(const MediumTracker &_other) = default;
   void initializePosition(const Double3 &pos);
   void goingThroughSurface(const Double3 &dir_of_travel, const SurfaceInteraction &intersection);
+  void goingThroughSurface(const Double3 &dir_of_travel, const BoundaryIntersection &intersection);
   const Medium& getCurrentMedium() const;
 };
 
@@ -71,6 +52,17 @@ inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, con
     enterVolume(&GetMediumOf(intersection, scene));
   else
     leaveVolume(&GetMediumOf(intersection, scene));
+}
+
+
+inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const BoundaryIntersection& intersection)
+{
+  const Medium *m = scene.GetMaterialOf(intersection.geom, intersection.prim).medium;
+  assert(m);
+  if (Dot(dir_of_travel.cast<float>(), intersection.n) < 0)
+    enterVolume(m);
+  else
+    leaveVolume(m);
 }
 
 
@@ -130,14 +122,12 @@ inline void MediumTracker::leaveVolume(const Medium* medium)
   }
 }
 
-
+// For scattered rays, which can either be reflected or transmitted. But it is not clear which of them happened.
 inline void MaybeGoingThroughSurface(MediumTracker &mt, const Double3& dir_of_travel, const SurfaceInteraction &surf)
 {
+    // Determine by geometry normal. Should always point outside of the volume.
     if(Dot(dir_of_travel, surf.normal) < 0.)
     {
-      // By definition, intersection.normal points to where the intersection ray is coming from.
-      // Thus we can determine if the sampled direction goes through the surface by looking
-      // if the direction goes in the opposite direction of the normal.
       mt.goingThroughSurface(dir_of_travel, surf);
     }
 }
@@ -176,6 +166,67 @@ struct EnvLightPointSamplingBeyondScene
   }
 };
 
+#if 0
+template<class Func>
+inline bool ForEachVolumeSegments(const Scene &scene, const Ray &ray, double tnear, const double tfar, MediumTracker &medium_tracker, Func func)
+{
+  const Span<BoundaryIntersection> intersections = scene.IntersectionsWithVolumes(ray, tnear, tfar);
+  for (const auto &intersection : intersections)
+  {
+    bool continue_ = func(tnear, intersection.t, medium_tracker.getCurrentMedium());
+    if (!continue_)
+      return false;
+
+    medium_tracker.goingThroughSurface(ray.dir, intersection);
+    tnear = intersection.t;
+  }
+
+  return func(tnear, tfar, medium_tracker.getCurrentMedium());
+}
+#endif
+
+
+class SegmentIterator
+{
+  BoundaryIntersection const *start, *end;
+  double tnear, tfar;
+public:
+  SegmentIterator(const Span<BoundaryIntersection> is, double tnear, double tfar)
+    : start{ is.begin() }, end{ is.end() }, tnear{ tnear }, tfar{ tfar }
+  {}
+
+  operator bool() const
+  {
+    return tnear != tfar;
+  }
+
+  void Next(const Ray& ray, MediumTracker &medium_tracker)
+  {
+    assert(tnear < tfar); // Not done yet
+    if (start == end)
+    {
+      // Mark as invalid.
+      tnear = tfar;
+    }
+    else
+    {
+      medium_tracker.goingThroughSurface(ray.dir, *start);
+      tnear = start->t;
+      ++start;
+    }
+  }
+
+  std::pair<double, double> Interval() const
+  {
+    return std::make_pair(tnear, (start==end ? tfar : start->t));
+  }
+};
+
+inline SegmentIterator VolumeSegmentIterator(const Scene &scene, const Ray &ray, double tnear, double tfar)
+{
+  return SegmentIterator{ scene.IntersectionsWithVolumes(ray, tnear, tfar), tnear, tfar };
+}
+
 
 
 /* Ray is the ray to shoot. It must already include the anti-self-intersection offset.
@@ -194,64 +245,47 @@ inline TrackToNextInteraction(
   VolumeHitVisitor &&volume_visitor,
   EscapeVisitor &&escape_visitor)
 {
-  static constexpr int MAX_ITERATIONS = 100; // For safety, in case somethign goes wrong with the intersections ...
-  
   Spectral3 weight{1.};
   
-  RaySegment segment;
-  SurfaceInteraction intersection;
-  IterateIntersectionsBetween iter{RaySegment{ray, LargeNumber}, scene};
-  
-  for (int interfaces_crossed=0; interfaces_crossed < MAX_ITERATIONS; ++interfaces_crossed)
-  {
-    double prev_t = iter.GetT();
-    
-    bool hit = iter.Next(segment, intersection);
+  double tfar = LargeNumber;
+  const auto hit = scene.FirstIntersection(ray, 0., tfar);
 
+  auto iter = VolumeSegmentIterator(scene, ray, 0., tfar);
+  for (; iter; iter.Next(ray, medium_tracker))
+  {
+    auto[snear, sfar] = iter.Interval();
     const Medium& medium = medium_tracker.getCurrentMedium();
+    RaySegment segment{ ray, snear, sfar };
+    
     const auto medium_smpl = medium.SampleInteractionPoint(segment, weight*initial_weight, sampler, context);
     weight *= medium_smpl.weight;
-    
+
     const bool interacted_w_medium = medium_smpl.t < segment.length;
-    const bool hit_invisible_wall =
-      hit && 
-      scene.GetMaterialOf(intersection.hitid).shader==&scene.GetInvisibleShader() &&
-      scene.GetMaterialOf(intersection.hitid).emitter==nullptr;
-    const bool cont = !interacted_w_medium && hit_invisible_wall;
-    
-    segment.length = std::min(segment.length, medium_smpl.t);
-    
+    segment.length = interacted_w_medium ? medium_smpl.t : segment.length;
+
     if (volume_pdf_coeff != nullptr)
     {
-      VolumePdfCoefficients local_coeff = medium_tracker.getCurrentMedium().ComputeVolumePdfCoefficients(segment, context);
-      Accumulate(*volume_pdf_coeff, local_coeff, interfaces_crossed==0, !cont);
+      VolumePdfCoefficients local_coeff = medium.ComputeVolumePdfCoefficients(segment, context);
+      Accumulate(*volume_pdf_coeff, local_coeff, snear == 0., interacted_w_medium);
     }
 
-    // If there was a medium interaction, it came before the next surface, and we can surely return.
-    // Else it is possible to hit a perfectly transparent wall. I want to pass through it and keep on going.
-    // If we hit something else then we surely want to return to process it further.
-    // Finally there is the possibility of the photon escaping out of the scene to infinity.
-    if (cont)
+    if (interacted_w_medium)
     {
-      medium_tracker.goingThroughSurface(segment.ray.dir, intersection);
+      tfar = snear + medium_smpl.t;
+      VolumeInteraction vi{ ray.PointAt(tfar), medium, Spectral3{ 0. }, medium_smpl.sigma_s };
+      return volume_visitor(vi, tfar, weight);
     }
-    else
-    {
-      if (interacted_w_medium)
-      {
-        VolumeInteraction interaction{segment.EndPoint(), medium, Spectral3{0.}, medium_smpl.sigma_s};
-        return volume_visitor(interaction, prev_t+medium_smpl.t, weight);
-      }
-      else if (hit)
-      {
-        return surface_visitor(intersection, iter.GetT(), weight);
-      }
-      break; // Escaped the scene.
-    }
-    assert (interfaces_crossed < MAX_ITERATIONS-1);
   }
-  
-  return escape_visitor(weight);
+
+  // If we get here, there was no scattering in the medium.
+  if (hit)
+  {
+    return surface_visitor(*hit, tfar, weight);
+  }
+  else
+  {
+    return escape_visitor(weight);
+  }
 };
 
 
@@ -267,21 +301,21 @@ inline void TrackBeam(
   SegmentVisitor &&segment_visitor,
   EscapeVisitor &&escape_visitor)
 {
-  static constexpr int MAX_ITERATIONS = 100; // For safety, in case somethign goes wrong with the intersections ...
-  
   Spectral3 weight{1.};
-  bool has_weight = true;
   
-  RaySegment segment;
-  SurfaceInteraction intersection;
-  IterateIntersectionsBetween iter{RaySegment{ray, LargeNumber}, scene};
+  double tfar = LargeNumber;
+  const auto hit = scene.FirstIntersection(ray, 0., tfar);
+
   PiecewiseConstantTransmittance pct;
   
-  for (int interfaces_crossed=0; interfaces_crossed < MAX_ITERATIONS; ++interfaces_crossed)
-  {   
-    bool hit = iter.Next(segment, intersection);
-
-    const Medium& medium = medium_tracker.getCurrentMedium();
+  // TODO: if the active medium does not change at a boundary, we can aggregate the adjacent segments.
+  auto iter = VolumeSegmentIterator(scene, ray, 0., tfar);
+  for (; iter; iter.Next(ray, medium_tracker))
+  {
+    const auto[snear, sfar] = iter.Interval();
+    const RaySegment segment{ ray, snear, sfar };
+    const auto &medium = medium_tracker.getCurrentMedium();
+    
     medium.ConstructShortBeamTransmittance(segment, sampler, context, pct);
     
     segment_visitor(segment, medium, pct, weight);
@@ -289,35 +323,17 @@ inline void TrackBeam(
     weight *= pct(segment.length);
     pct.Clear();
     
-    has_weight = weight.maxCoeff()>0.;
-    const bool hit_invisible_wall =
-      hit && 
-      scene.GetMaterialOf(intersection.hitid).shader==&scene.GetInvisibleShader() &&
-      scene.GetMaterialOf(intersection.hitid).emitter==nullptr;
+    if (weight.maxCoeff() <= 0.)
+      break;
+  }
 
-    if (has_weight)
-    {
-      if (hit_invisible_wall)
-      {
-        medium_tracker.goingThroughSurface(segment.ray.dir, intersection);
-      }
-      else
-      {
-        if (hit)
-        {
-          surface_visitor(intersection, weight);
-          return;
-        }
-        else
-        {
-          escape_visitor(weight);
-          return;
-        }
-      }
-    }
-    else 
-      return;
-    assert (interfaces_crossed < MAX_ITERATIONS-1);
+  if (hit)
+  {
+    surface_visitor(*hit, weight);
+  }
+  else
+  {
+    escape_visitor(weight);
   }
 };
 

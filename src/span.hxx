@@ -43,6 +43,10 @@ public:
   
   const T* begin() const { return _begin; }
   
+  T* end() { return _begin + _size; }
+
+  const T* end() const { return _begin + _size;  }
+
   operator Span<const T>() const { return Span<const T>(begin(), size()); }
 };
 
@@ -85,4 +89,16 @@ inline Span<const typename Eigen::internal::traits<Derived>::Scalar>
 AsSpan(const Eigen::PlainObjectBase<Derived> &x)
 {
   return Span<const typename Eigen::internal::traits<Derived>::Scalar>(x.data(), (ptrdiff_t)x.size());
+}
+
+template<class T, size_t N>
+inline Span<const T> AsSpan(const std::array<T, N> &a)
+{
+  return Span<const T>(a.data(), a.size());
+}
+
+template<class T, size_t N>
+inline Span<T> AsSpan(std::array<T, N> &a)
+{
+  return Span<T>(a.data(), a.size());
 }

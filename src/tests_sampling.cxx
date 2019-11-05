@@ -935,7 +935,7 @@ public:
       {-1, -1, 0}, {1, -1, 0}, {0, 1, 0}, {0, 0, 1});
     SetShadingNormal({0,0,1});
     context = PathContext{SelectRgbPrimaryWavelengths()};
-    embree.Add(mesh);
+    embree.InsertRefTo(mesh);
     embree.Build();
   }
   

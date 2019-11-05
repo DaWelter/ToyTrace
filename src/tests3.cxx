@@ -19,41 +19,55 @@ using namespace RandomWalk;
 void RenderingMediaTransmission1Helper(
   const Scene &scene, 
   const Ray &ray, 
-  const Medium **media_after_intersect, 
-  const double *intersect_pos, 
-  int NHITS)
+  const Span<int> medium_changes,
+  const Span<double> intersect_pos, 
+  int num_hits)
 {
+  std::unordered_map<int, const Medium*> media_table;
+
   MediumTracker mt(scene);
-  mt.initializePosition({0, 0, -10});
-  ASSERT_EQ(&mt.getCurrentMedium(), &scene.GetEmptySpaceMedium());
-  RaySegment seg{ray, LargeNumber};
-  std::printf("Media Trace:\n");
-  IterateIntersectionsBetween iter{seg, scene};
-  SurfaceInteraction intersection;
-  int i = 0;
-  for (; iter.Next(seg, intersection); ++i)
+  mt.initializePosition(ray.org);
+
+  auto CheckOrInsert = [&](int medium_id) -> bool
   {
-    EXPECT_LE(i, NHITS-1);
-    mt.goingThroughSurface(seg.ray.dir, intersection);
-    std::printf("IS[%i]: pos=%f, med_expect=%p, got=%p\n", i, intersection.pos[2], media_after_intersect[i], &mt.getCurrentMedium());
-    EXPECT_NEAR(intersection.pos[2], intersect_pos[i], 1.e-6);
-    ASSERT_EQ(&mt.getCurrentMedium(), media_after_intersect[i]);
+    auto[it, inserted] = media_table.insert({ medium_id, &mt.getCurrentMedium() });
+    return inserted || it->second == &mt.getCurrentMedium();
+  };
+
+  CheckOrInsert(medium_changes[0]);
+
+  std::printf("Media Trace:\n");
+
+  int i = 0;
+  auto intersections = scene.IntersectionsWithVolumes(ray, 0., LargeNumber);
+  ASSERT_EQ(intersections.size(), num_hits);
+
+  for (const auto &intersection : intersections)
+  {
+    assert(intersection.geom >= 0 && intersection.prim >= 0);
+    mt.goingThroughSurface(ray.dir, intersection);
+    const Double3 pos = ray.PointAt(intersection.t);
+    const bool medium_ok = CheckOrInsert(medium_changes[i + 1]);
+    std::printf("IS[%i]: pos=%f, med_expect=%p, got=%p\n", i, pos[2], media_table[medium_changes[i+1]], &mt.getCurrentMedium());
+    EXPECT_NEAR(pos[2], intersect_pos[i], 1.e-6);
+    EXPECT_TRUE(medium_ok);
+    ++i;
   }
 }
 
 
 void CheckVolumePdfCoefficientsForMedium(const VolumePdfCoefficients &coeff, double tr, double sigma_start, double sigma_end, double tol)
 {
+  EXPECT_NEAR(coeff.transmittance, tr, tol);
   EXPECT_NEAR(coeff.pdf_scatter_fwd, tr*sigma_end, tol);
   EXPECT_NEAR(coeff.pdf_scatter_bwd, tr*sigma_start, tol);
-  EXPECT_NEAR(coeff.transmittance, tr, tol);
 }
 
 
 TEST(Rendering, MediaTransmission1)
 {
   const std::string scenestr {R"""(
-shader invisible
+shader none
 medium med1 1 1 1 2 2 2
 medium med2 1 1 1 2 2 2
 
@@ -75,33 +89,30 @@ s 0 0 6 0.5
   Scene scene;
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
-  auto GetMedium = [&scene](int i) {
-    return scene.GetMaterialOf({&scene.GetGeometry(1), i}).medium;
+
+  static constexpr int NHITS = 10;
+  auto intersect_pos = std::array<double, NHITS>{
+    -2, 0, 1, 2, 3, 4, 5, 5.5, 6.5, 7
   };
-  
-  for (int i=0; i<5; ++i)
-  {
-    std::printf("Medium of prim %i = %p\n", i, GetMedium(i));
-  }
-  const Medium *vac = &scene.GetEmptySpaceMedium();
-  const Medium *m1 = GetMedium(0);
-  const Medium *m2 = GetMedium(1);
-  const Medium *media_after_intersect[] = {
-    m1, vac, m2, m2, m1, vac, m1, m2, m1, vac
+  auto medium_changes = std::array<int, NHITS + 1>{
+  0, 1, 0, 2, 2, 1, 0, 1, 2, 1, 0
   };
-  int NHITS = sizeof(media_after_intersect)/sizeof(void*);
-  double intersect_pos[] = {
-    -2, 0,   1,  2,  3,   4,  5,  5.5,6.5, 7
-  };
+  /*
+    -2 -- 0  // med 1
+            1 -- 3 // med 2
+               2 --- 4 // med 1
+                            5 ---------- 7    // med 1
+                              5.5 -- 6.5 // med 2
+  */
   Ray ray{{0, 0, -10}, {0, 0, 1}};
-  RenderingMediaTransmission1Helper(scene, ray, media_after_intersect, intersect_pos, NHITS);
+  RenderingMediaTransmission1Helper(scene, ray, AsSpan(medium_changes), AsSpan(intersect_pos), NHITS);
 }
 
 
 TEST(Rendering, MediaTransmission2)
 {
   const std::string scenestr {R"""(
-shader invisible
+shader none
 medium med1 1 1 1 2 2 2
 medium med2 1 1 1 2 2 2
 
@@ -120,29 +131,105 @@ m testing/scenes/unitcube.dae
   Scene scene;
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
-  auto GetMedium = [&scene](int i) {
-    return scene.GetMaterialOf({&scene.GetGeometry(0), i}).medium;
+  
+  static constexpr int NHITS = 5;
+  auto intersect_pos = std::array<double, NHITS>{
+     0,   1,  2,  3,   4
   };
-  const Medium *vac = &scene.GetEmptySpaceMedium();
-  const Medium *m1 = GetMedium(0);
-  const Medium *m2 = GetMedium(12);
-  const Medium *media_after_intersect[] = {
-    m1, vac, m2, m2, m1, vac
+  auto media_changes = std::array<int, NHITS+1> {
+  1, 0,   2,  2,  1,   0
   };
-  int NHITS = sizeof(media_after_intersect)/sizeof(void*);
-  double intersect_pos[] = {
-    -2, 0,   1,  2,  3,   4,
-  };
-  Ray ray{{0, 0, -10}, {0, 0, 1}}; // Offset to prevent hiting two adjacent triangles exactly at the interfacing edge.
-  RenderingMediaTransmission1Helper(scene, ray, media_after_intersect, intersect_pos, NHITS);
+  /*
+   -2 .. 0  // med1
+            1  .. 3  // med2
+               2 .. 4 // med1
+  */
+  const Ray ray{{0, 0, -1.}, {0, 0, 1}};
+  RenderingMediaTransmission1Helper(scene, ray, AsSpan(media_changes), AsSpan(intersect_pos), NHITS);
+}
+
+
+
+namespace Eigen
+{
+
+template<class Derived>
+auto ToVector(const ArrayBase<Derived> &v)
+{
+  using Scalar = typename internal::traits<Derived>::Scalar;
+  if (v.rows() > 1 && v.cols() > 1)
+    throw std::runtime_error("Need 1D array!");
+  const auto temp = v.eval();
+  return ToyVector<Scalar>(temp.data(), temp.data() + temp.size());
+}
+
+};
+
+
+
+namespace test_medium
+{
+
+struct ControlPoint
+{
+  double x;
+  Eigen::ArrayXd mu_s;
+  Eigen::ArrayXd mu_a;
+};
+
+
+struct Result
+{
+  Eigen::ArrayXd transmittance;
+  Eigen::ArrayXd mu_s, mu_a;
+};
+
+/* 
+  ControlPoints define a piecewise constant medium.
+  Its values are valid from x to the next control point.
+*/
+Result ComputeTransmittance(double x, const ToyVector<ControlPoint> &medium)
+{
+  const auto dim = medium.empty() ? 0 : medium.front().mu_s.size();
+
+  Result res{};
+  res.transmittance.resize(dim);
+  res.transmittance.setOnes();
+  res.mu_s.resize(dim);
+  res.mu_s.setZero();
+  res.mu_a.resize(dim);
+  res.mu_a.setZero();
+
+  if (medium.empty() || x < medium.front().x)
+    return res;
+
+  for (std::size_t i = 0; i<medium.size(); ++i)
+  {
+    double next_x = (i + 1 == medium.size()) ? std::numeric_limits<double>::infinity() : medium[i + 1].x;
+    const auto &c = medium[i];
+    const bool is_x_in_segment = x < next_x;
+    if (is_x_in_segment)
+    {
+      next_x = x;
+      res.mu_a = c.mu_a;
+      res.mu_s = c.mu_s;
+    }
+    res.transmittance *= ((c.mu_a + c.mu_s)*(c.x - next_x)).exp();
+    if (is_x_in_segment)
+      break;
+  }
+  return res;
+}
+
 }
 
 
 TEST(Rendering, TransmittanceEstimate)
 {
+  using namespace test_medium;
   Scene scene;
   const char* scenestr = R"""(
-shader invisible
+shader none
 medium med1 1 1 1 2 2 2
 
 m testing/scenes/unitcube.dae
@@ -150,37 +237,40 @@ m testing/scenes/unitcube.dae
 transform 0 0 2 0 0 0
 m testing/scenes/unitcube.dae
 )""";
-  const double total_length = 2; // Because 2 unit cubes.
+  LambdaSelection wavelengths = SelectRgbPrimaryWavelengths();
+  const auto sigma_s = Color::RGBToSpectralSelection(RGB{ 1._rgb }, wavelengths.indices);
+  const auto sigma_a = Color::RGBToSpectralSelection(RGB{ 2._rgb }, wavelengths.indices);
+  const auto zero = decltype(sigma_s)::Zero();
+  const auto exact = ComputeTransmittance(LargeNumber, {
+    { -0.5, sigma_s, sigma_a},
+    {  0.5, zero,   zero},
+    {  1.5, sigma_s, sigma_a},
+    {  2.5, zero ,   zero},
+  });
+
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
-  LambdaSelection wavelengths = SelectRgbPrimaryWavelengths();
-  RadianceEstimatorBase rt(scene);
+  
+  RaySegment seg{{{0.,0.,-10.}, {0.,0.,1.}}, LargeNumber};
   MediumTracker medium_tracker(scene);
-  double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
-  RaySegment seg{{{ray_offset,0.,-10.}, {0.,0.,1.}}, LargeNumber};
   medium_tracker.initializePosition(seg.ray.org);
-  ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
+  Sampler sampler;
   VolumePdfCoefficients volume_pdf_coeff{};
-  auto res = rt.TransmittanceEstimate(seg, medium_tracker, PathContext{wavelengths}, &volume_pdf_coeff);
-  
-  auto sigma_e = Color::RGBToSpectralSelection(RGB{3._rgb}, wavelengths.indices);
-  Spectral3 expected = (-total_length*sigma_e).exp();
-  
+  auto res = ::TransmittanceEstimate(scene, seg, medium_tracker, PathContext{wavelengths}, sampler, &volume_pdf_coeff);
+
   for (int i=0; i<static_size<Spectral3>(); ++i)
-    ASSERT_NEAR(res[i], expected[i], 1.e-3);
-  
-  double approximated_tr = (-1.*sigma_e).exp().mean()*(-1*sigma_e).exp().mean(); 
-  // Concatentation of the approximations from the two cubes.
+    ASSERT_NEAR(res[i], exact.transmittance[i], 1.e-3);
   CheckVolumePdfCoefficientsForMedium(
-    volume_pdf_coeff, approximated_tr, 0, 0, 1.e-6);
+    volume_pdf_coeff, exact.transmittance.mean(), 0, 0, 1.e-6);
 }
 
 
 TEST(Rendering, NextInteractionEstimation)
 {
+  using namespace test_medium;
   Scene scene;
   const char* scenestr = R"""(
-shader invisible
+shader none
 medium med1 3 3 3 0 0 0
 
 m testing/scenes/unitcube.dae
@@ -188,41 +278,25 @@ m testing/scenes/unitcube.dae
 transform 0 0 2 0 0 0
 m testing/scenes/unitcube.dae
 )""";
+  LambdaSelection wavelengths = SelectRgbPrimaryWavelengths();  
+  Spectral3 sigma = Color::RGBToSpectralSelection(RGB{3._rgb,3._rgb,3._rgb}, wavelengths.indices);
+  const auto zero = decltype(sigma)::Zero();
+  const auto mediumTestDescr = ToyVector<ControlPoint>{
+    { -0.5, sigma, zero},
+    {  0.5, zero,   zero},
+    {  1.5, sigma, zero},
+    {  2.5, zero ,   zero}
+  };
+
   scene.ParseNFFString(scenestr);
   scene.BuildAccelStructure();
-  LambdaSelection wavelengths = SelectRgbPrimaryWavelengths();
-  
-  Spectral3 sigma = Color::RGBToSpectralSelection(RGB{3._rgb,3._rgb,3._rgb}, wavelengths.indices);
-  double cube1_start = -0.5;
-  double cube2_start = 1.5;
-  double camera_start = -10.;
-  auto AnalyticTrApprox = [=](double x) -> double
-  {
-    double first_cube_tr = (-sigma).exp().mean();
-    if (x < cube1_start) 
-      return 1.;
-    if (x < cube1_start+1.)
-      return (-(x-cube1_start)*sigma).exp().mean();
-    if (x < cube2_start)
-      return first_cube_tr;
-    if (x < cube2_start+1.)
-      return first_cube_tr*(-(x-cube2_start)*sigma).exp().mean();
-    return first_cube_tr*(-sigma).exp().mean();
-  };
-  auto AnalyticSigmaApprox = [=](double x) -> double
-  {
-    if (cube1_start < x && x < cube1_start+1) return sigma.mean();
-    if (cube2_start < x && x < cube2_start+1) return sigma.mean();
-    return 0.;
-  };
-  
+
   Sampler sampler;
+  Ray ray{{0.,0.,-10}, {0.,0.,1.}};
   MediumTracker medium_tracker(scene);
-  double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
-  Ray ray{{ray_offset,0.,camera_start}, {0.,0.,1.}};
   medium_tracker.initializePosition(ray.org);
   ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
-  
+
   int num_escaped = 0;
   Spectral3 weight_sum_interacted{0.};
   Spectral3 weight_sum_escaped{0.};
@@ -240,10 +314,10 @@ m testing/scenes/unitcube.dae
       },
       /*volume visitor=*/[&](const VolumeInteraction &interaction, double distance, const Spectral3 &weight)
       {
-        double x = distance + camera_start;
-        double tr = AnalyticTrApprox(x);
-        double s = AnalyticSigmaApprox(x);
-        CheckVolumePdfCoefficientsForMedium(volume_pdf_coeff, tr, 0., s, 1.e-5);
+        double x = distance + ray.org[2];
+        const auto exact = ComputeTransmittance(x, mediumTestDescr);
+
+        CheckVolumePdfCoefficientsForMedium(volume_pdf_coeff, exact.transmittance.mean(), 0., (exact.mu_a + exact.mu_s).mean(), 1.e-5);
         weight_sum_interacted += weight*interaction.sigma_s;
       },
       /* escape_visitor=*/[&](const Spectral3 &weight)
@@ -267,12 +341,12 @@ m testing/scenes/unitcube.dae
 }
 
 
-
 TEST(Rendering, TrackBeam)
 {
+  using namespace test_medium;
   Scene scene;
   const char* scenestr = R"""(
-shader invisible
+shader none
 medium med1 3 0
 
 m testing/scenes/unitcube.dae
@@ -280,47 +354,34 @@ m testing/scenes/unitcube.dae
 transform 0 0 2 0 0 0
 m testing/scenes/unitcube.dae
 )""";
-  scene.ParseNFFString(scenestr);
-  scene.BuildAccelStructure();
+
   LambdaSelection wavelengths = SelectRgbPrimaryWavelengths();
   Spectral3 sigma = Color::RGBToSpectralSelection(RGB{3._rgb,3._rgb,3._rgb}, wavelengths.indices);
-  double cube1_start = -0.5;
-  double cube2_start = 1.5;
-  double camera_start = -10.;
-  auto AnalyticTrApprox = [=](double x) -> double
-  {
-    double first_cube_tr = (-sigma).exp().mean();
-    if (x < cube1_start) 
-      return 1.;
-    if (x < cube1_start+1.)
-      return (-(x-cube1_start)*sigma).exp().mean();
-    if (x < cube2_start)
-      return first_cube_tr;
-    if (x < cube2_start+1.)
-      return first_cube_tr*(-(x-cube2_start)*sigma).exp().mean();
-    return first_cube_tr*(-sigma).exp().mean();
+  const auto zero = decltype(sigma)::Zero();
+  const auto mediumTestDescr = ToyVector<ControlPoint>{
+    { -0.5, sigma, zero},
+    {  0.5, zero,   zero},
+    {  1.5, sigma, zero},
+    {  2.5, zero ,   zero}
   };
-  auto AnalyticSigmaApprox = [=](double x) -> double
-  {
-    if (cube1_start < x && x < cube1_start+1) return sigma.mean();
-    if (cube2_start < x && x < cube2_start+1) return sigma.mean();
-    return 0.;
-  };
+
+
   constexpr int NUM_PROBES = 5;
   double probe_locations[NUM_PROBES] = {
     -1., 0., 1., 2., 5.
   }; 
   
+  scene.ParseNFFString(scenestr);
+  scene.BuildAccelStructure();
+
   Sampler sampler;
+  Ray ray{ {0.,0.,-10}, {0.,0.,1.} };
   MediumTracker medium_tracker(scene);
-  double ray_offset = 0.1; // because not so robust handling of intersection edge cases. No pun intended.
-  Ray ray{{ray_offset,0.,camera_start}, {0.,0.,1.}};
-  medium_tracker.initializePosition(ray.org);
-  ASSERT_EQ(&medium_tracker.getCurrentMedium(), &scene.GetEmptySpaceMedium());
   
   int num_escaped = 0;
   Spectral3 weight_sum_probed[NUM_PROBES];
-  for (int i=0; i<NUM_PROBES; ++i) weight_sum_probed[i] = Spectral3::Zero();
+  for (int i=0; i<NUM_PROBES; ++i) 
+    weight_sum_probed[i] = Spectral3::Zero();
   Spectral3 weight_sum_escaped{0.};
   
   constexpr int NUM_SAMPLES = 10000;
@@ -337,7 +398,7 @@ m testing/scenes/unitcube.dae
         for (int i = 0; i<NUM_PROBES; ++i)
         {
           // Convert probe location to distance along local segment.
-          double distance = Dot(ray.PointAt(probe_locations[i]-camera_start)-segment.ray.org, ray.dir);
+          double distance = probe_locations[i]-segment.ray.org[2];
           if (distance >= 0 && distance < segment.length)
             weight_sum_probed[i] += weight*pct(distance);
         }
@@ -353,10 +414,10 @@ m testing/scenes/unitcube.dae
   for (int probe_idx=0; probe_idx<NUM_PROBES; ++probe_idx)
   {
     weight_sum_probed[probe_idx] *= 1./(NUM_SAMPLES);
-    double expected_transmission = AnalyticTrApprox(probe_locations[probe_idx]);
+    const auto exact = ComputeTransmittance(probe_locations[probe_idx], mediumTestDescr);
     for (int i=0; i<static_size<Spectral3>(); ++i)
     {
-      ASSERT_NEAR(weight_sum_probed[probe_idx][i], expected_transmission, 1.e-2);
+      ASSERT_NEAR(weight_sum_probed[probe_idx][i], exact.transmittance[i], 1.e-2);
     }
   }
 
@@ -369,7 +430,6 @@ m testing/scenes/unitcube.dae
     ASSERT_NEAR(weight_sum_escaped[i], expected_transmissions[i], 1.e-2);
   }
 }
-
 
 
 TEST(Rendering,PiecewiseConstantTransmittance)

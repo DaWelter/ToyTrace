@@ -192,9 +192,10 @@ private:
 Scope NFFParser::CreateScope()
 {
   Scope s;
-  s.mediums.set_and_activate("default", scene->empty_space_medium);
+  s.mediums.set_and_activate("default", nullptr);
   s.shaders.set_and_activate("black", black_shader);
   s.shaders.set_and_activate("invisible", scene->invisible_shader);
+  s.shaders.set_and_activate("none", nullptr);
   s.shaders.set_and_activate("default", scene->default_shader);
   s.areaemitters.set_and_activate("none", nullptr);
   return s;
@@ -1401,6 +1402,6 @@ std::runtime_error NFFParser::MakeException(const std::string &msg) const
 
 void NFFParser::AddPointLight(std::unique_ptr<RadianceOrImportance::PointEmitter> p)
 {
-  p->scene_index = scene->lights.size();
+  p->scene_index = isize(scene->lights);
   scene->lights.push_back(std::move(p));
 }

@@ -292,7 +292,7 @@ class ToyVector : public std::vector<T, Alloc>
   using B = std::vector<T, Alloc>;
 public:
   using B::B;
-  
+
   inline typename B::const_reference operator[](typename B::size_type i) const
   {
     assert(i >= 0 && i<B::size());

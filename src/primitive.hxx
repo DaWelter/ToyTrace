@@ -1,5 +1,4 @@
-#ifndef PRIMITIVE_HXX
-#define PRIMITIVE_HXX
+#pragma once
 
 #include "types.hxx"
 #include "util.hxx"
@@ -42,7 +41,7 @@ public:
   } const type;
   MaterialIndex material_index{ -1 };
   index_t light_num_offset = -1;
-  
+  index_t index_in_scene = -1;
   Geometry(Type _t) : type{_t} {}
   virtual ~Geometry() = default;
   virtual HitId SampleUniformPosition(index_t index, Sampler &sampler) const = 0;
@@ -119,4 +118,3 @@ void FillPosBoundsSphere(SurfaceInteraction &interaction);
 // Return if there is something left of the segment, and the clipped near/far coordinate along the ray.
 std::tuple<bool, double, double> ClipRayToSphereInterior(const Double3 &ray_org, const Double3 &ray_dir, double tnear, double tfar, const Double3 &sphere_p, double sphere_r);
 
-#endif

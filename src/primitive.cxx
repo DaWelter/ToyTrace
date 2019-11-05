@@ -96,8 +96,8 @@ static void AppendVertical(M &a, const M &b)
 
 void  Mesh::Append(const Mesh &other)
 {
-  if (other.material_index != material_index)
-    throw std::runtime_error("Cannot merge geometries with mismatching materials");
+  //if (other.material_index != material_index)
+  //  throw std::runtime_error("Cannot merge geometries with mismatching materials");
   // a + b > overflow => b > overflow - a
   if (other.NumTriangles() > std::numeric_limits<decltype(NumTriangles())>::max() - NumTriangles())
     throw std::range_error("Cannot handle that many triangles in a mesh.");
@@ -203,8 +203,8 @@ void Spheres::Append(const Float3 pos, const float radius)
 
 void Spheres::Append(const Spheres& other)
 {
-  if (other.material_index != material_index)
-    throw std::runtime_error("Cannot merge geometries with mismatching materials");
+  //if (other.material_index != material_index)
+  //  throw std::runtime_error("Cannot merge geometries with mismatching materials");
   if (other.Size() > std::numeric_limits<decltype(Size())>::max() - Size())
     throw std::range_error("Cannot handle that many spheres in a geometry.");
   spheres.insert(spheres.end(), other.spheres.begin(), other.spheres.end());
@@ -306,3 +306,4 @@ std::tuple<bool, double, double> ClipRayToSphereInterior(const Double3 &ray_org,
     return std::make_tuple(true, tnear, tfar);
   }
 }
+
