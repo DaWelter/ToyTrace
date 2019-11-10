@@ -223,6 +223,13 @@ std::tuple<RVODemo, int> RVODemoFunc4(volatile int q, int &num_copies)
 
 TEST(BasicAssumptions, RVO)
 {
+  
+#ifdef _MSC_VER 
+  // MS compiler does not do named RVO?!
+  static constexpr int NUM_COPIES_IN_NAMED_RVO_TEST = 1;
+#else
+  static constexpr int NUM_COPIES_IN_NAMED_RVO_TEST = 0;
+#endif
   int num_copies;
   volatile int q = 1;
   {
@@ -234,8 +241,8 @@ TEST(BasicAssumptions, RVO)
   {
     num_copies = 0;
     RVODemo demo = RVODemoFunc2(q, num_copies);
-    std::cout << "q=" << demo.q << " num_copies =" << num_copies << std::endl; 
-    EXPECT_EQ(num_copies, 0);
+    std::cout << "q=" << demo.q << " num_copies =" << num_copies << std::endl;
+    EXPECT_EQ(num_copies, NUM_COPIES_IN_NAMED_RVO_TEST); // MS compiler does not do named RVO?!
   }
   {
     num_copies = 0;
@@ -262,7 +269,7 @@ TEST(BasicAssumptions, RVO)
     num_copies = 0;
     RVODemo demo = RVODemoFunc2(q, num_copies);
     std::cout << "q=" << demo.q << " num_copies =" << num_copies << std::endl;
-    EXPECT_EQ(num_copies, 0);
+    EXPECT_EQ(num_copies, NUM_COPIES_IN_NAMED_RVO_TEST);
   }
   { 
     num_copies = 0;
