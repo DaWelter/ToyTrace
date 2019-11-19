@@ -134,6 +134,7 @@ bool EmbreeAccelerator::FirstIntersection(const Ray &ray, double tnear, double &
 struct RTCIntersectContextWithMyCallback : public RTCIntersectContext
 {
   mutable ToyVector<BoundaryIntersection> hitRecords;
+  float tfarMax;
 
   // TODO: filter duplicate intersections!
   static void MyFilterFunction(const struct RTCFilterFunctionNArguments* args)
@@ -146,7 +147,7 @@ struct RTCIntersectContextWithMyCallback : public RTCIntersectContext
     const auto previousHits = AsSpan(context->hitRecords);
 
     /* ignore inactive rays */
-    if (args->valid[0] != -1) return;
+    if (args->valid[0] != -1 || ray->tfar > context->tfarMax) return;
 
     args->valid[0] = 0;
 
@@ -171,7 +172,9 @@ struct RTCIntersectContextWithMyCallback : public RTCIntersectContext
     );
 
     if (!found)
+    {
       context->hitRecords.insert(it, current);
+    }
   }
 };
 
@@ -183,6 +186,7 @@ Span<BoundaryIntersection> EmbreeAccelerator::IntersectionsInOrder(const Ray &ra
   context.hitRecords = std::move(this->intersections_result);
   context.hitRecords.clear();
   context.filter = RTCIntersectContextWithMyCallback::MyFilterFunction;
+  context.tfarMax = tfar;
 
   RTCRay rtray; // = rtrayhit.ray;
   rtray.org_x = ray.org[0];
@@ -201,10 +205,10 @@ Span<BoundaryIntersection> EmbreeAccelerator::IntersectionsInOrder(const Ray &ra
   // Here we do the work!!
   rtcOccluded1(rtscene, &context, &rtray);
 
-  //std::sort(context.hitRecords.begin(), context.hitRecords.end(), [](const BoundaryIntersection &a, const BoundaryIntersection &b) { return a.t < b.t;  });
-  
+  // TODO: Since the memory returned comes from internal storage, I can
+  // never hold on to it and call the IntersectionsInOrder function again.
+  // Improve this!
   this->intersections_result = std::move(context.hitRecords);
-
   return AsSpan(this->intersections_result);
 }
 
