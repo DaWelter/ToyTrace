@@ -48,17 +48,21 @@ inline const Medium& MediumTracker::getCurrentMedium() const
 
 inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const SurfaceInteraction& intersection)
 {
+  const Medium *m = scene.GetMaterialOf(intersection.hitid).medium;
+  if (!m)
+    return;
   if (Dot(dir_of_travel, intersection.geometry_normal) < 0)
-    enterVolume(&GetMediumOf(intersection, scene));
+    enterVolume(m);
   else
-    leaveVolume(&GetMediumOf(intersection, scene));
+    leaveVolume(m);
 }
 
 
 inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const BoundaryIntersection& intersection)
 {
   const Medium *m = scene.GetMaterialOf(intersection.geom, intersection.prim).medium;
-  assert(m);
+  if (!m)
+    return;
   if (Dot(dir_of_travel.cast<float>(), intersection.n) < 0)
     enterVolume(m);
   else
@@ -193,7 +197,8 @@ class SegmentIterator
 public:
   SegmentIterator(const Span<BoundaryIntersection> is, double tnear, double tfar)
     : start{ is.begin() }, end{ is.end() }, tnear{ tnear }, tfar{ tfar }
-  {}
+  {
+  }
 
   operator bool() const
   {
@@ -202,7 +207,7 @@ public:
 
   void Next(const Ray& ray, MediumTracker &medium_tracker)
   {
-    assert(tnear < tfar); // Not done yet
+    assert(static_cast<float>(tnear) < static_cast<float>(tfar)); // Not done yet
     if (start == end)
     {
       // Mark as invalid.
@@ -250,7 +255,8 @@ inline TrackToNextInteraction(
   double tfar = LargeNumber;
   const auto hit = scene.FirstIntersection(ray, 0., tfar);
 
-  auto iter = VolumeSegmentIterator(scene, ray, 0., tfar);
+  // The factor by which tfar is decreased is meant to prevent intersections which lie close to the end of the query segment.
+  auto iter = VolumeSegmentIterator(scene, ray, 0., tfar * 0.9999);
   for (; iter; iter.Next(ray, medium_tracker))
   {
     auto[snear, sfar] = iter.Interval();

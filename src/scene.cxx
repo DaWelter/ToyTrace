@@ -90,7 +90,9 @@ void Scene::Append(const Geometry &geo, const Material &mat)
     clone->material_index = material_index;
     geometries.push_back(std::move(clone));
     if (is_volume)
+    {
       volumes.push_back(geometries.back().get());
+    }
     else
     {
       if (is_emissive)
@@ -107,14 +109,24 @@ void Scene::Append(const Geometry &geo, const Material &mat)
 
 void Scene::BuildAccelStructure()
 {
-  for (int i = 0; i < isize(surfaces); ++i)
-    embreeaccelerator.InsertRefTo(*surfaces[i]);
-  for (int i = 0; i < isize(emissive_surfaces); ++i)
-    embreeaccelerator.InsertRefTo(*emissive_surfaces[i]);
+  for (auto &surf : surfaces)
+  {
+    assert(materials[value(surf->material_index)].shader != nullptr);
+    embreeaccelerator.InsertRefTo(*surf);
+  }
+  for (auto &surf : emissive_surfaces)
+  {
+    assert(materials[value(surf->material_index)].shader != nullptr);
+    embreeaccelerator.InsertRefTo(*surf);
+  }
   embreeaccelerator.Build();
 
-  for (int i = 0; i < isize(volumes); ++i)
-    embreevolumes.InsertRefTo(*volumes[i]);
+  for (auto &v : volumes)
+  {
+    assert(materials[value(v->material_index)].shader == nullptr);
+    assert(materials[value(v->material_index)].medium != nullptr);
+    embreevolumes.InsertRefTo(*v);
+  }
   embreevolumes.Build();
   
   this->boundingBox = embreeaccelerator.GetSceneBounds();
