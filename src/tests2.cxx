@@ -988,6 +988,41 @@ TEST(Intrusive, MyMultiLinkedList)
 }
 
 //////////////////////////////////////////////
+// Template Lambdas
+//////////////////////////////////////////////
+
+namespace TemplateLambdaMagicNamespace
+{
+
+// G will be a lambda defined with "auto" arguments. This way it becomes like a 
+// template function. The nice thing is that it can apparently be instantiated 
+// for different types inside of f, where it is not visible from the outside which
+// types exactly that will be!
+template<class G>
+void f(bool switch_, G g)
+{
+  if (switch_)
+    g(666.);
+  else
+    g(std::string_view("42"));
+}
+
+}
+
+TEST(TemplateLambda, performDarkRitual)
+{
+
+  TemplateLambdaMagicNamespace::f(true, [&](const auto &arg) {
+    std::cout << "is's magic " << arg << " is a " << typeid(arg).name() << std::endl;
+  });
+
+  TemplateLambdaMagicNamespace::f(false, [&](const auto &arg) {
+    std::cout << "is's magic " << arg << " is a " << typeid(arg).name() << std::endl;
+  });
+}
+
+
+//////////////////////////////////////////////
 ////// Demoing Parameterized Tests
 //////////////////////////////////////////////
 namespace ParameterizedTestDemoDetail
