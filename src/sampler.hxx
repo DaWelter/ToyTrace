@@ -405,7 +405,10 @@ public:
   }
 };
 
-
+inline double Value(const Pdf &pdf)
+{
+  return static_cast<double>(pdf);
+}
   
 
 

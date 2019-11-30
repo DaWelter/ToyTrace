@@ -24,7 +24,7 @@ public:
   virtual ~MaybeDisplay() = default;
   virtual void Show(const Image &im) = 0;
   virtual bool IsOkToKeepGoing() const = 0;
-  virtual void MaybeDemandInterrupt(RenderingAlgo &algo) const = 0;
+  virtual bool WantsPeriodicDisplay() const = 0;
 };
 
 
@@ -42,9 +42,9 @@ public:
     return display.is_open();
   }
   
-  void MaybeDemandInterrupt(RenderingAlgo &algo) const override
+  bool WantsPeriodicDisplay() const override
   {
-    algo.RequestInterrupt(); 
+      return true;
   }
 };
 
@@ -61,8 +61,9 @@ public:
     return true;
   }
   
-  void MaybeDemandInterrupt(RenderingAlgo &algo) const override
+  bool WantsPeriodicDisplay() const override
   {
+      return false;
   }
 };
 
@@ -172,7 +173,10 @@ int main(int argc, char *argv[])
     while (display->IsOkToKeepGoing() && stop_flag.load() == false)
     {    
       std::this_thread::sleep_for(std::chrono::seconds(1));
-      display->MaybeDemandInterrupt(*algo);
+      if (display->WantsPeriodicDisplay())
+      {
+          algo->RequestInterrupt();
+      }
     }
     algo->RequestFullStop();
   });

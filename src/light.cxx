@@ -176,4 +176,55 @@ double EnvMapLight::EvaluatePdf(const Double3 &dir_out, const PathContext &conte
 
 
 
-} // namespace 
+} // namespace RadianceOrImportance
+
+
+namespace Lights {
+namespace Detail {
+
+EnvLightPointSamplingBeyondScene::EnvLightPointSamplingBeyondScene(const Scene & scene)
+{
+  Box bb = scene.GetBoundingBox();
+  box_center = 0.5*(bb.max + bb.min);
+  diameter = Length(bb.max - bb.min);
+  sufficiently_long_distance_to_go_outside_the_scene_bounds = 10.*diameter;
+}
+
+
+Double3 EnvLightPointSamplingBeyondScene::Sample(const Double3 & exitant_direction, Sampler & sampler) const
+{
+  Double3 disc_sample = SampleTrafo::ToUniformDisc(sampler.UniformUnitSquare());
+  Eigen::Matrix3d frame = OrthogonalSystemZAligned(exitant_direction);
+  Double3 org =
+    box_center +
+    -sufficiently_long_distance_to_go_outside_the_scene_bounds * exitant_direction
+    + frame * 0.5 * diameter * disc_sample;
+  return org;
+}
+
+
+
+RaySegment SegmentToEnv(const SurfaceInteraction & surface, const Scene & scene, const Double3 & dir)
+{
+  Ray ray{ surface.pos, dir };
+  const double length = 10.*scene.GetBoundingBox().DiagonalLength();
+  ray.org += AntiSelfIntersectionOffset(surface, ray.dir);
+  return { ray, length };
+}
+
+RaySegment SegmentToPoint(const SurfaceInteraction & surface, const Double3 & pos)
+{
+  Ray ray{ surface.pos, pos - surface.pos };
+  double length = Length(ray.dir);
+  if (length > 0.)
+    ray.dir /= length;
+  else // Just pick something which will not result in NaN.
+  {
+    length = Epsilon;
+    ray.dir = surface.normal;
+  }
+  ray.org += AntiSelfIntersectionOffset(surface, ray.dir);
+  return { ray, length };
+}
+
+}} // Lights::Detail::

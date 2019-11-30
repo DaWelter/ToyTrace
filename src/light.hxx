@@ -305,5 +305,190 @@ public:
 };
 
 
-
 } // namespace
+
+
+namespace Lights
+{
+
+namespace Detail
+{
+
+// TODO: At least some of the data could be precomputed.
+// TODO: For improved precision it would make sense to move the scene center to the origin.
+struct EnvLightPointSamplingBeyondScene
+{
+  double diameter;
+  double sufficiently_long_distance_to_go_outside_the_scene_bounds;
+  Double3 box_center;
+
+  EnvLightPointSamplingBeyondScene(const Scene &scene);
+
+  Double3 Sample(const Double3 &exitant_direction, Sampler &sampler) const;
+
+  double Pdf(const Double3 &) const
+  {
+    return 1. / (Pi*0.25*Sqr(diameter));
+  }
+};
+
+
+RaySegment SegmentToEnv(const SurfaceInteraction &surface, const Scene &scene, const Double3 &dir);
+RaySegment SegmentToPoint(const SurfaceInteraction &surface, const Double3 &pos);
+
+
+} // namespace Detail
+
+
+using EmissionSample = std::tuple<Ray, std::pair<Pdf,Pdf>, Spectral3>;
+using LightConnectionSample = std::tuple<RaySegment, Pdf, Spectral3>;
+
+inline static constexpr int IDX_PROB_ENV = 0;
+inline static constexpr int IDX_PROB_AREA = 1;
+inline static constexpr int IDX_PROB_POINT = 2;
+inline static constexpr int IDX_PROB_VOLUME = 3;
+inline static constexpr int NUM_LIGHT_TYPES = 4;
+
+struct LightRef
+{
+  std::uint32_t type : 2;
+  std::uint32_t idx : 30;
+};
+
+static_assert(sizeof(LightRef) == 4);
+
+inline LightRef MakeLightRef(const Scene &scene, const PrimRef &hitid)
+{
+  return { (uint32_t)IDX_PROB_AREA , (uint32_t)scene.GetAreaLightIndex(hitid) };
+}
+
+inline LightRef MakeLightRef(const Scene &scene, const RadianceOrImportance::TotalEnvironmentalRadianceField &envlight)
+{
+  return { (uint32_t)IDX_PROB_ENV ,(uint32_t)0 };
+}
+
+inline LightRef MakeLightRef(const Scene &scene, const RadianceOrImportance::PointEmitter &pointlight)
+{
+  return { (uint32_t)IDX_PROB_POINT, (uint32_t)pointlight.scene_index };
+}
+
+
+class Base
+{
+};
+
+
+class Env : public Base
+{
+  const RadianceOrImportance::EnvironmentalRadianceField *env;
+public:
+  Env(const RadianceOrImportance::EnvironmentalRadianceField &env_) : env{ &env_ } {}
+
+  static constexpr bool IsAngularDistribution() { return true;  }
+
+  const auto & Get() const { return *env; }
+
+  Double3 SurfaceNormal() const { return Double3::Zero(); }
+
+  EmissionSample SampleExitantRay(const Scene &scene, Sampler &sampler, const PathContext &context)
+  {
+    auto smpl = env->TakeDirectionSample(sampler, context);
+    Detail::EnvLightPointSamplingBeyondScene gen{ scene };
+    double pdf = gen.Pdf(smpl.coordinates);
+    Double3 org = gen.Sample(smpl.coordinates, sampler);
+    return { { org, smpl.coordinates }, { smpl.pdf_or_pmf, pdf}, smpl.value };
+  }
+
+  LightConnectionSample SampleConnection(const SurfaceInteraction &surfaceFrom, const Scene &scene, Sampler &sampler, const PathContext &context)
+  {
+    const auto smpl = env->TakeDirectionSample(sampler, context);
+    const auto seg = Detail::SegmentToEnv(surfaceFrom, scene, smpl.coordinates);
+    return { seg, smpl.pdf_or_pmf, smpl.value };
+  }
+};
+
+
+class Point : public Base
+{
+  const RadianceOrImportance::PointEmitter *light;
+public:
+  Point(const RadianceOrImportance::PointEmitter &light_) : light{ &light_ } {}
+
+  static constexpr bool IsAngularDistribution() { return false; }
+
+  const auto & Get() const { return *light; }
+
+  Double3 SurfaceNormal() const { return Double3::Zero(); }
+
+  EmissionSample SampleExitantRay(const Scene &scene, Sampler &sampler, const PathContext &context)
+  {
+    const Double3 org = light->Position();
+    auto smpl = light->TakeDirectionSampleFrom(org, sampler, context);
+    return { {org, smpl.coordinates }, { Pdf::MakeFromDelta(1.), smpl.pdf_or_pmf}, smpl.value };
+  }
+
+  LightConnectionSample SampleConnection(const SurfaceInteraction &surfaceFrom, const Scene &scene, Sampler &sampler, const PathContext &context)
+  {
+    const auto seg = Detail::SegmentToPoint(surfaceFrom, light->Position());
+    const auto val = light->Evaluate(light->Position(), -seg.ray.dir, context, nullptr);
+    return { seg, Pdf::MakeFromDelta(1.), val };
+  }
+};
+
+
+class Area : public Base
+{
+  PrimRef prim_ref;
+  const RadianceOrImportance::AreaEmitter *emitter;
+  SurfaceInteraction light_surf;
+public:
+  Area(const PrimRef &prim_ref_, const Scene &scene)
+    : prim_ref{prim_ref_}
+  {
+    const auto &mat = scene.GetMaterialOf(prim_ref);
+    assert(mat.emitter); // Otherwise would would not have been selected.
+    emitter = mat.emitter;
+  }
+
+  static constexpr bool IsAngularDistribution() { return false; }
+
+  const auto Get() const { return prim_ref; }
+
+  Double3 SurfaceNormal() const { return light_surf.geometry_normal; }
+
+  EmissionSample SampleExitantRay(const Scene &scene, Sampler &sampler, const PathContext &context)
+  {
+    auto area_smpl = emitter->TakeAreaSample(prim_ref, sampler, context);
+    auto dir_smpl = emitter->TakeDirectionSampleFrom(area_smpl.coordinates, sampler, context);
+    this->light_surf = SurfaceInteraction{ area_smpl.coordinates };
+    Ray out_ray{ this->light_surf.pos, dir_smpl.coordinates };
+    out_ray.org += AntiSelfIntersectionOffset( this->light_surf, out_ray.dir);
+    Spectral3 val = dir_smpl.value * std::abs(Dot(light_surf.smooth_normal, out_ray.dir));
+    
+    return { out_ray, { area_smpl.pdf_or_pmf, dir_smpl.pdf_or_pmf }, val };
+  }
+
+  LightConnectionSample SampleConnection(const SurfaceInteraction &surfaceFrom, const Scene &scene, Sampler &sampler, const PathContext &context)
+  {
+    auto area_smpl = emitter->TakeAreaSample(prim_ref, sampler, context);
+    this->light_surf = SurfaceInteraction{ area_smpl.coordinates };
+    const auto seg = Detail::SegmentToPoint(light_surf, light_surf.pos);
+    const auto val = emitter->Evaluate(area_smpl.coordinates, -seg.ray.dir, context, nullptr);
+    // TODO: multiply val by cos of emitting surface?
+    return { seg, area_smpl.pdf_or_pmf, val };
+  }
+};
+
+
+class Medium : public Base
+{
+  const ::Medium *medium;
+public:
+  Medium(const ::Medium &m) :
+    medium{ &m } {}
+
+  const auto& Get() const { return *medium; }
+};
+
+
+} // namespace Lights

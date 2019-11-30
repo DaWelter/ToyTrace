@@ -63,8 +63,40 @@ void while_parallel_fed_interruptible(Func &&f, Feeder &&feeder, IrqHandler &&ir
   }
 }
 
+
+template<class Func, class IrqHandler>
+void parallel_for_interruptible(int start, int end, int step, Func &&f, IrqHandler &&irq_handler, tbb::task_group &tg)
+{
+    const int workers = tbb::this_task_arena::max_concurrency();
+    tbb::atomic<int> idx{ start };
+
+    std::function<void()> worker_fun;
+    
+    worker_fun = [&idx, &tg, step, end, &f, &worker_fun]()
+    {
+        int my_idx = idx.fetch_and_add(step);
+        if (my_idx < end)
+        {
+            f(my_idx);
+            tg.run(worker_fun);
+        }
+    };
+
+    while (true)
+    {
+        for (int i=0; i<workers; ++i)
+        {
+            tg.run(worker_fun);
+        }
+        if (tg.wait() == tbb::task_group_status::complete || !irq_handler())
+            break;
+    }
+}
+
+
 } // namespace ThreadUtilDetail
 
 
 using ThreadUtilDetail::while_parallel_fed;
 using ThreadUtilDetail::while_parallel_fed_interruptible;
+using ThreadUtilDetail::parallel_for_interruptible;

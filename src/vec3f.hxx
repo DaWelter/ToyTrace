@@ -66,6 +66,7 @@ typedef Vec<float, 2> Float2;
 #define VECD Vec<T, d>
 #endif
 
+using Int2 = Eigen::Array2i;
 using UInt3 = Eigen::Array<unsigned int, 3, 1>;
 
 using Index3 = Eigen::Array<int, 3, 1>;

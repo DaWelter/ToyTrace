@@ -2,16 +2,72 @@
 
 #include <tbb/parallel_for.h>
 #include <tbb/blocked_range.h>
+#include <tbb/flow_graph.h>
 #include <numeric>
 
 #include "gtest/gtest.h"
 
 
-namespace UcbLightPickerImpl
+namespace Lightpickers
 {
 
-Stats::Stats()
-  : LinkListBase<Stats>(),
+
+std::array<int, Lights::NUM_LIGHT_TYPES> Lightpickers::GetNumLightTypes(const Scene & scene)
+{
+  std::array<int, Lights::NUM_LIGHT_TYPES> ret;
+  ret[IDX_PROB_POINT] = scene.GetNumPointLights();  ret[IDX_PROB_AREA] = scene.GetNumAreaLights();  ret[IDX_PROB_ENV] = scene.HasEnvLight() ? 1 : 0;  ret[IDX_PROB_VOLUME] = 0;  return ret;
+}
+
+
+namespace {
+void ComputeDistributionAndUpdate(Stats* stats_by_light_type, LightSelectionProbabilityMap &distribution)
+{
+  for (int light_type = 0; light_type < Lights::NUM_LIGHT_TYPES; ++light_type)
+  {
+    auto &s = stats_by_light_type[light_type];
+    s.ComputeDistributionAndUpdate(distribution.cummulative_probs[light_type], /*weight_sum = */distribution.light_type_selection_probs[light_type]);
+  }
+  distribution.light_type_selection_probs /= distribution.light_type_selection_probs.sum();
+}
+}
+
+
+
+
+LightSelectionProbabilityMap::LightSelectionProbabilityMap(const Scene & scene)
+  : scene{ scene }
+{
+  const auto counts = GetNumLightTypes(scene);
+
+  for (int i = 0; i < NUM_LIGHT_TYPES; ++i)
+  {
+    cummulative_probs[i] = Eigen::VectorXd(counts[i]);
+    if (counts[i] > 0)
+    {
+      cummulative_probs[i].setConstant(1. / counts[i]); // Uniform distribution
+      TowerSamplingComputeNormalizedCumSum(AsSpan(cummulative_probs[i]));
+    }
+    light_type_selection_probs = counts[i];
+  }
+  light_type_selection_probs /= light_type_selection_probs.sum();
+}
+
+void Lightpickers::LightSelectionProbabilityMap::Print(std::ostream & os) const
+{
+  os << "Light selection probabilities: \n";
+  auto PrintType = [this, &os](int t, const char* name) {
+    os << strformat("-- %s: %s --\n", name, light_type_selection_probs[t]);
+    for (int i = 0; i<cummulative_probs[t].size(); ++i)
+      os << strformat("p[%s]=%s\n", i, TowerSamplingProbabilityFromCmf(AsSpan(cummulative_probs[t]), i));
+  };
+  PrintType(IDX_PROB_POINT, "IDX_PROB_POINT");
+  PrintType(IDX_PROB_AREA, "IDX_PROB_AREA");
+  PrintType(IDX_PROB_ENV, "IDX_PROB_ENV");
+  PrintType(IDX_PROB_VOLUME, "IDX_PROB_VOLUME");
+}
+
+
+Stats::Stats() :
     accum(0)
 {
 }
@@ -21,23 +77,10 @@ void Stats::Init(int arm_count)
 {
   step_count = 0;
   accum = decltype(accum)(arm_count);
-  shared_cummulative_probs = std::make_shared<Eigen::ArrayXd>(arm_count);
-  cummulative_probs = AsSpan(*shared_cummulative_probs);
 }
 
 
-void Stats::InitSharedWith(Stats & other)
-{
-  step_count = 0;
-  accum = decltype(accum)(other.ArmCount());
-
-  shared_cummulative_probs = other.shared_cummulative_probs;
-  cummulative_probs = AsSpan(*shared_cummulative_probs);
-  CircularLinkList<Stats>::append(other, *this);
-}
-
-
-void Stats::UpdateAllShared(double &out_weight_sum)
+void Stats::ComputeDistributionAndUpdate(Eigen::ArrayXd &cummulative_probs, double &out_weight_sum)
 {
   ++step_count;
   // To make it very likely that unsampled arms are visited.
@@ -49,12 +92,6 @@ void Stats::UpdateAllShared(double &out_weight_sum)
   {
     out_weight_sum = 0;
     return;
-  }
-
-  OnlineVariance::ArrayAccumulator<double> accum(arm_count);
-  for (Stats &stats : CircularLinkList<Stats>::rangeStartingAt(*this))
-  {
-    accum.Add(stats.accum);
   }
 
   const auto &count = accum.Counts();
@@ -72,101 +109,105 @@ void Stats::UpdateAllShared(double &out_weight_sum)
         cummulative_probs[i] = large_weight;
       assert(std::isfinite(cummulative_probs[i]));
   }
-  TowerSamplingInplaceCumSum(cummulative_probs);
+  TowerSamplingInplaceCumSum(AsSpan(cummulative_probs));
   out_weight_sum = cummulative_probs[arm_count - 1];
-  TowerSamplingNormalize(cummulative_probs);
+  TowerSamplingNormalize(AsSpan(cummulative_probs));
 }
 
 
-void UcbLightPickerImpl::Stats::Print(std::ostream & os) const
-{
-  for (int i = 0; i < ArmCount(); ++i)
-  {
-    os << strformat("p[%s]=%s\n", i, TowerSamplingProbabilityFromCmf(cummulative_probs, i));
-  }
-}
 
 
 
 UcbLightPicker::UcbLightPicker(const Scene & scene)
   : LightPickerCommon{ scene },
-    LinkListBase<UcbLightPicker>()
+  distribution{ scene }
 {
-}
-
-void UcbLightPicker::Init()
-{
-  light_sampler[LightPickerCommon::IDX_PROB_POINT].Init(scene.GetNumPointLights());
-  light_sampler[LightPickerCommon::IDX_PROB_AREA].Init(scene.GetNumAreaLights());
-  light_sampler[LightPickerCommon::IDX_PROB_ENV].Init(scene.HasEnvLight() ? 1 : 0);
-  light_sampler[LightPickerCommon::IDX_PROB_VOLUME].Init(0);
-  //int num_lights = std::transform_reduce(
-  //    light_sampler,  light_sampler+NUM_LIGHT_TYPES, 0, 
-  //    std::plus<>(),
-  //    [](const Stats &s) { return s.ArmCount(); });
-  for (int i = 0; i < NUM_LIGHT_TYPES; ++i)
-    light_type_selection_probs[i] = static_cast<double>(light_sampler[i].ArmCount());
-}
-
-void UcbLightPicker::InitSharedWith(UcbLightPicker &other)
-{
-  assert(&other != this); // Probably not what I want.
-  for (int i = 0; i < NUM_LIGHT_TYPES; ++i)
+  const auto counts = GetNumLightTypes(scene);
+  int i = 0;
+  for (int lightcount : counts)
   {
-    light_sampler[i].InitSharedWith(other.light_sampler[i]);
-    light_type_selection_probs[i] = other.light_type_selection_probs[i];
+    stats[i++].Init(lightcount);
   }
-  CircularLinkList<UcbLightPicker>::append(other, *this);
 }
 
 
-void UcbLightPicker::ObserveLightContribution(const LightRef & lr, const Spectral3 & radiance)
+void UcbLightPicker::ObserveReturns(Span<const std::pair<LightRef, float>> buffer)
 {
-  assert(lr.type >= 0 && lr.type < NUM_LIGHT_TYPES);
   // This should maybe be the integral over the full spectrum, to get the total power.
   // Instead I sort of take the average over the spectrum. It is not the same because
   // this way I'm factoring in the variance across the spectrum. Not sure if this is right ...
-  for (int lambda = 0; lambda < static_size<Spectral3>(); ++lambda)
+  for (const auto [lr, value] : buffer)
   {
-    light_sampler[lr.type].ObserveReturn(lr.idx, radiance[lambda]);
+    stats[lr.type].ObserveReturn(lr.idx, value);
   }
 }
 
 
-void UcbLightPickerImpl::UcbLightPicker::ObserveLightContribution(const LightRef & lr, float value)
+void Lightpickers::UcbLightPicker::ComputeDistribution()
 {
-  assert(lr.type >= 0 && lr.type < NUM_LIGHT_TYPES);
-  light_sampler[lr.type].ObserveReturn(lr.idx, value);
+  ComputeDistributionAndUpdate(stats, distribution);
 }
 
 
-void UcbLightPickerImpl::UcbLightPicker::UpdateAllShared()
+
+/////////////////////////////////////////////////////////////////////////////////////////
+/// Photon based light picker
+/////////////////////////////////////////////////////////////////////////////////////////
+
+PhotonUcbLightPicker::PhotonUcbLightPicker(const Scene &scene)
+  : LightPickerCommon{ scene },
+  distribution{ scene }
 {
+  const auto counts = GetNumLightTypes(scene);
   int i = 0;
-  for (auto &s : light_sampler)
+  for (int lightcount : counts)
   {
-    s.UpdateAllShared(/*weight_sum = */light_type_selection_probs[i++]);
-  }
-  light_type_selection_probs /= light_type_selection_probs.sum();
-  for (auto &picker : CircularLinkList<UcbLightPicker>::rangeStartingAt(*this))
-  {
-    picker.light_type_selection_probs = this->light_type_selection_probs;
+    stats[i++].Init(lightcount);
   }
 }
 
 
-void UcbLightPickerImpl::UcbLightPicker::Print(std::ostream & os) const
+void PhotonUcbLightPicker::OnPassStart(const Span<LightRef> emitters_of_paths)
 {
-  os << "Light selection probabilities: \n";
-  auto PrintType = [this,&os](int idx, const char* name) {
-    os << strformat("-- %s: %s --\n", name, light_type_selection_probs[idx]);
-    light_sampler[idx].Print(os);
-  };
-  PrintType(LightPickerCommon::IDX_PROB_POINT, "IDX_PROB_POINT");
-  PrintType(LightPickerCommon::IDX_PROB_AREA, "IDX_PROB_AREA");
-  PrintType(LightPickerCommon::IDX_PROB_ENV, "IDX_PROB_ENV");
-  PrintType(LightPickerCommon::IDX_PROB_VOLUME, "IDX_PROB_VOLUME");
+  // Reallocate because there is no simpler way to clear or resize the array.
+  ucb_photon_path_returns = decltype(ucb_photon_path_returns)(emitters_of_paths.size());
 }
+
+void PhotonUcbLightPicker::OnPassEnd(const Span<LightRef> emitters_of_paths)
+{
+  for (int i = 0; i < emitters_of_paths.size(); ++i)
+  {
+    stats[emitters_of_paths[i].type].ObserveReturn(
+      emitters_of_paths[i].idx, 
+      ucb_photon_path_returns[i]);
+  }
+}
+
+void PhotonUcbLightPicker::ObserveReturns(Span<const std::pair<int, float>> buffer)
+{
+  for (auto [path_index, value] : buffer)
+  {
+    ucb_photon_path_returns[path_index] += value;
+  }
+}
+
+
+
+
+void PhotonUcbLightPicker::ComputeDistribution()
+{
+  ComputeDistributionAndUpdate(stats, distribution);
+}
+
+
+//void SetupGraph(tbb::flow::graph &g)
+//{
+//  tbb::flow::function_node<LightRefReturnsBuffer, tbb::flow::continue_msg> func(g, 1, [&](LightRefReturnsBuffer &buffer) {
+//    // fill
+//  });
+//}
+
+
 
 
 }

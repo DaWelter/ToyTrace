@@ -37,7 +37,8 @@ public:
   unsigned int identifier = { (unsigned int)-1 }; // Used by embree. It's the geometry identifier.
   enum Type {
     PRIMITIVES_TRIANGLES,
-    PRIMITIVES_SPHERES
+    PRIMITIVES_SPHERES,
+    PRIMITIVES_POINTS,
   } const type;
   MaterialIndex material_index{ -1 };
   index_t light_num_offset = -1;
@@ -106,6 +107,24 @@ class Spheres : public Geometry
     void GetLocalGeometry(SurfaceInteraction &interaction) const override;
     std::unique_ptr<Geometry> Clone() const override;
 };
+
+#if 0
+class Points : public Geometry
+{
+  public:
+    Points();
+    Points(Double3 &pos);
+    HitId SampleUniformPosition(index_t index, Sampler &sampler) const override;
+    double Area(index_t index) const  override;
+    index_t Size() const override;
+    void GetLocalGeometry(SurfaceInteraction &interaction) const  override;
+    void Append(const Geometry &other)  override;
+    std::unique_ptr<Geometry> Clone() const  override;
+  private:
+    ToyVector<Double3> points;
+};
+#endif
+
 
 inline std::pair<Float3, float> Spheres::Get(int i) const 
 { 

@@ -1,5 +1,7 @@
 #include "lightpicker_trivial.hxx"
 
+namespace Lightpickers
+{
 
 LightPickerCommon::LightPickerCommon(const Scene & scene)
   : scene{ scene }
@@ -8,7 +10,7 @@ LightPickerCommon::LightPickerCommon(const Scene & scene)
 
 
 TrivialLightPicker::TrivialLightPicker(const Scene& _scene)
-    : LightPickerCommon{_scene}
+  : LightPickerCommon{ _scene }
 {
   const auto nl = (double)scene.GetNumPointLights();
   const auto ne = (double)(scene.HasEnvLight() ? 1 : 0);
@@ -25,4 +27,6 @@ TrivialLightPicker::TrivialLightPicker(const Scene& _scene)
   in_class_probabilities[IDX_PROB_AREA] = na > 0 ? (1. / na) : NaN;
   in_class_probabilities[IDX_PROB_POINT] = nl > 0 ? (1. / nl) : NaN;
   in_class_probabilities[IDX_PROB_VOLUME] = 0; // Not implemented
+}
+
 }

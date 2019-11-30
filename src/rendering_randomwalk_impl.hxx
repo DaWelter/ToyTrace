@@ -22,13 +22,6 @@ using  AlgorithmParameters = RenderingParameters;
 namespace ROI = RadianceOrImportance;
 
 
-
-double UpperBoundToBoundingBoxDiameter(const Scene &scene);
-
-
-
-
-
 namespace RandomWalk
 {
 namespace RW = RandomWalk;
@@ -220,8 +213,9 @@ struct EmitterSampleVisitor
   Pdf &pdf;           // Return value.
   RW::PathNode &node; // Return value.
   
-  void operator()(const ROI::EnvironmentalRadianceField &env, double prob)
+  void operator()(const Lights::Env &light, double prob)
   {
+    const auto &env = light.Get();
     auto smpl = env.TakeDirectionSample(sampler, context);
     node.node_type = RW::NodeType::ENV;
     node.interaction.emitter_env = RW::EnvironmentalRadianceFieldInteraction{
@@ -231,17 +225,19 @@ struct EmitterSampleVisitor
     node.interaction.emitter_env.radiance = smpl.value;
     pdf = prob*smpl.pdf_or_pmf;
   }
-  void operator()(const ROI::PointEmitter &light, double prob)
+  void operator()(const Lights::Point &light, double prob)
   {
+    const auto &emitter = light.Get();
     node.node_type = RW::NodeType::POINT_LIGHT;
     node.interaction.emitter_point = RW::PointEmitterInteraction{
-      light.Position(),
-      light
+      emitter.Position(),
+      emitter
     };
     pdf = Pdf::MakeFromDelta(prob);
   }
-  void operator()(const PrimRef& prim_ref, double prob)
+  void operator()(const Lights::Area &light, double prob)
   {
+    const PrimRef& prim_ref = light.Get();
     const auto &mat = scene.GetMaterialOf(prim_ref);
     assert(mat.emitter); // Otherwise would would not have been selected.
     auto smpl = mat.emitter->TakeAreaSample(prim_ref, sampler, context);
@@ -250,8 +246,9 @@ struct EmitterSampleVisitor
       smpl.coordinates };
     pdf = prob*smpl.pdf_or_pmf;
   }
-  void operator()(const Medium &medium, double prob)
+  void operator()(const Lights::Medium &light, double prob)
   {
+    const auto &medium = light.Get();
     Medium::VolumeSample smpl = medium.SampleEmissionPosition(sampler, context);
     double pdf_which_cannot_be_delta = 0;
     auto radiance =  medium.EvaluateEmission(smpl.pos, context, &pdf_which_cannot_be_delta);
@@ -273,12 +270,12 @@ protected:
   int max_path_node_count;
 
 protected:
-  TrivialLightPicker light_picker;
+  Lightpickers::TrivialLightPicker light_picker;
   int sensor_connection_unit = {};
 public:
   RadianceEstimatorBase(const Scene &_scene, const AlgorithmParameters &algo_params = AlgorithmParameters{})
     : sampler{}, scene{_scene},     
-      sufficiently_long_distance_to_go_outside_the_scene_bounds{10.*UpperBoundToBoundingBoxDiameter(_scene)},
+      sufficiently_long_distance_to_go_outside_the_scene_bounds{10.*_scene.GetBoundingBox().DiagonalLength()},
       max_path_node_count{algo_params.max_ray_depth+1},
       light_picker{_scene}
   {
@@ -447,7 +444,7 @@ public:
       assert ((out_direction == interaction.pos));
       if (pdf)
       {
-        EnvLightPointSamplingBeyondScene env_sampling{scene};
+        Lights::Detail::EnvLightPointSamplingBeyondScene env_sampling{scene};
         *pdf = env_sampling.Pdf(interaction.pos);
       }
       return interaction.radiance;
@@ -607,7 +604,7 @@ public:
     {
       // For env light, the coordinate is a position!
       const EnvironmentalRadianceFieldInteraction &interaction = node.interaction.emitter_env;
-      EnvLightPointSamplingBeyondScene gen{scene};
+      Lights::Detail::EnvLightPointSamplingBeyondScene gen{scene};
       double pdf = gen.Pdf(interaction.pos);
       Double3 org = gen.Sample(interaction.pos, sampler);
       return { org, interaction.radiance, pdf };

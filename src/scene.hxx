@@ -14,6 +14,12 @@ namespace boost { namespace filesystem {
   class path;
 }};
 
+namespace RadianceOrImportance
+{
+class TotalEnvironmentalRadianceField;
+};
+
+
 struct RenderingParameters
 {
   int pixel_x = {-1};
@@ -132,7 +138,7 @@ private:
   ToyVector<std::unique_ptr<EnvironmentalRadianceField>> envlights;
   ToyVector<std::unique_ptr<Light>> lights; // point lights
   ToyVector<std::shared_ptr<Texture>> textures;
-  std::unique_ptr<EnvironmentalRadianceField> envlight;
+  std::unique_ptr<RadianceOrImportance::TotalEnvironmentalRadianceField> envlight;
   Box boundingBox;
 
 public:
@@ -164,7 +170,7 @@ public:
   bool HasEnvLight() const { return envlights.size() > 0; }
 
   // TODO: Remove
-  const RadianceOrImportance::EnvironmentalRadianceField& GetTotalEnvLight() const
+  const RadianceOrImportance::TotalEnvironmentalRadianceField& GetTotalEnvLight() const
   {
     assert(envlight.get() != nullptr);
     return *envlight;
@@ -263,5 +269,3 @@ public:
 private:
   void UpdateEmissiveIndexOffset();
 };
-
-

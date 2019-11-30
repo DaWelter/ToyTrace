@@ -60,6 +60,10 @@ public:
               box.max[1] < min[1] ||
               box.max[2] < min[2]) ;
   }
+
+  double DiagonalLength() const {
+    return (max - min).norm();
+  }
 };
 
 #endif

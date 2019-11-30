@@ -177,10 +177,57 @@ public:
 };
 
 
+class Demo3
+{
+    tbb::task_group task_group;
+    tbb::task_arena arena;
+    tbb::mutex mutex;  // Lock the frame buffer. Well here it actually locks std::cout.
+    int count = 50;
+public:
+    static constexpr int n_tasks = 4;
+    void Run()
+    {
+        arena.initialize(n_tasks);
+        arena.execute([this] {
+            parallel_for_interruptible(
+                0, count, 1,
+                /* func = */[=](int i)
+            {
+                run_primary_task(i);
+            },
+                /* irq handler=*/ [=]() -> bool
+            {
+                run_secondary_tasks();
+                return true;
+            }, task_group);
+        });
+    }
+
+    void run_primary_task(int j)
+    {
+        printl("Running primary subtask ", j, ", threadid ", std::this_thread::get_id());
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    void run_secondary_tasks()
+    {
+        tbb::parallel_for(0, n_tasks, 1, [this](int worker_num) {
+            printl("Running secondary ", worker_num, ", threadid ", std::this_thread::get_id());
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        });
+    }
+
+    void interrupt()
+    {
+        task_group.cancel();
+    }
+};
+
+
 void DoDemo()
 {
   tbb::task_scheduler_init init(Demo::n_tasks); // Not strictly required. But this way I can set the number of threads.
-  Demo2 d;
+  Demo3 d;
   // The demo algorithm must be run in a thread, so I can cause interruptions from the main thread.
   tbb::tbb_thread th([&] {d.Run(); });
   util::Sleep(200);
@@ -363,7 +410,7 @@ public:
 
 int main(int argc, char **argv)
 {
-  //rendering_main_loop_parallelization1::DoDemo();
-  rendering_main_loop_with_flow::Demo().Run();
+  rendering_main_loop_parallelization1::DoDemo();
+  //rendering_main_loop_with_flow::Demo().Run();
   return 0;
 }

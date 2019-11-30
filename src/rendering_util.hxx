@@ -8,9 +8,6 @@
 #include "shader_util.hxx"
 
 
-double UpperBoundToBoundingBoxDiameter(const Scene &scene);
-
-
 /* This thing tracks overlapping media volumes. Since it is a bit complicated
  * to physically correctly handle mixtures of media that would occur
  * in overlapping volumes, I take a simpler approach. This hands over the
@@ -136,39 +133,6 @@ inline void MaybeGoingThroughSurface(MediumTracker &mt, const Double3& dir_of_tr
     }
 }
 
-
-// TODO: At least some of the data could be precomputed.
-// TODO: For improved precision it would make sense to move the scene center to the origin.
-struct EnvLightPointSamplingBeyondScene
-{
-  double diameter;
-  double sufficiently_long_distance_to_go_outside_the_scene_bounds;
-  Double3 box_center;
-  
-  EnvLightPointSamplingBeyondScene(const Scene &scene)
-  {
-    Box bb = scene.GetBoundingBox();
-    box_center = 0.5*(bb.max+bb.min);
-    diameter = Length(bb.max - bb.min);
-    sufficiently_long_distance_to_go_outside_the_scene_bounds = 10.*diameter;
-  }
-  
-  Double3 Sample(const Double3 &exitant_direction, Sampler &sampler) const
-  {
-    Double3 disc_sample = SampleTrafo::ToUniformDisc(sampler.UniformUnitSquare());
-    Eigen::Matrix3d frame = OrthogonalSystemZAligned(exitant_direction);
-    Double3 org = 
-      box_center +
-      -sufficiently_long_distance_to_go_outside_the_scene_bounds*exitant_direction
-      + frame * 0.5 * diameter * disc_sample;
-    return org;
-  }
-  
-  double Pdf(const Double3 &) const
-  {
-    return 1./(Pi*0.25*Sqr(diameter));
-  }
-};
 
 #if 0
 template<class Func>

@@ -3,10 +3,6 @@
 #include "ray.hxx"
 #include "scene.hxx"
 
-// Mesh::Mesh()
-//   : Geometry{Geometry::PRIMITIVES_TRIANGLES}
-// {}
-
 
 Mesh::Mesh(index_t num_triangles, index_t num_vertices)
   : Geometry{Geometry::PRIMITIVES_TRIANGLES}
@@ -17,31 +13,6 @@ Mesh::Mesh(index_t num_triangles, index_t num_vertices)
   normals.resize(num_vertices, Eigen::NoChange);
   uvs.resize(num_vertices, Eigen::NoChange);
 }
-
-
-// Mesh::Mesh(Mesh &&other) 
-//   : Geometry{other},
-//     vertices{std::move(other.vertices)},
-//     vert_indices{std::move(other.vert_indices)},
-//     normals{std::move(other.normals)},
-//     uvs{std::move(other.uvs)}
-//     //material_indices{std::move(other.material_indices)}
-// {
-// }
-// 
-// 
-// Mesh& Mesh::operator=(Mesh &&other)
-// {
-//   if (&other == this)
-//     return *this;
-//   this->Geometry::operator=(other);
-//   vertices = std::move(other.vertices);
-//   vert_indices = std::move(other.vert_indices);
-//   normals = std::move(other.normals);
-//   uvs = std::move(other.uvs);
-//   //material_indices = std::move(material_indices);
-//   return *this;
-// }
 
 
 void Mesh::MakeFlatNormals()
@@ -258,6 +229,65 @@ std::unique_ptr<Geometry> Spheres::Clone() const
 
 
 //////////////////////////////////////////////////////////////////////
+#if 0
+Points::Points()  :
+  Geometry(PRIMITIVES_POINTS)
+{
+}
+
+Points::Points(Double3 & pos)
+  : Geometry(PRIMITIVES_POINTS),
+    points{pos}
+{
+}
+
+HitId Points::SampleUniformPosition(index_t index, Sampler & sampler) const
+{
+  return HitId{
+    this,
+    index,
+    Double3::Zero()
+  };
+}
+
+double Points::Area(index_t index) const
+{
+  return 0.0;
+}
+
+Geometry::index_t Points::Size() const
+{
+  return isize(points);
+}
+
+void Points::GetLocalGeometry(SurfaceInteraction & ia) const
+{
+  assert(ia.hitid.geom == this);
+  ia.geometry_normal = Double3::Zero();
+  ia.smooth_normal = Double3::Zero();
+  ia.pos = points[ia.hitid.index];
+  // Points cannot be hit, so I don't care.
+  ia.pos_bounds = Double3::Zero();
+}
+
+void Points::Append(const Geometry & other)
+{
+  if (Size() >= (std::numeric_limits<decltype(Size())>::max()-other.Size()))
+    throw std::range_error("Cannot handle that many points in a geometry.");
+  if (other.type != this->type)
+    throw std::runtime_error("Geometry type mismatch!");
+  const auto &other_points = static_cast<const Points&>(other);
+  points.insert(points.end(), other_points.points.begin(), other_points.points.end());
+}
+
+std::unique_ptr<Geometry> Points::Clone() const
+{
+  return std::make_unique<Points>(*this);
+}
+#endif
+
+
+//////////////////////////////////////////////////////////////////////
 void FillPosBoundsTriangle(SurfaceInteraction &interaction, const Float3 &p0, const Float3 &p1, const Float3 &p2)
 {
   // Compute the position error bounds, according to PBRT Chpt 3.9, pg. 227
@@ -306,4 +336,3 @@ std::tuple<bool, double, double> ClipRayToSphereInterior(const Double3 &ray_org,
     return std::make_tuple(true, tnear, tfar);
   }
 }
-

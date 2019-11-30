@@ -1,13 +1,5 @@
 #include "rendering_util.hxx"
 
-double UpperBoundToBoundingBoxDiameter(const Scene &scene)
-{
-  Box bb = scene.GetBoundingBox();
-  double diameter = Length(bb.max - bb.min);
-  return diameter;
-}
-
-
 MediumTracker::MediumTracker(const Scene& _scene)
   : current{nullptr},
     media{}, // Note: Ctor zero-initializes the media array.
