@@ -334,7 +334,9 @@ struct EnvLightPointSamplingBeyondScene
 
 
 RaySegment SegmentToEnv(const SurfaceInteraction &surface, const Scene &scene, const Double3 &dir);
+RaySegment SegmentToEnv(const VolumeInteraction &volume, const Scene &scene, const Double3 &dir);
 RaySegment SegmentToPoint(const SurfaceInteraction &surface, const Double3 &pos);
+RaySegment SegmentToPoint(const VolumeInteraction &volume, const Double3 &pos);
 
 
 } // namespace Detail
@@ -399,10 +401,10 @@ public:
     return { { org, smpl.coordinates }, { smpl.pdf_or_pmf, pdf}, smpl.value };
   }
 
-  LightConnectionSample SampleConnection(const SurfaceInteraction &surfaceFrom, const Scene &scene, Sampler &sampler, const PathContext &context)
+  LightConnectionSample SampleConnection(const SomeInteraction &from, const Scene &scene, Sampler &sampler, const PathContext &context)
   {
     const auto smpl = env->TakeDirectionSample(sampler, context);
-    const auto seg = Detail::SegmentToEnv(surfaceFrom, scene, smpl.coordinates);
+    const auto seg = std::visit([this, &scene, &smpl](auto && ia) -> RaySegment { return Detail::SegmentToEnv(ia, scene, smpl.coordinates); }, from);
     return { seg, smpl.pdf_or_pmf, smpl.value };
   }
 };
@@ -427,9 +429,16 @@ public:
     return { {org, smpl.coordinates }, { Pdf::MakeFromDelta(1.), smpl.pdf_or_pmf}, smpl.value };
   }
 
-  LightConnectionSample SampleConnection(const SurfaceInteraction &surfaceFrom, const Scene &scene, Sampler &sampler, const PathContext &context)
+  //LightConnectionSample SampleConnection(const SurfaceInteraction &surfaceFrom, const Scene &scene, Sampler &sampler, const PathContext &context)
+  //{
+  //  const auto seg = Detail::SegmentToPoint(surfaceFrom, light->Position());
+  //  const auto val = light->Evaluate(light->Position(), -seg.ray.dir, context, nullptr);
+  //  return { seg, Pdf::MakeFromDelta(1.), val };
+  //}
+
+  LightConnectionSample SampleConnection(const SomeInteraction &from, const Scene &scene, Sampler &sampler, const PathContext &context)
   {
-    const auto seg = Detail::SegmentToPoint(surfaceFrom, light->Position());
+    const auto seg = std::visit([this](auto && ia) -> RaySegment { return Detail::SegmentToPoint(ia, light->Position()); }, from);
     const auto val = light->Evaluate(light->Position(), -seg.ray.dir, context, nullptr);
     return { seg, Pdf::MakeFromDelta(1.), val };
   }
@@ -468,11 +477,23 @@ public:
     return { out_ray, { area_smpl.pdf_or_pmf, dir_smpl.pdf_or_pmf }, val };
   }
 
-  LightConnectionSample SampleConnection(const SurfaceInteraction &surfaceFrom, const Scene &scene, Sampler &sampler, const PathContext &context)
+  //LightConnectionSample SampleConnection(const SurfaceInteraction &surfaceFrom, const Scene &scene, Sampler &sampler, const PathContext &context)
+  //{
+  //  auto area_smpl = emitter->TakeAreaSample(prim_ref, sampler, context);
+  //  this->light_surf = SurfaceInteraction{ area_smpl.coordinates };
+  //  const auto seg = Detail::SegmentToPoint(surfaceFrom, light_surf.pos);
+  //  const auto val = emitter->Evaluate(area_smpl.coordinates, -seg.ray.dir, context, nullptr);
+  //  // TODO: multiply val by cos of emitting surface?
+  //  return { seg, area_smpl.pdf_or_pmf, val };
+  //}
+
+  LightConnectionSample SampleConnection(const SomeInteraction &somewhere, const Scene &scene, Sampler &sampler, const PathContext &context)
   {
     auto area_smpl = emitter->TakeAreaSample(prim_ref, sampler, context);
     this->light_surf = SurfaceInteraction{ area_smpl.coordinates };
-    const auto seg = Detail::SegmentToPoint(light_surf, light_surf.pos);
+    const auto seg = std::visit([this](auto && ia) -> RaySegment {
+      return Detail::SegmentToPoint(ia, light_surf.pos);
+    }, somewhere);
     const auto val = emitter->Evaluate(area_smpl.coordinates, -seg.ray.dir, context, nullptr);
     // TODO: multiply val by cos of emitting surface?
     return { seg, area_smpl.pdf_or_pmf, val };

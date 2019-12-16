@@ -315,6 +315,7 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
     
     render_params.algo_name = vm["algo"].as<std::string>();
     if (render_params.algo_name != "pt" &&
+        render_params.algo_name != "pt2" &&
         render_params.algo_name != "bdpt" &&
         render_params.algo_name != "normalvis" &&
         render_params.algo_name != "photonmap")

@@ -121,7 +121,7 @@ message(STATUS "Yaml-cpp LIBRARY: ${YAML_CPP_LIBRARY}")
 add_library(commonstuff STATIC
   src/image.cxx  src/parsenff.cxx  src/shader.cxx src/ray.cxx src/sampler.cxx
   src/phasefunctions.cxx src/atmosphere.cxx src/spectral.cxx src/primitive.cxx src/renderingalgorithms.cxx 
-  src/light.cxx src/texture.cxx src/embreeaccelerator.cxx src/scene.cxx src/lightpicker_trivial.cxx src/lightpicker_ucb.cxx src/renderingalgorithms_photonmap.cxx 
+  src/light.cxx src/texture.cxx src/embreeaccelerator.cxx src/scene.cxx src/lightpicker_trivial.cxx src/lightpicker_ucb.cxx src/renderingalgorithms_photonmap.cxx src/renderingalgorithms_pathtracing2.cxx 
   src/renderingalgorithms_normalvisualizer.cxx src/renderingalgorithms_pathtracing.cxx
   src/rendering_util.cxx src/pathlogger.cxx src/photonintersector.cxx  external/cubature/hcubature.c)
 

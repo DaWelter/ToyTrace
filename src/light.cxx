@@ -212,6 +212,14 @@ RaySegment SegmentToEnv(const SurfaceInteraction & surface, const Scene & scene,
   return { ray, length };
 }
 
+RaySegment SegmentToEnv(const VolumeInteraction & volume, const Scene & scene, const Double3 & dir)
+{
+  Ray ray{ volume.pos, dir };
+  const double length = 10.*scene.GetBoundingBox().DiagonalLength();
+  return { ray, length };
+}
+
+
 RaySegment SegmentToPoint(const SurfaceInteraction & surface, const Double3 & pos)
 {
   Ray ray{ surface.pos, pos - surface.pos };
@@ -226,5 +234,22 @@ RaySegment SegmentToPoint(const SurfaceInteraction & surface, const Double3 & po
   ray.org += AntiSelfIntersectionOffset(surface, ray.dir);
   return { ray, length };
 }
+
+RaySegment SegmentToPoint(const VolumeInteraction& volume, const Double3 & pos)
+{
+  Ray ray{ volume.pos, pos - volume.pos };
+  double length = Length(ray.dir);
+  if (length > 0.)
+    ray.dir /= length;
+  else // Just pick something which will not result in NaN.
+  {
+    length = Epsilon;
+    ray.dir = Double3{ 1.,0.,0. };
+  }
+  return { ray, length };
+}
+
+
+
 
 }} // Lights::Detail::

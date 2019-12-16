@@ -21,16 +21,19 @@ std::unique_ptr<RenderingAlgo> AllocatePhotonmappingRenderingAlgo(const Scene &s
 std::unique_ptr<RenderingAlgo> AllocateNormalVisualizer(const Scene &scene, const RenderingParameters &params);
 std::unique_ptr<RenderingAlgo> AllocatBptPathTracer(const Scene &scene, const RenderingParameters &params);
 std::unique_ptr<RenderingAlgo> AllocatForwardPathTracer(const Scene &scene, const RenderingParameters &params);
+std::unique_ptr<RenderingAlgo> AllocatePathtracing2RenderingAlgo(const Scene &scene, const RenderingParameters &params);
 
-std::unique_ptr<RenderingAlgo> RenderAlgorithmFactory(const Scene &_scene, const RenderingParameters &_params)
+std::unique_ptr<RenderingAlgo> RenderAlgorithmFactory(const Scene &scene, const RenderingParameters &params)
 {
 
-  if (_params.algo_name == "bdpt")
-    return AllocatBptPathTracer(_scene, _params);
-  else if (_params.algo_name == "normalvis")
-    return AllocateNormalVisualizer(_scene, _params);
-  else if (_params.algo_name == "photonmap")
-    return AllocatePhotonmappingRenderingAlgo(_scene, _params);
+  if (params.algo_name == "bdpt")
+    return AllocatBptPathTracer(scene, params);
+  else if (params.algo_name == "normalvis")
+    return AllocateNormalVisualizer(scene, params);
+  else if (params.algo_name == "photonmap")
+    return AllocatePhotonmappingRenderingAlgo(scene, params);
+  else if (params.algo_name == "pt2")
+    return AllocatePathtracing2RenderingAlgo(scene, params);
   else
-    return AllocatForwardPathTracer(_scene, _params);
+    return AllocatForwardPathTracer(scene, params);
 }
