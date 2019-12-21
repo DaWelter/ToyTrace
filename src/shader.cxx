@@ -526,18 +526,18 @@ ScatterSample GlossyTransmissiveDielectricShader::SampleBSDF(const Double3 &reve
 
 Spectral3 InvisibleShader::EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
-  constexpr double tol = Epsilon;
-  double u = LengthSqr(incident_dir + out_direction);
-  u = u<tol ? 1. : 0.;
   if (pdf)
-    *pdf = u;
-  return Spectral3{u};
+    *pdf = 0.;
+  return Spectral3::Zero();
 }
 
 
 ScatterSample InvisibleShader::SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
 {
-  return ScatterSample{-incident_dir, Spectral3{1.}, 1.};
+  return ScatterSample{
+    -incident_dir, 
+    Spectral3{-1. / std::abs(Dot(incident_dir, surface_hit.shading_normal))},
+    Pdf::MakeFromDelta(1.)};
 }
 
 

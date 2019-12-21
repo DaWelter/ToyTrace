@@ -47,8 +47,8 @@ LightSelectionProbabilityMap::LightSelectionProbabilityMap(const Scene & scene)
       cummulative_probs[i].setConstant(1. / counts[i]); // Uniform distribution
       TowerSamplingComputeNormalizedCumSum(AsSpan(cummulative_probs[i]));
     }
-    light_type_selection_probs = counts[i];
   }
+  light_type_selection_probs = Eigen::Map<const Eigen::ArrayXi>(counts.data(), Eigen::Index(counts.size())).cast<double>();
   light_type_selection_probs /= light_type_selection_probs.sum();
 }
 

@@ -1,5 +1,6 @@
 #include "light.hxx"
 #include "scene.hxx"
+#include "rendering_util.hxx"
 
 namespace RadianceOrImportance 
 {
@@ -206,7 +207,7 @@ Double3 EnvLightPointSamplingBeyondScene::Sample(const Double3 & exitant_directi
 
 RaySegment SegmentToEnv(const SurfaceInteraction & surface, const Scene & scene, const Double3 & dir)
 {
-  Ray ray{ surface.pos, dir };
+  Ray ray{ surface.pos, -dir };
   const double length = 10.*scene.GetBoundingBox().DiagonalLength();
   ray.org += AntiSelfIntersectionOffset(surface, ray.dir);
   return { ray, length };
@@ -214,7 +215,7 @@ RaySegment SegmentToEnv(const SurfaceInteraction & surface, const Scene & scene,
 
 RaySegment SegmentToEnv(const VolumeInteraction & volume, const Scene & scene, const Double3 & dir)
 {
-  Ray ray{ volume.pos, dir };
+  Ray ray{ volume.pos, -dir };
   const double length = 10.*scene.GetBoundingBox().DiagonalLength();
   return { ray, length };
 }
@@ -252,4 +253,20 @@ RaySegment SegmentToPoint(const VolumeInteraction& volume, const Double3 & pos)
 
 
 
-}} // Lights::Detail::
+}  // Lights::Detail::
+
+
+LightConnectionSample Area::SampleConnection(const SomeInteraction & somewhere, const Scene & scene, Sampler & sampler, const PathContext & context)
+{
+  auto area_smpl = emitter->TakeAreaSample(prim_ref, sampler, context);
+  this->light_surf = SurfaceInteraction{ area_smpl.coordinates };
+  const auto seg = std::visit([this](auto && ia) -> RaySegment {
+    return Detail::SegmentToPoint(ia, light_surf.pos);
+  }, somewhere);
+  const auto val = emitter->Evaluate(area_smpl.coordinates, -seg.ray.dir, context, nullptr);
+  const auto dfactor = DFactorPBRT(light_surf, seg.ray.dir);
+  return { seg, area_smpl.pdf_or_pmf, dfactor*val };
+}
+
+
+}

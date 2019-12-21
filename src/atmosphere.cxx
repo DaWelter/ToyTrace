@@ -286,11 +286,11 @@ double ExponentialConstituentDistribution::ComputeSigmaTMajorante(double altitud
 }
 
 #ifdef HAVE_JSON
-std::vector<Color::SpectralN> ReadArrayOfSpectra(const rapidjson::Value &array)
+ToyVector<Color::SpectralN> ReadArrayOfSpectra(const rapidjson::Value &array)
 {
-  std::vector<Color::SpectralN> ret;
+  ToyVector<Color::SpectralN> ret;
   //for (auto &json_spectrum : array)
-  for (int i=0; i<array.Size(); ++i)
+  for (rapidjson::SizeType i=0; i<array.Size(); ++i)
   {
     const auto &json_spectrum = array[i];
     if (json_spectrum.Size() != Color::NBINS)
@@ -329,13 +329,7 @@ TabulatedConstituents::TabulatedConstituents(const std::string& filename)
   
   for (auto &s : sigma_t)
   {
-    MajoranteType m;
-    for (int lambda = 0; lambda < LAMBDA_STRATA_SIZE; ++lambda)
-    {
-      auto lambda_idx = LambdaSelectionStrategy::MakeIndices(lambda);
-      m[lambda] = Take(s, lambda_idx).maxCoeff();
-    }
-    sigma_t_majorante.push_back(m);
+    sigma_t_majorante.push_back(s.maxCoeff());
   }
   
   /* It could happen that going from high to low altitudes, the majorante takes a dip. Perhaps
@@ -343,16 +337,12 @@ TabulatedConstituents::TabulatedConstituents(const std::string& filename)
    * of a ray traversing the atmosphere.
    * In order to ensure that this is true, the following filtering fills the dips with the upper bound of the values 
    * encountered so far going from high to low alt. */
-  for (int i=sigma_t_majorante.size()-2; i>=0; --i)
+  for (int i=isize(sigma_t_majorante)-2; i>=0; --i)
   {
-    for (int k=0; k<LAMBDA_STRATA_SIZE; ++k)
-      sigma_t_majorante[i][k] = std::max(sigma_t_majorante[i][k], sigma_t_majorante[i+1][k]);
-    // HELP: The line below crashes with seg fault! It should be equivalent to the operation in the two lines above! Lib-Eigen shenanigans?
-    // When run with valgrind, there is no crash either way. No memory error detected!
-    //sigma_t_majorante[i] = sigma_t_majorante[i].max(sigma_t_majorante[i+1]).eval();
+    sigma_t_majorante[i] = std::max(sigma_t_majorante[i], sigma_t_majorante[i+1]);
   }
   
-  if ((sigma_t_majorante[0] < sigma_t_majorante[sigma_t_majorante.size()-1]).any())
+  if (sigma_t_majorante[0] < sigma_t_majorante[sigma_t_majorante.size()-1])
     throw std::runtime_error("The extinction majorante at the lowest altitude is lower than at the highest altitude. There is very probably something wrong. Not going to work with that data.");
   
   lower_altitude_cutoff = d["H0"].GetDouble();
@@ -428,20 +418,19 @@ void TabulatedConstituents::ComputeSigmaS(double altitude, Spectral3* sigma_s_of
 }
 
 
-double TabulatedConstituents::ComputeSigmaTMajorante(double altitude, const Index3& lambda_idx) const
+double TabulatedConstituents::ComputeSigmaTMajorante(double altitude, const Index3&) const
 {
-  int lambda_idx_primary = LambdaSelectionStrategy::PrimaryIndex(lambda_idx);
   double real_index = RealTableIndex(altitude);
   auto idx = (int)real_index;
   if (idx >= 0 && idx < AltitudeTableSize()-1)
   {
     double f = real_index - idx; // The fractional part.
-    return Lerp(sigma_t_majorante[idx][lambda_idx_primary], 
-                sigma_t_majorante[idx+1][lambda_idx_primary], f);
+    return Lerp(sigma_t_majorante[idx], 
+                sigma_t_majorante[idx+1], f);
   }
   else if (idx < 0)
   {
-    return sigma_t_majorante[0][lambda_idx_primary];
+    return sigma_t_majorante[0];
   }
   else
   {

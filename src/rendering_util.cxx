@@ -38,6 +38,8 @@ void MediumTracker::initializePosition(const Double3& pos)
 Spectral3 TransmittanceEstimate(const Scene &scene, RaySegment seg, MediumTracker &medium_tracker, const PathContext &context, Sampler &sampler, VolumePdfCoefficients *volume_pdf_coeff)
 {
     Spectral3 result{1.};
+    
+    seg.length *= 0.9999; // To avoid intersections with the adjacent nodes/positions/surfaces.
 
     if (scene.IsOccluded(seg.ray, 0., seg.length))
       return Spectral3::Zero();

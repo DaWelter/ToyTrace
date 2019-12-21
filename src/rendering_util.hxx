@@ -259,6 +259,33 @@ inline TrackToNextInteraction(
 };
 
 
+std::tuple<MaybeSomeInteraction, double, Spectral3>
+inline TrackToNextInteraction(
+  const Scene &scene,
+  const Ray &ray,
+  const PathContext &context,
+  const Spectral3 &initial_weight,
+  Sampler &sampler,
+  MediumTracker &medium_tracker,
+  VolumePdfCoefficients *volume_pdf_coeff)
+{
+  using RetType = std::tuple<MaybeSomeInteraction, double, Spectral3>;
+
+  return TrackToNextInteraction(scene, ray, context, initial_weight, sampler, medium_tracker, volume_pdf_coeff,
+    [&](const SurfaceInteraction &si, double tfar, const Spectral3 &weight) -> RetType
+  {
+    return RetType{ si, tfar, weight };
+  }, [&](const VolumeInteraction &vi, double tfar, const Spectral3 &weight) -> RetType
+  {
+    return RetType{ vi, tfar, weight };
+  },
+      [&](const Spectral3 &weight) -> RetType
+  {
+    return RetType{ std::monostate{}, LargeNumber, weight };
+  });
+}
+
+
 
 template<class SurfaceHitVisitor, class EscapeVisitor, class SegmentVisitor>
 inline void TrackBeam(

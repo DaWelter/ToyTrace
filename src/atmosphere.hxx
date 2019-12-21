@@ -66,10 +66,10 @@ struct ExponentialConstituentDistribution
 struct TabulatedConstituents
 {
   static constexpr int LAMBDA_STRATA_SIZE = Color::NBINS / static_size< Spectral3 >();
-  using MajoranteType = Eigen::Array<Color::Scalar, LAMBDA_STRATA_SIZE,1>;
-  std::vector<MajoranteType> sigma_t_majorante;
-  std::vector<Color::SpectralN> sigma_t; // Total.
-  std::vector<Color::SpectralN> sigma_s[NUM_CONSTITUENTS];
+  using MajoranteType = double;
+  ToyVector<MajoranteType> sigma_t_majorante;
+  ToyVector<Color::SpectralN> sigma_t; // Total.
+  ToyVector<Color::SpectralN> sigma_s[NUM_CONSTITUENTS];
   double lower_altitude_cutoff;
   double upper_altitude_cutoff;
   double delta_h, inv_delta_h;

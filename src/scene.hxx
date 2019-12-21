@@ -100,7 +100,7 @@ struct VolumeInteraction : public InteractionPoint
 
 
 using SomeInteraction = std::variant<SurfaceInteraction, VolumeInteraction>;
-
+using MaybeSomeInteraction = std::variant<std::monostate, SurfaceInteraction, VolumeInteraction>;
 
 Double3 AntiSelfIntersectionOffset(const SurfaceInteraction &interaction, const Double3 &exitant_dir);
 
