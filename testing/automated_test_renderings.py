@@ -17,18 +17,26 @@ import fnmatch
 import itertools
 import copy
 import argparse
+import enum
 # References for PIL:
 # http://pillow.readthedocs.io/en/5.0.0/reference/ImageDraw.html
 # https://stackoverflow.com/questions/30227466/combine-several-images-horizontally-with-python
 
-destination_dir =     os.path.join('renders-'+datetime.datetime.now().strftime('%d-%m-%Y-%H'))
+destination_dir = os.path.join('renders-'+datetime.datetime.now().strftime('%d-%m-%Y-%H'))
 if not os.path.isdir(destination_dir):
     os.mkdir(destination_dir)
 scenefile_dir = os.path.join(destination_dir, 'generated_scenes')
-the_exe = '' #'../buildopt/toytrace'
+
+
+class Algorithm(enum.Enum):
+    PT = 'pt'
+    BDPT = 'bdpt'
+    PT2 = 'pt2'
 
 def merge(d1, d2):
-    return dict(d1.items() + d2.items())
+    d = copy.copy(d1)
+    d.update(d2)
+    return d
 
 
 def logRendering(name, opts):
@@ -39,31 +47,40 @@ def logRendering(name, opts):
     logging.info("---------  Render: '%s' (%s) -----------", name, mode)
 
 
-def toytrace(scene, output_file, opts, name = "UNKNOWN"):
+class ToyTrace(object):
+  def __init__(self, exe, include_dirs):
+    self.exe = exe
+    self.include_dirs = include_dirs
+    if not os.path.isfile(self.exe):
+        raise RuntimeError(f"Executable path '{self.exe}' is not a file")
+
+  def __call__(self, scene, output_file, opts, name = "UNKNOWN"):
     logRendering(name, opts)
     use_tmpfile = not output_file
+
     if use_tmpfile:
         output_file = tempfile.mktemp(suffix='.png', prefix='/tmp/')
     else:
         output_file = os.path.join(destination_dir, output_file)
+
     opts = sum([[k, str(v)] for k,v in opts.items()], [])
-    if os.path.isfile(os.path.join('scenes',scene)):
-        input_file = os.path.join('scenes',scene)
+    includes = sum([['-I', i] for i in self.include_dirs], [])
+
+    if os.path.isfile(scene):
+        input_file = scene
     else:
         input_file = '-'
-    cmd = [the_exe, '--no-display', '-I', 'scenes', '--input-file', input_file, '--output-file', output_file]
-    cmd += opts
-    print cmd
-    #current_dir = os.getcwd()
-    #os.chdir('scenes')
+
+    cmd = [self.exe, '--no-display'] + includes + ['--input-file', input_file, '--output-file', output_file] + opts
+    print(cmd)
 
     if os.path.isfile(scene):
         p = subprocess.Popen(cmd)
         p.communicate()
     else:
         p = subprocess.Popen(cmd, stdin = subprocess.PIPE)
-        stdout, stderr = p.communicate(input = scene)
-    #os.chdir(current_dir)
+        stdout, stderr = p.communicate(input = scene.encode('utf-8'))
+
     if p.wait() != 0:
         raise RuntimeError("Toytrace failed!")
     if use_tmpfile:
@@ -246,6 +263,22 @@ class CornelBoxLightTypes(object):
                     d.text((1, 11+i*H), name)
         new_im.save(os.path.join(destination_dir, 'arealights.png'))
 
+    def test_pt2(self):
+        W, H = self.W, self.H
+        images = []
+        for name, scene in self.makeScenes():
+            scene = scene()
+            img = toytrace(
+                scene, '',
+                merge(self.common_opt, {'--algo': 'pt2', '--spp' : 16 }),
+                name = name)
+            images.append((name, img))
+        new_im  = Image.new('RGB', (W, H*len(images)))
+        d = ImageDraw.Draw(new_im)
+        for i, (name, im) in enumerate(images):
+            new_im.paste(im, (0, i*H))
+            d.text((1, i*H), name)
+        new_im.save(os.path.join(destination_dir, 'arealights_pt2.png'))
 
     def test_bdpt(self):
         W, H = self.W, self.H
@@ -264,9 +297,13 @@ class CornelBoxLightTypes(object):
             d.text((1, i*H), name)
         new_im.save(os.path.join(destination_dir, 'arealights_bdpt.png'))
 
-    def makeTests(self):
-      yield ('test_forwardtraced', self.test_forwardtraced)
-      yield ('test_bdpt', self.test_bdpt)
+    def makeTests(self, configs : set):
+        if Algorithm.PT in configs:
+            yield ('test_forwardtraced', self.test_forwardtraced)
+        if Algorithm.BDPT in configs:
+            yield ('test_bdpt', self.test_bdpt)
+        if Algorithm.PT2 in configs:
+            yield ('test_pt2', self.test_pt2)
 
 
 class EmissiveDemoMediumScenes(object):
@@ -301,7 +338,7 @@ class EmissiveDemoMediumScenes(object):
         transform 0 0 0 0 0 0 1 1 1
         m box_in_cornelbox.dae
 
-        shader invisible
+        shader none
         emissivedemomedium m1 {} {} 1 {} 0 0.5 -0.5 0.2
         transform 0 0.5 -0.5 0 0 0 0.4 0.4 0.4
         m unitcube.dae
@@ -320,19 +357,21 @@ class EmissiveDemoMediumScenes(object):
                 name = "emissivedemomedium_{}K_e{}".format(int(temperature), int(cross_section*10))
                 yield name, functools.partial(self._makeScene, (cross_section, temperature, main_light_power))
 
-    def _run(self, scene, name, render_mode):
+    def _run(self, scene, name, algo):
         #opt = {'-w': 512, '-h': 512, '--spp': 512,
         opt = {'-w': 256, '-h': 256, '--spp': 32,
-               '--algo' : render_mode }
+               '--algo' : algo.value }
         toytrace(
             scene, name+'.png', opt, name=name)
 
-    def makeTests(self):
+    def makeTests(self, configs):
+        configs = copy.copy(configs)
+        configs.discard(Algorithm.PT2) # Not supporting emissive media
         for prefix, scene_builder in self.makeScenes():
             scene = scene_builder()
-            for render_mode in ['pt', 'bdpt']:
-                name = '{}_{}'.format(prefix, render_mode)
-                yield (name, functools.partial(self._run, scene, name, render_mode))
+            for algo in configs:
+                name = '{}_{}'.format(prefix, algo.value)
+                yield (name, functools.partial(self._run, scene, name, algo))
 
 
 
@@ -405,11 +444,16 @@ class Atmosphere(object):
         yield ('atmosphere_space', lambda : self.spacescene)
         yield ('atmosphere_backlit', lambda : self.backlit)
 
-    def makeTests(self):
+    def makeTests(self, configs):
+        configs = set.intersection(configs, {Algorithm.PT, Algorithm.PT2})
         common_opt = {'--spp': 16, '-w': 320, '-h': 320}
-        for name, scene in self.makeScenes():
-            func = functools.partial(toytrace, scene(), name+'.png', common_opt, name = name)
-            yield (name, func)
+        for prefix, scene in self.makeScenes():
+            for algo in configs:
+                opt = copy.copy(common_opt)
+                opt['--algo'] = algo.value
+                name = '{}_{}'.format(prefix, algo.value)
+                func = functools.partial(toytrace, scene(), name+'.png', opt, name = name)
+                yield (name, func)
 
 
 
@@ -442,21 +486,21 @@ class Various(object):
         # self.common_opt['various_cornelbox_parabolic_reflector'] = {'-w': 320, '-h': 320}
 
     def runSingle(self, name, scene, mode):       
-        if mode == 'bdpt':
+        if mode == Algorithm.BDPT:
           opts = { '--algo' : 'bdpt', '--spp': 8}
-          filename = name+'_bdpt.png'
         else:
           opts = {'--spp': 16}
-          filename = name+'.png'
+        filename = name + ".png"
         toytrace(
-            self.scenes[name], filename,
+            os.path.join('scenes',scene), filename,
             opts,
             name = name)
 
-    def makeTests(self):
-        for name, scene in self.scenes.items():
-          yield (name, functools.partial(self.runSingle, name, scene, 'pt'))
-          yield (name+'_bdpt', functools.partial(self.runSingle, name, scene, 'bdpt'))
+    def makeTests(self, configs):
+        for prefix, scene in self.scenes.items():
+            for config in configs:
+                name = '{}_{}'.format(prefix, config.value)
+                yield (name, functools.partial(self.runSingle, name, scene, config))
 
 
 class ParticipatingMediaSimple(object):
@@ -483,7 +527,7 @@ class ParticipatingMediaSimple(object):
 
         {light_spec}
 
-        shader invisible
+        shader none
         {medium_spec}
         m unitcube.dae
         '''
@@ -555,7 +599,7 @@ class ParticipatingMediaSimple(object):
 
     def run(self, scene, name, render_mode):
         opt = {'-w': 256, '-h': 256, '--spp': 16,
-               '--algo' : render_mode }
+               '--algo' : render_mode.value }
         toytrace(
             scene, name+'.png', opt, name=name)
 
@@ -567,12 +611,12 @@ class ParticipatingMediaSimple(object):
                     name = self.assemble_prefix(config)
                     yield (name, functools.partial(self.assemble_scene, config))
 
-    def makeTests(self):
+    def makeTests(self, configs):
         for prefix, scene_builder in self.makeScenes():
             scene = scene_builder()
-            for render_mode in ['pt', 'bdpt']:
-                name = '{}_{}'.format(prefix, render_mode)
-                yield (name, functools.partial(self.run, scene, name, render_mode))
+            for config in configs:
+                name = '{}_{}'.format(prefix, config.value )
+                yield (name, functools.partial(self.run, scene, name, config))
 
 
 
@@ -581,7 +625,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Render the test scenes.')
     parser.add_argument('--dump', action='store_true', default = False)
     parser.add_argument('--list', action='store_true', default = False)
-    parser.add_argument('--exe', type = str, default = the_exe)
+    parser.add_argument('--exe', type = str, default = '')
+    parser.add_argument('--configs', type = str, default =  'pt')
     parser.add_argument('pattern', default = '*', type = str, nargs = '?')
     args = parser.parse_args()
 
@@ -598,26 +643,28 @@ if __name__ == '__main__':
         EmissiveDemoMediumScenes
     ]
 
-    the_exe = args.exe
-    if not os.path.isfile(the_exe):
-        print "Cannot find toytrace exe: ", the_exe
-        sys.exit(-1)
-
     if args.dump:
         the_generators = [ c().makeScenes() for c in the_classes if hasattr(c, "makeScenes") ]
         the_things = itertools.chain(*the_generators)
         to_execute = filter(FilterFunc, the_things)
         if args.list:
             for name, scene_gen in to_execute:
-                print name
+                print(name)
         else:
             dumpToSceneDir(to_execute)
     else:
-        the_generators = [c().makeTests() for c in the_classes]
+        assert (os.path.split(os.getcwd())[1] == 'testing')
+        global toytrace
+        toytrace = ToyTrace(args.exe, ['scenes'])
+
+        configs = args.configs.split(',')
+        configs = { Algorithm.__members__[c.upper()] for c in configs }
+
+        the_generators = [c().makeTests(configs) for c in the_classes]
         the_things = itertools.chain(*the_generators)
         to_execute = filter(FilterFunc, the_things)
         for name, t in to_execute:
             if args.list:
-                print name
+                print(name)
             else:
                 t()

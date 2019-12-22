@@ -1,0 +1,40 @@
+v
+from 0 0.5 1.4
+at 0 0.5 0
+up 0 1 0
+resolution 480 480
+angle 40
+
+lddome 0 0 1  0.02 0.02 0.05
+
+# TODO: Height scale of 0.02 will make the light
+# surface coincide with the medium boundary,
+# which will make me have a bad day ...
+# Fix this!
+{
+yaml{
+transform:
+  pos: [0, 0.99, -0.55]
+  hpb: [0, 0, 180]
+  scale: [0.4, 1, 0.4]
+  angle_in_degree: true
+}yaml
+larea arealight2 uniform 1 1 1 100
+diffuse black  1 1 1 0.
+m unitrectangle.obj
+}
+
+
+#l 0. 0.8 -0.55  1. 1. 1. 10
+
+diffuse white  1 1 1 0.8
+diffuse red    1 0 0 0.2
+diffuse green  0 1 0 0.2
+diffuse blue   1 1 1 0.2
+
+m cornelbox.dae
+
+
+speculartransmissivedielectric Mat1 1.4
+transform 0 0.0  -0.3 2.5 0 0 0.7 0.7 0.7
+m bunny_lowpoly_smooth_fix_origin.obj

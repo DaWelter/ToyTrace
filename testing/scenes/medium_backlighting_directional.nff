@@ -1,0 +1,14 @@
+v
+from -100 0 0
+at 0 0 0
+up 0 1 0
+resolution 100 100
+angle 1
+
+# Large opening angle because scene renders without NEE. See area light version of this scene.
+lsun 1 0 0 100 20
+
+shader invisible
+medium prettydense 10 0
+transform 0 0 0 0 0 0 1 1 1
+m unitcube.dae

@@ -4,7 +4,7 @@ diffusetexture worldmap_640px.jpg
 
 s 0 0 0 6300
 
-shader invisible
+shader none
 tabulatedatmosphere atmos 0 0 0 6300 earth_atmosphere_collision_coefficients.json
 #simpleatmosphere atmos 0 0 0 6300
 s 0 0 0 6500

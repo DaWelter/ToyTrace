@@ -1,0 +1,26 @@
+v
+from -100 0 0
+at 0 0 0
+up 0 1 0
+resolution 100 100
+angle 1
+
+# With shader = none I can use a smaller light
+# because next event estimation works from out
+# of the medium.
+{
+transform -101 0 0 0 0 0 1 1 1
+larea arealight1 uniform 1. 1. 1. 10000
+shader black
+p 4
+0 1 -1
+0 1 1
+0 -1 1
+0 -1 -1
+larea none
+}
+
+shader none
+medium prettydense 10 0
+transform 0 0 0 0 0 0 1 1 1
+m unitcube.dae

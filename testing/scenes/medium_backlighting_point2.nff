@@ -1,0 +1,13 @@
+v
+from -100 0 0
+at 0 0 0
+up 0 1 0
+resolution 100 100
+angle 1
+
+l -101 0 0  1. 1. 1. 10000
+
+shader none
+medium prettydense 10 0
+transform 0 0 0 0 0 0 1 1 1
+m unitcube.dae
