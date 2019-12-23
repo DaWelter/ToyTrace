@@ -672,7 +672,6 @@ class PerspectiveCameraTesting : public testing::Test
           dir{0, 0, 1},
           up{0, 1, 0};
   double fov = 90;
-  double bound_at_z1 = 0.5;
   Sampler sampler;
   InfinitePlane imageplane;
   std::unique_ptr<PerspectiveCamera> cam;

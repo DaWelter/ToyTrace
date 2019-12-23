@@ -1117,7 +1117,6 @@ class AssimpReader
 public:
   AssimpReader(NFFParser &parser, Scope &scope)
     : scene{*parser.scene},
-      parser{parser},
       outer_scope{scope}
   {
   }
@@ -1295,7 +1294,6 @@ private:
 private:
   const aiScene *aiscene = { nullptr };
   Scene &scene;
-  NFFParser &parser;
   Scope &outer_scope;
 
   inline static Double3 aiVector3_to_myvector(const aiVector3D &v)

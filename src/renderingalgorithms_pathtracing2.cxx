@@ -58,10 +58,11 @@ private:
   
 public:
   LightPickerUcbBufferedQueue(const Scene &scene, int num_workers)
-    : local(num_workers),
-    picker_nee(scene),
+    :
     graph(),
-    node_nee(this->graph, 1, [&](Buffer<std::pair<LightRef, float>> x) {  picker_nee.ObserveReturns(x); delete x.begin();  })
+    node_nee(this->graph, 1, [&](Buffer<std::pair<LightRef, float>> x) {  picker_nee.ObserveReturns(x); delete x.begin();  }),
+    local(num_workers),
+    picker_nee(scene)
   {
 
   }
@@ -296,8 +297,8 @@ inline std::unique_ptr<Image> PathTracingAlgo2::GenerateImage()
 CameraRenderWorker::CameraRenderWorker(PathTracingAlgo2* master, int worker_index)
   : master{ master },
   pickers{ master->pickers.get() },
-  worker_index{ worker_index },
-  ray_termination{ master->render_params }
+  ray_termination{ master->render_params },
+  worker_index{ worker_index }
 {
   framebuffer = AsSpan(master->framebuffer);
 }
@@ -495,7 +496,7 @@ bool CameraRenderWorker::MaybeScatter(const SomeInteraction &interaction, PathSt
 
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{ 1. }, ps.current_node_count, sampler))
   {
-    std::visit([this, &ps, &scene{ master->scene }, &smpl](auto &&ia) {
+    std::visit([&ps, &scene{ master->scene }, &smpl](auto &&ia) {
       return PrepareStateForAfterScattering(ps, ia, scene, smpl);
     }, interaction);
     return true;

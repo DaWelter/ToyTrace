@@ -404,7 +404,7 @@ public:
   LightConnectionSample SampleConnection(const SomeInteraction &from, const Scene &scene, Sampler &sampler, const PathContext &context)
   {
     const auto smpl = env->TakeDirectionSample(sampler, context);
-    const auto seg = std::visit([this, &scene, &smpl](auto && ia) -> RaySegment { return Detail::SegmentToEnv(ia, scene, smpl.coordinates); }, from);
+    const auto seg = std::visit([&scene, &smpl](auto && ia) -> RaySegment { return Detail::SegmentToEnv(ia, scene, smpl.coordinates); }, from);
     return { seg, smpl.pdf_or_pmf, smpl.value };
   }
 };
@@ -461,7 +461,7 @@ public:
 
   static constexpr bool IsAngularDistribution() { return false; }
 
-  const auto Get() const { return prim_ref; }
+  auto Get() const { return prim_ref; }
 
   Double3 SurfaceNormal() const { return light_surf.geometry_normal; }
 

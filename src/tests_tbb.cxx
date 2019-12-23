@@ -27,14 +27,6 @@ void Sleep(uint32_t ms)
 
 static tbb::mutex cout_mutex;
 
-// Nice debug output.
-template<typename... Xs>
-void printl(Xs...xs)
-{
-  tbb::mutex::scoped_lock lock(cout_mutex);
-  printl_recurse(xs...);
-}
-
 template<typename X, typename... Xs>
 void printl_recurse(X x, Xs...xs)
 {
@@ -43,6 +35,14 @@ void printl_recurse(X x, Xs...xs)
     printl_recurse(xs...);
   else
     std::cout << std::endl;
+}
+
+// Nice debug output.
+template<typename... Xs>
+void printl(Xs...xs)
+{
+  tbb::mutex::scoped_lock lock(cout_mutex);
+  printl_recurse(xs...);
 }
 
 }
@@ -100,7 +100,7 @@ public:
   {
     if (interrupt_flag.load() || is_done())
     {
-      tbb::parallel_for(0, n_tasks, 1, [this](int worker_num) {
+      tbb::parallel_for(0, n_tasks, 1, [](int worker_num) {
         printl("Running secondary ", worker_num, ", threadid ", std::this_thread::get_id());
         util::Sleep(100);
       });
@@ -159,7 +159,7 @@ public:
 
   void run_secondary_tasks()
   {
-    tbb::parallel_for(0, n_tasks, 1, [this](int worker_num) {
+    tbb::parallel_for(0, n_tasks, 1, [](int worker_num) {
       printl("Running secondary ", worker_num, ", threadid ", std::this_thread::get_id());
       std::this_thread::sleep_for(std::chrono::milliseconds(200));
     });
@@ -211,7 +211,7 @@ public:
 
     void run_secondary_tasks()
     {
-        tbb::parallel_for(0, n_tasks, 1, [this](int worker_num) {
+        tbb::parallel_for(0, n_tasks, 1, [](int worker_num) {
             printl("Running secondary ", worker_num, ", threadid ", std::this_thread::get_id());
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         });
@@ -278,7 +278,6 @@ class Demo
   tbb::spin_mutex random_mutex;
 
   const uint32_t num_items = 10;
-  const uint32_t num_frames = 2;
   uint32_t counter = 0;
   uint32_t current_frame_id = 0;
 

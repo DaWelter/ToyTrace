@@ -2,7 +2,7 @@
 
 #include <tbb/parallel_do.h>
 #include <tbb/task_group.h>
-
+#include <functional>
 
 namespace ThreadUtilDetail
 {

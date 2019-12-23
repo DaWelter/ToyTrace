@@ -318,7 +318,7 @@ template<class T>
 inline void OnlineVariance::ArrayAccumulator<T>::Add(const ArrayAccumulator<T>& other)
 {
   mean = (counts + other.counts > 0).select(
-    (mean * counts.cast<double>() + other.mean * other.counts.cast<double>()) / (counts + other.counts).cast<double>(),
+    (mean * counts.cast<double>() + other.mean * other.counts.template cast<double>()) / (counts + other.counts).template cast<double>(),
     0.
   );
   counts += other.counts;
@@ -328,7 +328,7 @@ inline void OnlineVariance::ArrayAccumulator<T>::Add(const ArrayAccumulator<T>& 
 template<class T>
 inline typename OnlineVariance::ArrayAccumulator<T>::ArrayXd OnlineVariance::ArrayAccumulator<T>::Var(T fill_value) const
 {
-  return (counts >= 2).select(sqr_dev / (counts - 1).cast<double>(), ArrayXd::Constant(Size(),fill_value));
+  return (counts >= 2).select(sqr_dev / (counts - 1).template cast<double>(), ArrayXd::Constant(Size(),fill_value));
 }
 
 }

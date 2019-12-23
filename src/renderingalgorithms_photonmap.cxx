@@ -31,7 +31,7 @@ namespace Photonmapping
 using SimplePixelByPixelRenderingDetails::SamplesPerPixelSchedule;
 using SimplePixelByPixelRenderingDetails::SamplesPerPixelScheduleConstant;
 class PhotonmappingRenderingAlgo;
-class EmitterSampleVisitor;
+struct EmitterSampleVisitor;
 using Lights::LightRef;
 using Lightpickers::UcbLightPicker;
 using Lightpickers::PhotonUcbLightPicker;
@@ -128,11 +128,12 @@ private:
 
 public:
   LightPickersUcbCombined(const Scene &scene, int num_workers)
-    : local(num_workers),
-    picker_nee(scene), picker_photon(scene),
+    :
     graph(),
     node_nee(this->graph, 1, [&](Buffer<std::pair<LightRef, float>> x) {  picker_nee.ObserveReturns(x); delete x.begin();  }),
-    node_photon(this->graph, 1, [&](Buffer<std::pair<int, float>> x) {  picker_photon.ObserveReturns(x); delete x.begin(); })
+    node_photon(this->graph, 1, [&](Buffer<std::pair<int, float>> x) {  picker_photon.ObserveReturns(x); delete x.begin(); }),
+    local(num_workers),
+    picker_nee(scene), picker_photon(scene)
   {
    
   }
@@ -374,8 +375,9 @@ Photonmapping::PhotonmappingRenderingAlgo::PhotonmappingRenderingAlgo(
   const Scene &scene_, const RenderingParameters &render_params_)
   : 
   RenderingAlgo{},
-  spp_schedule{ render_params_ }, render_params{ render_params_ }, scene{ scene_ },
-    tileset({ render_params_.width, render_params_.height })
+    tileset({ render_params_.width, render_params_.height }),
+    spp_schedule{ render_params_ }, 
+    render_params{ render_params_ }, scene{ scene_ }
 {
   the_task_arena.initialize(std::max(1, this->render_params.num_threads));
   num_pixels = render_params.width * render_params.height;
@@ -782,8 +784,8 @@ bool PhotonmappingWorker::ScatterAt(Ray& ray, const VolumeInteraction& interacti
 CameraRenderWorker::CameraRenderWorker(Photonmapping::PhotonmappingRenderingAlgo* master, int worker_index)
   : master{master},
     pickers{ master->pickers.get() },
-    worker_index{ worker_index },
-    ray_termination{master->render_params}
+    ray_termination{master->render_params},
+    worker_index{ worker_index }
 {
   framebuffer = AsSpan(master->framebuffer);
 }

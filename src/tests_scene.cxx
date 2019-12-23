@@ -48,7 +48,7 @@ void CheckSceneParsedWithScopes(const Scene &scene)
       static_cast<const Spheres*>(&scene.GetGeometry(geo_index)),
       prim_index);
   };
-  auto GetCenter = [&scene, Get](int i) -> Float3
+  auto GetCenter = [Get](int i) -> Float3
   {
     auto geo = Get(i);
     auto [center, _] = geo.first->Get(geo.second);
