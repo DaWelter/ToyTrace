@@ -21,6 +21,7 @@ Double3 ToCosHemisphere(Double2 r);
 Double3 ToPhongHemisphere(Double2 r, double alpha);
 Double3 ToTriangleBarycentricCoords(Double2 r);
 Double3 ToUniformSphere3d(const Double3 &r);
+Float2 ToNormal2d(const Float2 &r);
 }
 
 
@@ -62,14 +63,6 @@ template<class Iter>
 void RandomShuffle(Iter &&begin, Iter &&end, Sampler &sampler)
 {
 	std::shuffle(begin, end, sampler.GetGenerator());
-  // Deprecated in c++14
-  //std::random_shuffle(
-  //  begin,
-  //  end,
-  //  [&sampler](int n) {
-  //    return sampler.UniformInt(0, n-1);
-  //  }
-  //);
 }
 
 
@@ -135,6 +128,7 @@ inline int TowerSampling(const T *probs, T r)
     r -= probs[n];
     --n;
   }
+  assert(n >= 0 && n < n_);
   return n;
 }
 
@@ -223,9 +217,10 @@ namespace OnlineVariance
 
 // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Online_algorithm
 // sqr_deviation_sum = M_2,n
-template<class T>
-inline void Update(T& mean, T &sqr_deviation_sum, int &num_previous_samples, const T &new_x)
+template<class T, class CounterType>
+inline void Update(T& mean, T &sqr_deviation_sum, CounterType &num_previous_samples, const T &new_x)
 {
+  assert(num_previous_samples < std::numeric_limits<CounterType>::max());
   ++num_previous_samples;
   T delta = new_x - mean;
   mean = mean + delta / num_previous_samples;
@@ -233,8 +228,8 @@ inline void Update(T& mean, T &sqr_deviation_sum, int &num_previous_samples, con
   sqr_deviation_sum += delta*delta2;
 }
 
-template<class T>
-inline T FinalizeVariance(const T &sqr_deviation_sum, int num_samples)
+template<class T, class CounterType >
+inline T FinalizeVariance(const T &sqr_deviation_sum, CounterType num_samples)
 {
   if (num_samples < 2)
     return T{NaN};
@@ -242,12 +237,16 @@ inline T FinalizeVariance(const T &sqr_deviation_sum, int num_samples)
 }
 
 // Convenience class, wrapping the algorithm.
-template<class T>
+template<class T, class CounterType_=int>
 class Accumulator
 {
+  public:
+    using CounterType = CounterType_;
+    using ValueType = T;
+  private:
     T mean{0.};
     T sqr_deviation_sum{0.};
-    int n{0};
+    CounterType n{0};
   public:
     void Update(const T &new_x)
     {

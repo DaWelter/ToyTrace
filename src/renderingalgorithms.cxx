@@ -22,6 +22,7 @@ std::unique_ptr<RenderingAlgo> AllocateNormalVisualizer(const Scene &scene, cons
 std::unique_ptr<RenderingAlgo> AllocatBptPathTracer(const Scene &scene, const RenderingParameters &params);
 std::unique_ptr<RenderingAlgo> AllocatForwardPathTracer(const Scene &scene, const RenderingParameters &params);
 std::unique_ptr<RenderingAlgo> AllocatePathtracing2RenderingAlgo(const Scene &scene, const RenderingParameters &params);
+std::unique_ptr<RenderingAlgo> AllocatePathtracingGuidedRenderingAlgo(const Scene &scene, const RenderingParameters &params);
 
 std::unique_ptr<RenderingAlgo> RenderAlgorithmFactory(const Scene &scene, const RenderingParameters &params)
 {
@@ -34,6 +35,8 @@ std::unique_ptr<RenderingAlgo> RenderAlgorithmFactory(const Scene &scene, const 
     return AllocatePhotonmappingRenderingAlgo(scene, params);
   else if (params.algo_name == "pt2")
     return AllocatePathtracing2RenderingAlgo(scene, params);
+  else if (params.algo_name == "ptg")
+    return AllocatePathtracingGuidedRenderingAlgo(scene, params);
   else
     return AllocatForwardPathTracer(scene, params);
 }

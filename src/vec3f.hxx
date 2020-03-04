@@ -81,23 +81,6 @@ constexpr int static_size()
 }
 
 
-// Don't need.
-// namespace std
-// {
-//   template<class T, int dim>
-//   struct hash<Vec<T,dim> >
-//   {
-//     std::size_t operator()(const Vec<T, dim> &key) const
-//     {
-//       std::size_t seed = 0;
-//       for (int i=0; i<dim; ++i)
-//         boost::hash_combine(seed, boost::hash_value(key[i]));
-//       return seed;
-//     }
-//   };
-// }
-
-
 template<class Derived>
 inline std::ostream& operator<<(std::ostream &os, const Eigen::MatrixBase<Derived> &v)
 {
@@ -240,13 +223,13 @@ inline auto ClampDot(const Eigen::MatrixBase<Derived1> &u, const Eigen::MatrixBa
 #endif
 
 
-template<class Scalar>
-inline Scalar Clip(Scalar &x, Scalar a,Scalar b) {
-  // TODO: Change this so that it preserve NaN input in x;
-  if(x>b) x = b;
-  else if(x<a) x = a;
-  return x;
-}
+// template<class Scalar>
+// inline Scalar Clip(Scalar x, Scalar a,Scalar b) {
+//   // TODO: Change this so that it preserve NaN input in x;
+//   if(x>b) x = b;
+//   else if(x<a) x = a;
+//   return x;
+// }
 
 
 template<class Derived>

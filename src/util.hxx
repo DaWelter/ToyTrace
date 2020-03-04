@@ -43,6 +43,15 @@ inline float Rcp(float x)
   return 1.f/x;
 }
 
+// t = 0: Returns a
+// t = 1: Returns b
+// otherwise linear inter/extra-polation
+template<class T, class U>
+inline T Lerp(const T &a, const T &b, U t)
+{
+  return (std::remove_reference_t<U>(1) - t) * a + t * b;
+}
+
 
 // Note: Will happily take the signbit from zero. So the result for 0 is basically random.
 template<class T, typename std::enable_if_t<std::is_floating_point<T>{}, int> = 0>

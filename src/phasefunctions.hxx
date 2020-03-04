@@ -3,8 +3,6 @@
 
 class Sampler;
 
-void WeightsToCombinationProbabilities(Spectral3 &prob_lambda, Spectral3 *prob_constituent_given_lambda, int num_constituents); // forward decl. TODO find place for this.
-
 namespace PhaseFunctions
 {
   

@@ -48,6 +48,10 @@ public:
   const T* end() const { return _begin + _size;  }
 
   operator Span<const T>() const { return Span<const T>(begin(), size()); }
+
+  T* data() { return _begin; }
+
+  const T* data() const { return _begin; }
 };
 
 template<class T, class Alloc>

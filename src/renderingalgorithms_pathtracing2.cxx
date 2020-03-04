@@ -53,7 +53,7 @@ private:
   static constexpr size_t BUFFER_SIZE = 10240;
   tbb::flow::graph graph;
   tbb::flow::function_node<Buffer<std::pair<LightRef, float>>> node_nee;
-  ToyVector<ThreadLocal, tbb::cache_aligned_allocator<ThreadLocal>> local;
+  //ToyVector<ThreadLocal, tbb::cache_aligned_allocator<ThreadLocal>> local;
   UcbLightPicker picker_nee;
   
 public:
@@ -61,7 +61,7 @@ public:
     :
     graph(),
     node_nee(this->graph, 1, [&](Buffer<std::pair<LightRef, float>> x) {  picker_nee.ObserveReturns(x); delete x.begin();  }),
-    local(num_workers),
+    //local(num_workers),
     picker_nee(scene)
   {
 
@@ -148,7 +148,6 @@ class alignas(128) CameraRenderWorker
   RayTermination ray_termination;
   LambdaSelectionStrategyShuffling lambda_selection_factory;
   static constexpr int num_lambda_sweeps = decltype(lambda_selection_factory)::NUM_SAMPLES_REQUIRED;
-  const int worker_index;
 
 private:
   void InitializePathState(PathState &p, Int2 pixel, const LambdaSelection &lambda_selection) const;
@@ -226,8 +225,10 @@ PathTracingAlgo2::PathTracingAlgo2(
   const Scene &scene_, const RenderingParameters &render_params_)
   :
   RenderingAlgo{},
-  spp_schedule{ render_params_ }, render_params{ render_params_ }, scene{ scene_ },
-  tileset({ render_params_.width, render_params_.height })
+  tileset({ render_params_.width, render_params_.height }),
+  spp_schedule{ render_params_ }, 
+  render_params{ render_params_ },
+   scene{ scene_ }
 {
   the_task_arena.initialize(std::max(1, this->render_params.num_threads));
   num_pixels = render_params.width * render_params.height;
@@ -297,8 +298,7 @@ inline std::unique_ptr<Image> PathTracingAlgo2::GenerateImage()
 CameraRenderWorker::CameraRenderWorker(PathTracingAlgo2* master, int worker_index)
   : master{ master },
   pickers{ master->pickers.get() },
-  ray_termination{ master->render_params },
-  worker_index{ worker_index }
+  ray_termination{ master->render_params }
 {
   framebuffer = AsSpan(master->framebuffer);
 }

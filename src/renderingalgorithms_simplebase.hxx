@@ -36,6 +36,7 @@ class SamplesPerPixelSchedule
   int spp = 1; // Samples per pixel
   int total_spp = 0; // Samples till now.
   int max_spp;
+  static constexpr int MAX_SPP_PER_ITERATION = 1024;
 
 public:
   SamplesPerPixelSchedule(const RenderingParameters &render_params) 
@@ -45,7 +46,7 @@ public:
   void UpdateForNextPass()
   {
     total_spp += spp;
-    if (spp < 256)
+    if (spp < MAX_SPP_PER_ITERATION)
     {
       spp *= 2;
     }
@@ -57,6 +58,7 @@ public:
   
   inline int GetPerIteration() const { return spp; }
   inline int GetTotal() const { return total_spp; }
+  inline int GetMaxSppPerIteration() const { return MAX_SPP_PER_ITERATION;  }
 };
 
 

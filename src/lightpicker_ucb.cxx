@@ -12,10 +12,14 @@ namespace Lightpickers
 {
 
 
-std::array<int, Lights::NUM_LIGHT_TYPES> Lightpickers::GetNumLightTypes(const Scene & scene)
+std::array<int, Lights::NUM_LIGHT_TYPES> GetNumLightTypes(const Scene & scene)
 {
   std::array<int, Lights::NUM_LIGHT_TYPES> ret;
-  ret[IDX_PROB_POINT] = scene.GetNumPointLights();  ret[IDX_PROB_AREA] = scene.GetNumAreaLights();  ret[IDX_PROB_ENV] = scene.HasEnvLight() ? 1 : 0;  ret[IDX_PROB_VOLUME] = 0;  return ret;
+  ret[IDX_PROB_POINT] = scene.GetNumPointLights();
+  ret[IDX_PROB_AREA] = scene.GetNumAreaLights();
+  ret[IDX_PROB_ENV] = scene.HasEnvLight() ? 1 : 0;
+  ret[IDX_PROB_VOLUME] = 0;
+  return ret;
 }
 
 

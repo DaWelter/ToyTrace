@@ -8,7 +8,7 @@
 #include <boost/filesystem.hpp>
 
 #ifdef HAVE_JSON
-#include <rapidjson/document.h>
+#include "json.hxx"
 #endif
 
 #include "ray.hxx"
@@ -861,7 +861,7 @@ TEST(AtmosphereTest, LoadTabulatedData)
   const rapidjson::Value& val = d["H0"];
   ASSERT_TRUE(std::isfinite(val.GetDouble()));
   const auto& sigma_t = d["sigma_t"]; // Note: My version of rapidjson is age old. In up to date versions this should read blabla.GetArray().
-  ASSERT_GT(sigma_t.Size(), 0);
+  ASSERT_GT(sigma_t.Size(), 0ul);
   const auto& sigma_t_at_altitude0 = sigma_t[0];
   ASSERT_EQ(sigma_t_at_altitude0.Size(), Color::NBINS);
   const auto& value = sigma_t_at_altitude0[0];
@@ -1172,6 +1172,84 @@ lddome 0 1 0  0.02 0.02 0.5
 }
 #endif
 
+//////////////////////////////////////////////
+/// JSON
+//////////////////////////////////////////////
+
+#ifdef HAVE_JSON
+TEST(JSON, EigenToJson)
+{
+  using namespace rapidjson_util;
+  Double3 x{1,2,3};
+  Float3 y{4,5,6};
+  Index3 i{1,2,3};
+
+  rj::Document doc;
+  auto &alloc = doc.GetAllocator();
+  doc.SetObject();
+  doc.AddMember("Double3", ToJSON(x, alloc), alloc);
+  doc.AddMember("Float3", ToJSON(y, alloc), alloc);
+  doc.AddMember("Index3", ToJSON(i, alloc), alloc);
+
+  const std::string s = ToString(doc);
+  //std::cout << s << std::endl;
+
+  const std::string expected = \
+R"""({
+    "Double3": [
+        1.0,
+        2.0,
+        3.0
+    ],
+    "Float3": [
+        4.0,
+        5.0,
+        6.0
+    ],
+    "Index3": [
+        1,
+        2,
+        3
+    ]
+})""";
+  EXPECT_EQ(s, expected);
+}
+
+
+TEST(JSON, ContainerToJSON)
+{
+  using namespace rapidjson_util;
+  std::list<ToyVector<int>> c;
+  c.push_back({1,2,3});
+  c.push_back({4,5,6});
+
+  rj::Document doc;
+  auto &a = doc.GetAllocator();
+  doc.SetObject();
+  doc.AddMember("Container", ToJSON(c, a), a);
+
+  const std::string s = ToString(doc);
+  //std::cout << s << std::endl;
+
+  const std::string expected = \
+R"""({
+    "Container": [
+        [
+            1,
+            2,
+            3
+        ],
+        [
+            4,
+            5,
+            6
+        ]
+    ]
+})""";
+
+  EXPECT_EQ(expected, s);
+}
+#endif
 
 //////////////////////////////////////////////
 int main(int argc, char **argv) {

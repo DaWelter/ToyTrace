@@ -5,16 +5,18 @@ set (CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 set (Rapidjson_ENABLE False CACHE BOOL "For debug data output and loading of atmospheric data.")
 set (BuildTests True CACHE BOOL "Build the tests")
-
+set (BuildPythonBindings True CACHE BOOL "Build Python bindings")
 
 if(NOT WIN32)
     set (CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} -std=c++17) # Set this only for c++ files.
     add_compile_options (-Wextra -Wall)
+    add_compile_options (-fPIC)
     add_compile_options (-Wno-sign-compare -Wno-unused-parameter -Wno-unused-variable -Wno-char-subscripts -Winit-self -Wno-unused-function)
     add_compile_options ("$<$<CONFIG:RELEASE>:-march=native>")
     add_compile_options ("$<$<CONFIG:RELEASE>:-O3>")
-    add_compile_options ("$<$<CONFIG:RELEASE>:-msse2>")
-    add_compile_options ("$<$<CONFIG:RELEASE>:-mfpmath=sse>")
+    add_compile_options ("$<$<CONFIG:RELWITHDEBINFO>:-march=native>")
+    #add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+    #set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address)
 else()
     add_compile_options(-std:c++17)
     add_definitions(-DNOMINMAX -D_CRT_SECURE_NO_WARNINGS -D_NOEXCEPT=noexcept)
@@ -31,7 +33,7 @@ endif()
 add_definitions("-DBOOST_SYSTEM_NO_DEPRECATED")
 
 # Because bug. Need to fix ...
-add_definitions("-DEIGEN_DONT_VECTORIZE")
+# add_definitions("-DEIGEN_DONT_VECTORIZE")
 
 
 #################################################
@@ -123,7 +125,8 @@ add_library(commonstuff STATIC
   src/phasefunctions.cxx src/atmosphere.cxx src/spectral.cxx src/primitive.cxx src/renderingalgorithms.cxx 
   src/light.cxx src/texture.cxx src/embreeaccelerator.cxx src/scene.cxx src/lightpicker_trivial.cxx src/lightpicker_ucb.cxx src/renderingalgorithms_photonmap.cxx src/renderingalgorithms_pathtracing2.cxx 
   src/renderingalgorithms_normalvisualizer.cxx src/renderingalgorithms_pathtracing.cxx
-  src/rendering_util.cxx src/pathlogger.cxx src/photonintersector.cxx  external/cubature/hcubature.c)
+  src/rendering_util.cxx src/pathlogger.cxx src/photonintersector.cxx  external/cubature/hcubature.c
+  src/path_guiding.cxx src/renderingalgorithms_pathtracing_guided.cxx src/distribution_mixture_models.cxx)
 
   file(GLOB headers RELATIVE ${CMAKE_SOURCE_DIR} "src/*.hxx")
 target_sources(commonstuff PRIVATE ${headers})
@@ -164,7 +167,7 @@ target_link_libraries(toytrace commonstuff
                       debug ${Boost_PROGRAM_OPTIONS_LIBRARY_DEBUG})
 
 if(BuildTests)
-    add_executable(tests src/tests.cxx src/tests3.cxx src/tests_sampling.cxx src/tests_microfacet.cxx src/tests_stats.cxx src/tests_scene.cxx)
+    add_executable(tests src/tests.cxx src/tests3.cxx src/tests_sampling.cxx src/tests_microfacet.cxx src/tests_stats.cxx src/tests_scene.cxx src/tests_guiding.cxx)
     add_executable(tests2 src/tests2.cxx)
     add_executable(tests_tbb src/tests_tbb.cxx)
     
@@ -173,3 +176,27 @@ if(BuildTests)
       target_link_libraries(${EXE} commonstuff ${GTEST_LIBRARIES})
     endforeach()
 endif(BuildTests)
+
+
+#################################################
+## Python Lib
+#################################################
+
+if (BuildPythonBindings)
+
+find_package(PythonInterp REQUIRED)
+find_package(PythonLibs REQUIRED)
+
+add_library(path_guiding SHARED src/path_guiding_py.cxx)
+target_link_libraries(path_guiding commonstuff ${PYTHON_LIBRARIES})
+target_include_directories(path_guiding PRIVATE ${PYTHON_INCLUDE_DIRS})
+
+set_target_properties(
+    path_guiding
+    PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME "path_guiding"
+        LINKER_LANGUAGE C
+    )
+
+endif(BuildPythonBindings)

@@ -233,6 +233,9 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
       ("h,h", po::value<int>(), "Height")
       ("rd", po::value<int>(), "Max ray depth")
       ("spp", po::value<int>(), "Max samples per pixel")
+      ("guide-em-every", po::value<int>(), "Guiding: Expectancy maximization every x samples.")
+      ("guide-prior-strength", po::value<double>(), "Guiding: Roughly the number of samples were prior becomes insignificant.")
+      ("guide-subdiv-factor", po::value<int>(), "Guiding: Less makes the tree more refined. Value ranges around 100 to 10000.")
       ("algo", po::value<std::string>()->default_value("pt"), "Rendering algorithm: pt or bdpt")
       ("phm-radius", po::value<double>(), "Initial photon radius for photon mapping")
       ("pt-sample-mode", po::value<std::string>(), "Light sampling: 'bsdf' - bsdf importance sampling, 'lights' - sample lights aka. next event estimation, 'both' - both combined by MIS.")
@@ -254,6 +257,25 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
       exit(0);
     }
     
+    if (vm.count("guide-em-every"))
+    {
+      render_params.guiding_em_every = vm["guide-em-every"].as<int>();
+      if (render_params.guiding_em_every <= 0)
+        throw po::error("guide-em-every must be positive");
+    }
+    if (vm.count("guide-prior-strength"))
+    {
+      render_params.guiding_prior_strength = vm["guide-prior-strength"].as<double>();
+      if (render_params.guiding_prior_strength <= 0)
+        throw po::error("guide-prior-strength must be positive");
+    }
+    if (vm.count("guide-subdiv-factor"))
+    {
+      render_params.guiding_tree_subdivision_factor = vm["guide-subdiv-factor"].as<int>();
+      if (render_params.guiding_tree_subdivision_factor <= 0)
+        throw po::error("guide-subdiv-factor must be positive");
+    }
+
     int n = 4;
     if (vm.count("nt"))
     {
@@ -318,6 +340,7 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
         render_params.algo_name != "pt2" &&
         render_params.algo_name != "bdpt" &&
         render_params.algo_name != "normalvis" &&
+        render_params.algo_name != "ptg" &&
         render_params.algo_name != "photonmap")
       throw po::error("Algorithm must be pt or bdpt or normalvis");
     

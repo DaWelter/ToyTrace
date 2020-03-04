@@ -1,5 +1,8 @@
 private/
 
+
+.vscode
+
 # Other stuff
 .svn
 *.kdev4

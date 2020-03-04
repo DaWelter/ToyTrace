@@ -109,6 +109,15 @@ Double3 ToUniformSphere3d(const Double3 &rvs)
   return rho*p;
 }
 
+
+Float2 ToNormal2d(const Float2 &r)
+{
+    auto n1 = std::sqrt(-2 * std::log(r[0])) * std::cos(2 * float(Pi) * r[1]);
+    auto n2 = std::sqrt(-2 * std::log(r[0])) * std::sin(2 * float(Pi) * r[1]);
+    return { n1, n2 };
+}
+
+
 }
 
 

@@ -4,6 +4,9 @@
 #include "camera.hxx"
 #include "light.hxx"
 
+#include <fstream>
+#include <boost/filesystem/path.hpp>
+
 Scene::Scene()
     : camera(nullptr)
 { 
@@ -119,7 +122,8 @@ void Scene::BuildAccelStructure()
     assert(materials[value(surf->material_index)].shader != nullptr);
     embreeaccelerator.InsertRefTo(*surf);
   }
-  embreeaccelerator.Build();
+  // Iterating over intersections along some ray is required to initialize the MediumTracker.
+  embreeaccelerator.Build(true);
 
   for (auto &v : volumes)
   {
@@ -127,7 +131,7 @@ void Scene::BuildAccelStructure()
     assert(materials[value(v->material_index)].medium != nullptr);
     embreevolumes.InsertRefTo(*v);
   }
-  embreevolumes.Build();
+  embreevolumes.Build(true);
   
   this->boundingBox = embreeaccelerator.GetSceneBounds();
   this->boundingBox.Extend(embreevolumes.GetSceneBounds());
@@ -251,4 +255,48 @@ Double3 AntiSelfIntersectionOffset(const SurfaceInteraction &interaction, const 
   const auto normal = interaction.geometry_normal;
   const auto delta = Dot(interaction.pos_bounds, normal.cast<float>().cwiseAbs());
   return delta * (Dot(exitant_dir, normal) > 0. ? 1. : -1.)*normal;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+namespace 
+{
+
+void WriteObj(std::ostream &os, const Geometry &geo, long &vertex_offset)
+{
+  if (geo.type == Geometry::PRIMITIVES_TRIANGLES)
+  {
+    auto tris = static_cast<const Mesh&>(geo);
+    for (Geometry::index_t i = 0; i<tris.NumVertices(); ++i)
+    {
+      os << "v " << tris.vertices(i,0) << " " <<
+                    tris.vertices(i,1) << " " <<
+                    tris.vertices(i,2) << "\n";
+    }
+    os << "\n";
+    for (Geometry::index_t i = 0; i<tris.NumTriangles(); ++i)
+    {
+      os << "f " << vertex_offset+tris.vert_indices(i, 0) << " " <<
+                    vertex_offset+tris.vert_indices(i, 1) << " " <<
+                    vertex_offset+tris.vert_indices(i, 2) << "\n";
+    }
+    vertex_offset += tris.NumVertices();
+  }
+}
+
+} // anon namespace
+
+
+void Scene::WriteObj(const boost::filesystem::path &filename) const
+{
+  std::cout << "Writing scene as obj to " << filename << std::endl;
+  std::ofstream of(filename.string());
+
+  long vertex_offset = 1;
+  for (auto& pgeom : geometries)
+  {
+    of << "g\n";
+    ::WriteObj(of, *pgeom, vertex_offset);
+    of << "\n";
+  }
 }
