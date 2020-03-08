@@ -38,7 +38,8 @@ TEST(Guiding, KdTree)
   }
 
 #ifdef HAVE_JSON
-  rj::Document doc(rj::kObjectType);
+  rj::Document doc;
+  doc.SetObject();
   tree.DumpTo(doc, doc);
   std::cerr << ToString(doc) << std::endl;
 #endif
