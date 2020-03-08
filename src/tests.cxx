@@ -25,6 +25,7 @@
 #include "shader_util.hxx"
 #include "shader_physics.hxx"
 #include "lightpicker_ucb.hxx"
+#include "memory_arena.hxx"
 
 
 TEST(TestRaySegment, ExprTemplates)
@@ -1250,6 +1251,61 @@ R"""({
   EXPECT_EQ(expected, s);
 }
 #endif
+
+//////////////////////////////////////////////
+// pmr pointer bump allocator
+//////////////////////////////////////////////
+
+
+struct alignas(128) PmrAlignTester
+{
+  PmrAlignTester(int x_) : x(x_)
+  {
+    //std::cout << "PmrAlignTester(" << x_ << ")" << std::endl;
+  }
+  ~PmrAlignTester()
+  {
+    //std::cout << "~PmrAlignTester(" << x << ")" << std::endl;
+  }
+  int x;
+};
+
+
+TEST(MemoryArena, Alignment)
+{
+  util::MemoryArena arena{1024*4096};
+  auto t1 = arena.MakeUnique<PmrAlignTester>(7);
+  auto t2 = arena.MakeUnique<PmrAlignTester>(42);
+  size_t misalign1 = (size_t)t1.get() % 128;
+  size_t misalign2 = (size_t)t2.get() % 128;
+  ASSERT_EQ(misalign1, 0);
+  ASSERT_EQ(misalign2, 0);
+}
+
+
+TEST(MemoryArena, DefaultBufferSize)
+{
+  constexpr size_t itemsize = sizeof(PmrAlignTester);
+  constexpr size_t n = 100000; 
+  constexpr size_t sz = itemsize * (n+1); // +1 because alignment, to not cause additional allocations other than the first.
+  util::MemoryArena arena{sz};
+
+  auto AllocationLoop = [&]() { 
+    auto last = arena.MakeUnique<PmrAlignTester>(0);
+    for (size_t i = 1; i<n; ++i)
+    { 
+      auto current = arena.MakeUnique<PmrAlignTester>(i);
+      ASSERT_EQ(current.get() - last.get(), 1); // If it's really just bumping the pointer ...
+      last = std::move(current);
+    }
+  };
+
+  AllocationLoop();
+
+  arena.Release();
+
+  AllocationLoop();
+}
 
 //////////////////////////////////////////////
 int main(int argc, char **argv) {
