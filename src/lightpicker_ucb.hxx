@@ -1,7 +1,6 @@
 #pragma once
 
 #include "lightpicker_trivial.hxx"
-#include "linklist.hxx"
 #include "light.hxx"
 
 #include <tbb/task_arena.h>

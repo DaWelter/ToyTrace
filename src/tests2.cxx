@@ -20,7 +20,6 @@
 #include "util.hxx"
 #include "very_strong_typedef.hxx"
 #include "span.hxx"
-#include "linklist.hxx"
 
 
 TEST(BasicAssumptions, InheritCtor)
@@ -911,81 +910,6 @@ void Test()
 
 }
 
-
-namespace LinkListTest
-{
-
-struct ListNode : public LinkListBase<ListNode>
-{
-  int i = -1;
-};
-
-TEST(Intrusive,MyLinkedList)
-{
-  ListNode nodes[4];
-  using LL = CircularLinkList<ListNode>;
-  for (ListNode &n : LL::rangeStartingAt(nodes[0]))
-    n.i = 42;
-  // Ensure that iterating over one-element list works.
-  ASSERT_EQ(nodes[0].i, 42);
-  // Concatenate all the element
-  LL::append(nodes[0], nodes[2]);
-  LL::append(nodes[0], nodes[1]);
-  LL::append(nodes[2], nodes[3]);
-  // Test next method
-  ASSERT_EQ(LL::next(nodes[0]), &nodes[1]);
-  ASSERT_EQ(LL::next(nodes[1]), &nodes[2]);
-  ASSERT_EQ(LL::next(nodes[2]), &nodes[3]); 
-  ASSERT_EQ(LL::next(nodes[3]), &nodes[0]);
-  // Iteration over larger list. Stopping condition works?
-  int i = 0;
-  for (ListNode &n : LL::rangeStartingAt(nodes[0]))
-  {
-    n.i = i++;
-  }
-  for (int i = 0; i < 4; ++i)
-  {
-    ASSERT_EQ(nodes[i].i, i);
-  }
-}
-
-// Test items that have multiple list points allowing them to be in more than one list.
-struct First {};
-struct Second {};
-
-struct MultiListNode : public LinkListBase<MultiListNode, First>, public LinkListBase<MultiListNode, Second>
-{
-  int i1 = -1;
-  int i2 = -1;
-};
-
-TEST(Intrusive, MyMultiLinkedList)
-{
-  MultiListNode nodes[4];
-  using LL1 = CircularLinkList<MultiListNode,First>;
-  using LL2 = CircularLinkList<MultiListNode, Second>;
-  // First list head, one list of all things.
-  LL1::append(nodes[0], nodes[1]);
-  LL1::append(nodes[1], nodes[2]);
-  LL1::append(nodes[2], nodes[3]);
-  // Second head. Two smaller lists.
-  LL2::append(nodes[0], nodes[1]);
-  LL2::append(nodes[2], nodes[3]);
-
-  for (MultiListNode &n : LL1::rangeStartingAt(nodes[0]))
-    n.i1 = 42;
-  for (MultiListNode &n : LL2::rangeStartingAt(nodes[0]))
-    n.i2 = 1;
-  for (MultiListNode &n : LL2::rangeStartingAt(nodes[2]))
-    n.i2 = 2;
-  for (int i = 0; i < 4; ++i)
-  {
-    ASSERT_EQ(nodes[i].i1, 42);
-    ASSERT_EQ(nodes[i].i2, i <= 1 ? 1 : 2);
-  }
-}
-
-}
 
 //////////////////////////////////////////////
 // Template Lambdas
