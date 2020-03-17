@@ -162,7 +162,8 @@ target_include_directories(commonstuff PUBLIC
     ${Embree_INCLUDE_DIR} 
     ${YAML_CPP_INCLUDE_DIR} 
     ${TBB_INCLUDE_DIRS} 
-    "external/cubature")
+    "external/cubature"
+    "external")
 
 
 #################################################

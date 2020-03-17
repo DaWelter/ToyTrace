@@ -4,8 +4,9 @@
 #include "util.hxx"
 #include "span.hxx"
 
+#include "pcg32/pcg32.h"
+
 #include <cmath>
-#include <random>
 #include <array>
 #include <algorithm>
 #include <numeric>
@@ -27,8 +28,7 @@ Float2 ToNormal2d(const Float2 &r);
 
 class Sampler
 {
-  std::mt19937 random_engine;
-  std::uniform_real_distribution<double> uniform;
+  pcg32 generator;
 public:
   Sampler();
   void Seed(std::uint64_t seed);
@@ -49,20 +49,20 @@ public:
     Uniform01(r.data(), 2);
     return r;
   }
-  
-  static constexpr std::uint64_t default_seed = std::mt19937::default_seed;
 
-  auto& GetGenerator()
+  static constexpr std::uint64_t default_seed = PCG32_DEFAULT_STATE;
+
+  pcg32& GetGenerator()
   {
-	  return random_engine;
+    return generator;
   }
 };
 
 
 template<class Iter>
-void RandomShuffle(Iter &&begin, Iter &&end, Sampler &sampler)
+void RandomShuffle(Iter begin, Iter end, Sampler &sampler)
 {
-	std::shuffle(begin, end, sampler.GetGenerator());
+	sampler.GetGenerator().shuffle(begin, end);
 }
 
 

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <iostream>
 #include <fstream>
+#include <random>
 
 #include <boost/container/small_vector.hpp>
 

@@ -4,3 +4,6 @@
 [submodule "external/GSL"]
 	path = external/GSL
 	url = https://github.com/Microsoft/GSL
+[submodule "external/pcg32"]
+	path = external/pcg32
+	url = https://github.com/wjakob/pcg32.git

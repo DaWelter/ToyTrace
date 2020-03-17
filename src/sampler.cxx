@@ -122,45 +122,27 @@ Float2 ToNormal2d(const Float2 &r)
 
 
 Sampler::Sampler()
-  : random_engine(),
-    uniform(0., 1.)
 {
-
 }
 
 
 void Sampler::Seed(std::uint64_t seed)
 {
-  random_engine.seed(seed);
+  generator = pcg32{seed};
 }
 
 
 void Sampler::Uniform01(double* dest, int count)
 {
   for (int i=0; i<count; ++i)
-    dest[i] = uniform(random_engine);
+    dest[i] = generator.nextDouble();
 }
 
 
 int Sampler::UniformInt(int a, int b_inclusive)
 {
-  return std::uniform_int_distribution<int>(a, b_inclusive)(random_engine);
+  std::uint32_t x = generator.nextUInt(b_inclusive+1 - a);
+  return a + (int)x;
 }
 
 constexpr std::uint64_t Sampler::default_seed;
-
-
-// Double3 Sampler::UniformSphere()
-// {
-//   double r[2];
-//   Uniform01(r, 2);
-//   return TransformToUniformSphere(r[0], r[1]);
-// }
-// 
-// 
-// Double3 Sampler::UniformHemisphere()
-// {
-//   Double3 v = UniformSphere();
-//   v[2] = v[2]>=0. ? v[2] : -v[2];
-//   return v;
-// }
