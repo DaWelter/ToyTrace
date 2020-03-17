@@ -87,6 +87,7 @@ void InitializeForUnitDisc(GaussianMixture2d &mixture);
 namespace vmf_fitting
 {
 
+// 320 Bytes
 struct VonMisesFischerMixture
 {
   static constexpr int NUM_COMPONENTS = 16;
@@ -110,6 +111,8 @@ namespace incremental
 struct Data
 {
   static constexpr int NC = VonMisesFischerMixture::NUM_COMPONENTS;
+  // Don't have to be initialize because if data_count==0 then 
+  // those vars are assigned to anyway. (Otherwise they're added to.)
   Eigen::Array<float, NC, 3> avg_positions;
   Eigen::Array<float, NC, 1> avg_responsibilities;
   Eigen::Array<float, NC, 1> avg_responsibilities_unweighted;

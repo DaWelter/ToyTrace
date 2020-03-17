@@ -56,20 +56,6 @@ boost::filesystem::path GetDebugFilePrefix()
 
 static constexpr size_t CELL_BUFFER_SIZE = 1024;
 
-#if 0
-HashGridNaiveDynamic::HashGridNaiveDynamic(const Box &, double cellwidth) :
-    inv_cellsize{1./cellwidth}
-{
-    celldata.reserve(1024);
-}
-
-
-CellData& HashGridNaiveDynamic::Lookup(const Double3& p)
-{
-    CellIndex key = (p * inv_cellsize).cast<int>();
-    return celldata[key];
-}
-#endif
 
 SurfacePathGuiding::SurfacePathGuiding(const Box &region, double cellwidth, const RenderingParameters &params, tbb::task_arena &the_task_arena) :
     region{ region },
@@ -78,27 +64,22 @@ SurfacePathGuiding::SurfacePathGuiding(const Box &region, double cellwidth, cons
     param_em_every{ params.guiding_em_every },
     param_prior_strength{ params.guiding_prior_strength },
     the_task_arena{ &the_task_arena }
-    //graph{},
-    //transmission_node{
-    //    graph,
-    //    tbb::flow::unlimited,
-    //    [this](std::tuple<int, Span<Record>> x) 
-    //    {  
-    //        this->ProcessSamples(std::get<0>(x), std::get<1>(x));
-    //        FreeSpan(std::get<1>(x));
-    //    }
-    //}
 {
-  auto &cell = *recording_tree.GetData()[0];
+  auto& cell = cell_data.emplace_back();
   vmf_fitting::InitializeForUnitSphere(cell.mixture_learned);
   vmf_fitting::InitializeForUnitSphere(cell.mixture_sampled);
+}
 
+
+CellData& SurfacePathGuiding::LookupCellData(const Double3 &p)
+{
+  return cell_data[recording_tree.Lookup(p)];
 }
 
 
 const vmf_fitting::VonMisesFischerMixture* SurfacePathGuiding::FindSamplingMixture(const Double3 &p) const
 {
-    return &recording_tree.Lookup(p)->mixture_sampled;
+    return &cell_data[recording_tree.Lookup(p)].mixture_sampled;
 }
 
 
@@ -162,14 +143,14 @@ void SurfacePathGuiding::AddSample(
 
     auto rec = MakeSampleRecord(surface, reverse_incident_dir, radiance);
 
-    auto& cell = *recording_tree.Lookup(surface.pos);
+    auto& cell = LookupCellData(surface.pos);
     BufferMaybeSendOffSample(cell, rec);
 
     for (int i = 0; i < 1; ++i)
     {
       const auto new_rec = ComputeStochasticFilterPosition(rec, cell, sampler);
 
-      auto& other_cell = *recording_tree.Lookup(new_rec.pos);
+      auto& other_cell = LookupCellData(new_rec.pos);
       if (&other_cell != &cell)
         BufferMaybeSendOffSample(other_cell, new_rec);
     }
@@ -201,7 +182,7 @@ SurfacePathGuiding::Record SurfacePathGuiding::ComputeStochasticFilterPosition(c
 void SurfacePathGuiding::ProcessSamples(int cell_idx)
 {
   CellDataTemporary& cdtmp = cell_data_temp[cell_idx];
-  CellData& cd = *recording_tree.GetData()[cell_idx];
+  CellData& cd = cell_data[cell_idx];
 
   while (true)
   {    
@@ -255,7 +236,6 @@ void SurfacePathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRa
       float weight = in.weight;
       const auto xs = Span<const Eigen::Vector3f>(&in.reverse_incident_dir, 1);
       const auto ws = Span<const float>(&weight, 1);
-      // TODO: Careful with false sharing here! 
       incremental::Fit(cell.mixture_learned, cell.fitdata, params, xs, ws);
     }
   }
@@ -268,7 +248,7 @@ void SurfacePathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRa
 
 void SurfacePathGuiding::BeginRound(Span<ThreadLocal*> thread_locals)
 {
-  const auto n = recording_tree.GetData().size();
+  const auto n = recording_tree.NumLeafs();
 
   for (auto* tl : thread_locals)
   {
@@ -305,8 +285,6 @@ void SurfacePathGuiding::FinalizeRound(Span<ThreadLocal*> thread_locals)
   
   the_task_arena->execute([&]() { the_task_group.wait(); } );
 
-  auto celldatas = recording_tree.GetData();
-
   cell_data_temp.reset();
 
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
@@ -316,57 +294,104 @@ void SurfacePathGuiding::FinalizeRound(Span<ThreadLocal*> thread_locals)
 #endif
 }
 
-
 namespace 
 {
 
+using namespace ::guiding::kdtree;
 
-void UpdateCellSizeFromBox(const kdtree::Node *node, Span<CellData* const> celldata, const Box &box)
+std::pair<Box, Box> ChildrenBoxes(const Tree &tree, Handle node, const Box &node_box)
 {
-  if (node->is_leaf)
+  auto [axis, pos] = tree.Split(node);
+
+  Box leftbox{ node_box };
+  leftbox.max[axis] = pos;
+  
+
+  Box rightbox{ node_box };
+  rightbox.min[axis] = pos;
+  
+  return std::make_pair(leftbox, rightbox);
+}
+
+void ComputeLeafBoxes(const Tree &tree, Handle node, const Box &node_box, Span<CellData> out)
+{
+  if (node.is_leaf)
   {
-    const auto* leaf = static_cast<const kdtree::Leaf*>(node);
-    auto cd = celldata[leaf->num];
-    cd->cell_size = box.max - box.min;
+    // Assign lateral extents.
+    out[node.idx].cell_size = (node_box.max - node_box.min);
   }
   else
   {
-    const auto* branch = static_cast<const kdtree::Branch*>(node);
-    {
-      Box b{ box };
-      b.max[branch->split_axis] = branch->split_pos;
-      UpdateCellSizeFromBox(branch->left, celldata, b);
-    }
-    {
-      Box b{ box };
-      b.min[branch->split_axis] = branch->split_pos;
-      UpdateCellSizeFromBox(branch->right, celldata, b);
-    }
+    auto [left, right] = tree.Children(node);
+    auto [bl, br] = ChildrenBoxes(tree, node, node_box);
+    ComputeLeafBoxes(tree, left, bl, out);
+    ComputeLeafBoxes(tree, right, br, out);
   }
 }
 
-}
+} // namespace
+
 
 void SurfacePathGuiding::PrepareAdaptedStructures()
 {
-  std::cout << strconcat("round ", round, ": num_samples=", num_recorded_samples, ", num_cells=", recording_tree.GetData().size()) << std::endl;
+  std::cout << strconcat("round ", round, ": num_samples=", num_recorded_samples, ", num_cells=", recording_tree.NumLeafs()) << std::endl;
 
-  {
+  { // Start tree adaptation
     const std::uint64_t max_samples_per_cell = std::sqrt(num_recorded_samples.load()) * std::sqrt(param_num_initial_samples);
-    kdtree::AdaptParams params{
-      max_samples_per_cell, 0
+
+    auto DetermineSplit = [this, max_samples_per_cell](int cell_idx) -> std::pair<int, double>
+    {
+      // If too many samples fell into this cell -> split it at the sample's centroid.
+      const auto& stats = cell_data[cell_idx].leaf_stats;
+      if (stats.Count() > max_samples_per_cell)
+      {
+        const auto mean = stats.Mean();
+        const auto var = stats.Var();
+        int axis = -1;
+        var.maxCoeff(&axis);
+        double pos = mean[axis];
+        return { axis, pos };
+      }
+      else
+      {
+        return { -1, NaN };
+      }
     };
-    kdtree::TreeAdaptor(params).AdaptInplace(recording_tree);
-  }
 
-  for (auto* cd : recording_tree.GetData())
-  {
-    cd->leaf_stats = LeafStatistics{};
-    cd->fitdata = vmf_fitting::incremental::Data{};
-    cd->mixture_sampled = cd->mixture_learned;
-  }
+    kdtree::TreeAdaptor adaptor(DetermineSplit);
+    recording_tree = adaptor.Adapt(recording_tree);
+  
+    ToyVector<CellData> new_data(recording_tree.NumLeafs());
 
-  UpdateCellSizeFromBox(recording_tree.GetRoot(), recording_tree.GetData(), region);
+    {
+      int i =0;  
+      for (auto &cd : new_data)
+        cd.num = i++;
+    }
+
+    // This should initialize all sampling mixtures with
+    // the previously learned ones. If node is split, assignment
+    // is done to both children.
+    int i = 0;
+    for (auto m : adaptor.GetNodeMappings())
+    {
+      if (m.new_first >=0)
+      {
+        new_data[m.new_first].mixture_sampled = cell_data[i].mixture_learned;
+        new_data[m.new_first].mixture_learned = cell_data[i].mixture_learned;
+      }
+      if (m.new_second >= 0)
+      {
+        new_data[m.new_second].mixture_sampled = cell_data[i].mixture_learned;
+        new_data[m.new_second].mixture_learned = cell_data[i].mixture_learned;
+      }
+      ++i;
+    }
+
+    cell_data = std::move(new_data);
+  } // End tree adaption
+
+  ComputeLeafBoxes(recording_tree, recording_tree.GetRoot(), region, AsSpan(cell_data));
 
   num_recorded_samples = 0;
   round++;
@@ -451,20 +476,21 @@ void SurfacePathGuiding::WriteDebugData()
 
   auto &a = doc.GetAllocator();
 
-  for (const auto *cd : recording_tree.GetData())
+  int cell_idx = 0;
+  for (const auto cd : cell_data)
   {
     //std::cout << "cell " << idx << " contains" << celldata.incident_radiance.size() << " records " << std::endl;
     rj::Value jcell(rj::kObjectType);
-    jcell.AddMember("id", reinterpret_cast<std::size_t>(cd), a);
+    jcell.AddMember("id", cell_idx, a);
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
     jcell.AddMember("filename", ToJSON(cell_data_debug[cd->num].GetFilename(), a), a);
 #endif
     auto[mean, stddev] = [&]() {
-      if (cd->leaf_stats.Count())
+      if (cd.leaf_stats.Count())
       {
         return std::make_pair(
-          cd->leaf_stats.Mean(),
-          cd->leaf_stats.Stddev());
+          cd.leaf_stats.Mean(),
+          cd.leaf_stats.Stddev());
       }
       else
       {
@@ -473,14 +499,15 @@ void SurfacePathGuiding::WriteDebugData()
     }();
     jcell.AddMember("point_distribution_statistics_mean", ToJSON(mean, a), a);
     jcell.AddMember("point_distribution_statistics_stddev", ToJSON(stddev, a), a);
-    jcell.AddMember("size", ToJSON(cd->cell_size, a), a);
-    jcell.AddMember("num_points", cd->leaf_stats.Count(), a);
-    jcell.AddMember("average_weight", cd->fitdata.avg_weights, a);
+    jcell.AddMember("size", ToJSON(cd.cell_size, a), a);
+    jcell.AddMember("num_points", cd.leaf_stats.Count(), a);
+    jcell.AddMember("average_weight", cd.fitdata.avg_weights, a);
 
-    jcell.AddMember("mixture_learned", ToJSON(cd->mixture_learned, a), a);
-    jcell.AddMember("mixture_sampled", ToJSON(cd->mixture_sampled, a), a);
+    jcell.AddMember("mixture_learned", ToJSON(cd.mixture_learned, a), a);
+    jcell.AddMember("mixture_sampled", ToJSON(cd.mixture_sampled, a), a);
 
     records.PushBack(jcell.Move(), a);
+    ++cell_idx;
   }
 
   doc.AddMember("records", records.Move(), a);
@@ -493,64 +520,5 @@ void SurfacePathGuiding::WriteDebugData()
 #endif
 #endif
 }
-
-
-namespace kdtree
-{
-
-#ifdef HAVE_JSON
-
-namespace dump_rj_tree
-{
-using namespace rapidjson_util;
-using Alloc = rj::Document::AllocatorType;
-
-rj::Value Build(const Branch &branch, Alloc &alloc);
-rj::Value Build(const Leaf &leaf, Alloc &alloc);
-
-rj::Value Build(const Node &node, Alloc &alloc)
-{
-  if (node.is_leaf)
-    return Build(static_cast<const Leaf&>(node), alloc);
-  else
-    return Build(static_cast<const Branch&>(node), alloc);
-}
-
-rj::Value Build(const Branch &branch, Alloc &alloc)
-{
-  rj::Value v_left = Build(*branch.left, alloc);
-  rj::Value v_right = Build(*branch.right, alloc);
-  rj::Value v{ rj::kObjectType };
-  v.AddMember("kind", "branch", alloc);
-  v.AddMember("split_axis", branch.split_axis, alloc);
-  v.AddMember("split_pos", branch.split_pos, alloc);
-  v.AddMember("left", v_left.Move(), alloc);
-  v.AddMember("right", v_right.Move(), alloc);
-  return v;
-}
-
-rj::Value Build(const Leaf &leaf, Alloc &alloc)
-{
-  rj::Value v(rj::kObjectType);
-  v.AddMember("kind", "leaf", alloc);
-  v.AddMember("id", reinterpret_cast<std::size_t>(&static_cast<const CellData&>(leaf)), alloc);
-  return v;
-}
-
-}
-
-
-void Tree::DumpTo(rapidjson::Document &doc, rapidjson::Value & parent) const
-{
-  using namespace rapidjson_util;
-  auto &alloc = doc.GetAllocator();
-  parent.AddMember("tree", dump_rj_tree::Build(*root, alloc), alloc);
-}
-#endif
-
-} // namespace kdtree
-
-
-
 
 } // namespace guiding

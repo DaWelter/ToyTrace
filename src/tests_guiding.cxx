@@ -1,53 +1,142 @@
 #include "gtest/gtest.h"
 
-#include "path_guiding.hxx"
-#include "json.hxx"
+//#include "path_guiding.hxx"
+#include "path_guiding_tree.hxx"
+#include "distribution_mixture_models.hxx"
 
 using namespace guiding;
 
-TEST(Guiding, KdTree)
+namespace guiding { namespace kdtree {
+
+std::pair<Box, Box> ChildrenBoxes(const Tree &tree, Handle node, const Box &node_box)
+{
+  auto [axis, pos] = tree.Split(node);
+
+  Box leftbox{ node_box };
+  leftbox.max[axis] = pos;
+  
+
+  Box rightbox{ node_box };
+  rightbox.min[axis] = pos;
+  
+  return std::make_pair(leftbox, rightbox);
+}
+
+
+void ComputeLeafBoxes(const Tree &tree, Handle node, const Box &node_box, ToyVector<Box> &out)
+{
+  if (node.is_leaf)
+  {
+    out[node.idx] = node_box;
+  }
+  else
+  {
+    auto [left, right] = tree.Children(node);
+    auto [bl, br] = ChildrenBoxes(tree, node, node_box);
+    ComputeLeafBoxes(tree, left, bl, out);
+    ComputeLeafBoxes(tree, right, br, out);
+  }
+}
+
+
+}}  // guiding::tree
+
+
+TEST(Guiding, KdTreeAdaptation)
 {
   using namespace kdtree;
-  using namespace rapidjson_util;
 
-  std::array<Double3, 4> points{ {
-    { -1., -1., 0. },
-    { 1., -1., 0. },
-    { -1., 1., 0. },
-    { 1., 1., 0. },
+  // Tree with splits in the cell center and alternating dimension.
+  // Set up so each of these points ends up in the center of a cell.
+  std::array<Double3, 8> points{ {
+    { -1., -1., -1. },
+    { 1., -1., -1. },
+    { -1., 1., -1. },
+    { 1., 1., -1. },
+    { -1., -1., 1. },
+    { 1., -1., 1. },
+    { -1., 1., 1. },
+    { 1., 1., 1. },
   }};
+  Box rootbox;
+  rootbox.min = Double3::Constant(-2.);
+  rootbox.max = Double3::Constant(2.);
 
+  ToyVector<Box> leafboxes;
   Tree tree{};
 
   for (int iter = 0; iter < 3; ++iter)
   {
-    for (auto p : points)
-    {
-      tree.Lookup(p)->leaf_stats += p;
-    }
+    leafboxes.resize(tree.NumLeafs());
+    ComputeLeafBoxes(tree, tree.GetRoot(), rootbox, leafboxes);
 
-    AdaptParams params{
-      1, 0, // At most 1 point per leaf
+    auto SplitDecision = [&](int cellidx)
+    {
+      const int axis = 2 - iter; // Due to the point ordering. Makes the tests below more convenient.
+      // Split at center of cell.
+      const double pos = (leafboxes[cellidx].max[axis]+leafboxes[cellidx].min[axis])*0.5;
+      return std::make_pair(axis, pos);
     };
-    TreeAdaptor(params).AdaptInplace(tree);
 
-    for (auto *payload : tree.GetData())
+    TreeAdaptor adaptor(SplitDecision);
+    tree = adaptor.Adapt(tree);
+
+    // Since this builds a balanced tree ...
+    int leaf_idx = 0;
+    for (const auto &m : adaptor.GetNodeMappings())
     {
-      payload->leaf_stats = LeafStatistics{};
+      //std::cout << strconcat("map ", leaf_idx, " -> ", m.new_first, ", ", m.new_second, "\n");
+      EXPECT_EQ(m.new_first, leaf_idx*2);
+      EXPECT_EQ(m.new_second, leaf_idx*2+1);
+      leaf_idx++;
     }
   }
 
-#ifdef HAVE_JSON
-  rj::Document doc;
-  doc.SetObject();
-  tree.DumpTo(doc, doc);
-  std::cerr << ToString(doc) << std::endl;
-#endif
+  ASSERT_EQ(tree.NumLeafs(), 8);
 
-  ASSERT_EQ(tree.NumLeafs(), 4);
+  leafboxes.resize(tree.NumLeafs());
+  ComputeLeafBoxes(tree, tree.GetRoot(), rootbox, leafboxes);
+
+  int idx = 0;
+  for (auto &b : leafboxes)
+  {
+    const Double3 d = b.max - b.min;
+    const Double3 c = (b.max + b.min)*0.5;
+    EXPECT_NEAR(d[0], 2., 1.e-3);
+    EXPECT_NEAR(d[1], 2., 1.e-3);
+    EXPECT_NEAR(d[2], 2., 1.e-3);
+    //std::cout << strconcat("Box", idx, " = ", c, " +/- ", d, "\n");
+    EXPECT_NEAR(c[0], points[idx][0], 1.e-3);
+    EXPECT_NEAR(c[1], points[idx][1], 1.e-3);
+    EXPECT_NEAR(c[2], points[idx][2], 1.e-3);
+    ++idx;
+  }
 }
 
 
+TEST(Guiding, KdTreeNoopAdaptation)
+{
+  using namespace kdtree;
+
+  Tree tree{};
+
+  auto SplitDecision = [&](int cellidx)
+  {
+    return std::make_pair(-1, NaN);
+  };
+
+  TreeAdaptor adaptor(SplitDecision);
+  tree = adaptor.Adapt(tree);
+
+  ASSERT_EQ(tree.NumLeafs(), 1);
+  auto nodemap = adaptor.GetNodeMappings();
+  ASSERT_EQ(nodemap.size(), 1);
+  ASSERT_EQ(nodemap[0].new_first, 0);
+  ASSERT_EQ(nodemap[0].new_second, -1);
+}
+
+
+#if 0
 namespace 
 {
 
@@ -71,9 +160,10 @@ TEST(Guiding, StereographicProjection)
   TestProjection({0., 0.999999});
   TestProjection({0.123, 0.456});
 }
+#endif
 
 
-TEST(MOVMF, Sampling)
+TEST(Guiding, MovmfSampling)
 {
   using namespace vmf_fitting;
   VonMisesFischerMixture m;

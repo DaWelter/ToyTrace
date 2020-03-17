@@ -15,6 +15,7 @@ if(NOT WIN32)
     add_compile_options ("$<$<CONFIG:RELEASE>:-march=native>")
     add_compile_options ("$<$<CONFIG:RELEASE>:-O3>")
     add_compile_options ("$<$<CONFIG:RELWITHDEBINFO>:-march=native>")
+    add_compile_options ("$<$<CONFIG:RELWITHDEBINFO>:-fno-omit-frame-pointer>")
     #add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
     #set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address)
 else()
@@ -27,6 +28,7 @@ else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4068")  # Unkown pragma
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4099")  # pdb file not found
 endif()
+add_compile_options ("$<$<CONFIG:DEBUG>:-DEIGEN_INITIALIZE_MATRICES_BY_NAN>")
 
 # Eliminate link error caused by boost/pool/simple_segregated_storage.hpp
 # https://stackoverflow.com/questions/9723793/undefined-reference-to-boostsystemsystem-category-when-compiling
@@ -120,13 +122,17 @@ message(STATUS "Yaml-cpp LIBRARY: ${YAML_CPP_LIBRARY}")
 ### Library with common stuff 
 #################################################
 
+add_library(eigen_plugins INTERFACE)
+target_include_directories(eigen_plugins INTERFACE "src/eigen_plugins")
+
+
 add_library(commonstuff STATIC
   src/image.cxx  src/parsenff.cxx  src/shader.cxx src/ray.cxx src/sampler.cxx
   src/phasefunctions.cxx src/atmosphere.cxx src/spectral.cxx src/primitive.cxx src/renderingalgorithms.cxx 
   src/light.cxx src/texture.cxx src/embreeaccelerator.cxx src/scene.cxx src/lightpicker_trivial.cxx src/lightpicker_ucb.cxx src/renderingalgorithms_photonmap.cxx src/renderingalgorithms_pathtracing2.cxx 
   src/renderingalgorithms_normalvisualizer.cxx src/renderingalgorithms_pathtracing.cxx
-  src/rendering_util.cxx src/pathlogger.cxx src/photonintersector.cxx  external/cubature/hcubature.c
-  src/path_guiding.cxx src/renderingalgorithms_pathtracing_guided.cxx src/distribution_mixture_models.cxx)
+  src/rendering_util.cxx src/pathlogger.cxx src/photonintersector.cxx  external/cubature/hcubature.c 
+  src/path_guiding.cxx src/renderingalgorithms_pathtracing_guided.cxx src/distribution_mixture_models.cxx src/path_guiding_tree.cxx)
 
   file(GLOB headers RELATIVE ${CMAKE_SOURCE_DIR} "src/*.hxx")
 target_sources(commonstuff PRIVATE ${headers})
@@ -145,6 +151,7 @@ target_link_libraries(commonstuff
     ${YAML_CPP_LIBRARY}
     optimized ${TBB_LIBRARIES}
     debug ${TBB_DEBUG_LIBRARIES}
+    eigen_plugins
 )
 
 target_include_directories(commonstuff PUBLIC
@@ -156,6 +163,7 @@ target_include_directories(commonstuff PUBLIC
     ${YAML_CPP_INCLUDE_DIR} 
     ${TBB_INCLUDE_DIRS} 
     "external/cubature")
+
 
 #################################################
 ### Executables
@@ -170,11 +178,14 @@ if(BuildTests)
     add_executable(tests src/tests.cxx src/tests3.cxx src/tests_sampling.cxx src/tests_microfacet.cxx src/tests_stats.cxx src/tests_scene.cxx src/tests_guiding.cxx)
     add_executable(tests2 src/tests2.cxx)
     add_executable(tests_tbb src/tests_tbb.cxx)
-    
+    add_executable(experimentation src/experimentation.cxx)
+
     foreach(EXE tests tests2 tests_tbb)
       target_include_directories(${EXE} PUBLIC ${GTEST_INCLUDE_DIRS})
       target_link_libraries(${EXE} commonstuff ${GTEST_LIBRARIES})
     endforeach()
+
+    target_link_libraries(experimentation commonstuff)
 endif(BuildTests)
 
 
@@ -183,20 +194,18 @@ endif(BuildTests)
 #################################################
 
 if (BuildPythonBindings)
+  find_package(PythonInterp REQUIRED)
+  find_package(PythonLibs REQUIRED)
 
-find_package(PythonInterp REQUIRED)
-find_package(PythonLibs REQUIRED)
+  add_library(path_guiding SHARED src/path_guiding_py.cxx)
+  target_link_libraries(path_guiding commonstuff ${PYTHON_LIBRARIES})
+  target_include_directories(path_guiding PRIVATE ${PYTHON_INCLUDE_DIRS})
 
-add_library(path_guiding SHARED src/path_guiding_py.cxx)
-target_link_libraries(path_guiding commonstuff ${PYTHON_LIBRARIES})
-target_include_directories(path_guiding PRIVATE ${PYTHON_INCLUDE_DIRS})
-
-set_target_properties(
-    path_guiding
-    PROPERTIES
-        PREFIX ""
-        OUTPUT_NAME "path_guiding"
-        LINKER_LANGUAGE C
-    )
-
+  set_target_properties(
+      path_guiding
+      PROPERTIES
+          PREFIX ""
+          OUTPUT_NAME "path_guiding"
+          LINKER_LANGUAGE C
+      )
 endif(BuildPythonBindings)

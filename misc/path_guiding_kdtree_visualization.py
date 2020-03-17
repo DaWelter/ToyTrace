@@ -255,7 +255,7 @@ if __name__ == '__main__':
         # selection_filter.SetInputData(1, selection)
         # selection_filter.Update()
 
-        pd = selection_filter.GetOutput()
+        # pd = selection_filter.GetOutput()
 
         mapper = vtk.vtkPolyDataMapper()
         mapper.SetInputData(pd)

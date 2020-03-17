@@ -3,7 +3,7 @@
 
 #include <iostream>
 
-#include <eigen3/Eigen/Core>
+#include "eigen.hxx"
 #include <eigen3/Eigen/Geometry>
 #include <eigen3/Eigen/LU>
 // WARNING IMPORTANT!!!!! 
