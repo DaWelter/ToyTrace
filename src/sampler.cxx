@@ -135,14 +135,19 @@ void Sampler::Seed(std::uint64_t seed)
 void Sampler::Uniform01(double* dest, int count)
 {
   for (int i=0; i<count; ++i)
+  {
     dest[i] = generator.nextDouble();
+    assert(std::isfinite(dest[i]));
+  }
 }
 
 
 int Sampler::UniformInt(int a, int b_inclusive)
 {
-  std::uint32_t x = generator.nextUInt(b_inclusive+1 - a);
-  return a + (int)x;
+  const std::uint32_t x = generator.nextUInt(b_inclusive+1 - a);
+  const int y = a + (int)x;
+  assert(y >= a && y <= b_inclusive);
+  return y;
 }
 
 constexpr std::uint64_t Sampler::default_seed;

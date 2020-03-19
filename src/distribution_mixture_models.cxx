@@ -315,12 +315,11 @@ void InitializeForUnitDisc(GaussianMixture2d &mixture)
 namespace vmf_fitting
 {
 
-static constexpr float K_THRESHOLD = 1.e-4f;
-static constexpr float K_THRESHOLD_MAX = 1.e3f;
 
 inline Eigen::Array<float, VonMisesFischerMixture::NUM_COMPONENTS, 1> ComponentPdfs(const VonMisesFischerMixture & mixture, const Eigen::Vector3f & pos) noexcept
 {
-  const auto k = mixture.concentrations.max(K_THRESHOLD).min(K_THRESHOLD_MAX).eval();
+  const auto& k = mixture.concentrations;
+  assert((k >= K_THRESHOLD).all() && (k <= K_THRESHOLD_MAX).all());
   const auto prefactors = float(Pi)*2.f*(1.f - (-2.f*k).exp());
   const auto tmp = (k*((mixture.means.matrix() * pos).array() - 1.f)).exp();
   return (k / prefactors * tmp).eval();
@@ -336,8 +335,8 @@ float Pdf(const VonMisesFischerMixture & mixture, const Eigen::Vector3f & pos) n
 
 Eigen::Vector3f Sample(const Eigen::Vector3f& mu, float k, float r1, float r2) noexcept
 {
-  k = (k<K_THRESHOLD) ? K_THRESHOLD : k;
-  k = (k>K_THRESHOLD_MAX) ?  K_THRESHOLD_MAX : k;
+  assert (k >= K_THRESHOLD);
+  assert (k <= K_THRESHOLD_MAX);
   const float vx = std::cos((float)(Pi*2.)*r1);
   const float vy = std::sin((float)(Pi*2.)*r1);
   // if (!std::isfinite(vx) || !std::isfinite(vy))
@@ -480,6 +479,9 @@ void FitImpl::MaximizationStep(VonMisesFischerMixture & mixture, const Params &p
       mixture.concentrations[k] = post_conc;
     }
   }
+
+  mixture.concentrations = mixture.concentrations.max(K_THRESHOLD).min(K_THRESHOLD_MAX).eval();
+
   assert(mixture.weights.sum() > 0.f);
   mixture.weights /= mixture.weights.sum();
 }

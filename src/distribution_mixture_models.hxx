@@ -87,6 +87,10 @@ void InitializeForUnitDisc(GaussianMixture2d &mixture);
 namespace vmf_fitting
 {
 
+static constexpr float K_THRESHOLD = 1.e-4f;
+// Picked such that exp(-2k)>0. Otherwise we get -inf when the log is applied!
+static constexpr float K_THRESHOLD_MAX = 4.e1f; 
+
 // 320 Bytes
 struct VonMisesFischerMixture
 {
