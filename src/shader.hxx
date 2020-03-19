@@ -211,6 +211,7 @@ public:
 class HomogeneousMedium : public Medium
 {
   SpectralN sigma_s, sigma_a, sigma_ext;
+  bool is_scattering;
   Spectral3 EvaluateTransmissionHomogeneous(double x, const Spectral3 &sigma_ext) const;
 public:
   std::unique_ptr<PhaseFunctions::PhaseFunction> phasefunction; // filled by parser

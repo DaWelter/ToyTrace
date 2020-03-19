@@ -822,6 +822,7 @@ Medium::MaterialCoefficients VacuumMedium::EvaluateCoeffs(const Double3& pos, co
 
 HomogeneousMedium::HomogeneousMedium(const SpectralN& _sigma_s, const SpectralN& _sigma_a, int priority)
   : Medium(priority), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{sigma_s + sigma_a},
+    is_scattering{(_sigma_s>0.).any()},
     phasefunction{new PhaseFunctions::Uniform()}
 {
 }
@@ -841,6 +842,15 @@ ScatterSample HomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir
 
 Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, const Spectral3 &initial_weights, Sampler& sampler, const PathContext &context) const
 {
+  if (!is_scattering)
+  {
+    return Medium::InteractionSample{
+        LargeNumber,
+        Spectral3{1.},
+        Spectral3::Zero(),
+      };
+  }
+
   // Ref: Kutz et a. (2017) "Spectral and Decomposition Tracking for Rendering Heterogeneous Volumes"
   // Much simplified with constant coefficients.
   // Also, very importantly, sigma_s is not multiplied to the final weight! Compare with Algorithm 4, Line 10.
