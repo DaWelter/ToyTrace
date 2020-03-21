@@ -7,6 +7,9 @@
 
 class SimpleAtmosphereTesting;
 
+namespace materials
+{
+
 namespace Atmosphere
 {
 
@@ -124,3 +127,5 @@ std::unique_ptr<Simple> MakeSimple(const Double3 &planet_center, double radius, 
 std::unique_ptr<Tabulated> MakeTabulated(const Double3 &planet_center, double radius, const std::string &datafile, int _priority);
 
 }
+
+} // materials

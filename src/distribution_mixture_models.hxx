@@ -137,6 +137,7 @@ struct Params
 
 
 void Fit(VonMisesFischerMixture &mixture, Data &fitdata, const Params &params, Span<const Eigen::Vector3f> data, Span<const float> data_weights) noexcept;
+float GetAverageWeight(const Data &fitdata);
 
 // Large enough so that 1/eps is still finite ...
 inline static constexpr float eps = 1.e-38f;

@@ -635,6 +635,8 @@ ScatterSample SpecularDenseDielectricShader::SampleBSDF(const Double3& reverse_i
 }
 
 
+namespace materials
+{
 
 /*************************************
  * Media
@@ -656,11 +658,17 @@ Spectral3 Medium::EvaluateEmission(const Double3 &pos, const PathContext &contex
   return Spectral3::Zero();
 }
 
+OnTheLinePtr Medium::GetOnTheLine(const RaySegment &segment, const PathContext &context, MemoryArena &arena) const
+{
+  assert (!"not implemented");
+  return nullptr;
+}
 
 /*****************************************
 * Derived media classes 
 ****************************************/
 
+#if 0
 EmissiveDemoMedium::EmissiveDemoMedium(double _sigma_s, double _sigma_a, double extra_emission_multiplier_, double temperature, const Double3 &pos_, double radius_, int priority)
   : Medium(priority, true), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{_sigma_s + _sigma_a}, spectrum{Color::MaxwellBoltzmanDistribution(temperature)}, pos{pos_}, radius{radius_}
 {
@@ -757,7 +765,7 @@ Medium::MaterialCoefficients EmissiveDemoMedium::EvaluateCoeffs(const Double3& p
 {
   throw std::runtime_error("not implemented");
 }
-
+#endif
 
 ////////////////////////////////////////////////////////////
 Spectral3 VacuumMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, const PathContext &context, double* pdf) const
@@ -817,11 +825,17 @@ Medium::MaterialCoefficients VacuumMedium::EvaluateCoeffs(const Double3& pos, co
   };
 }
 
+namespace {
+inline MediumFlags MakeFlags(const SpectralN& _sigma_s, const SpectralN& _sigma_a)
+{
+  return ((_sigma_s>0.).any() ? IS_SCATTERING : MediumFlags(0)) | IS_HOMOGENEOUS |
+    (_sigma_s.isConstant(_sigma_s[0], Epsilon) ? IS_MONOCHROMATIC : MediumFlags(0));
 
-
+}
+}
 
 HomogeneousMedium::HomogeneousMedium(const SpectralN& _sigma_s, const SpectralN& _sigma_a, int priority)
-  : Medium(priority), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{sigma_s + sigma_a},
+  : Medium(priority, MakeFlags(_sigma_s, sigma_a)), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{sigma_s + sigma_a},
     is_scattering{(_sigma_s>0.).any()},
     phasefunction{new PhaseFunctions::Uniform()}
 {
@@ -960,11 +974,17 @@ Medium::MaterialCoefficients HomogeneousMedium::EvaluateCoeffs(const Double3& po
 
 
 
+namespace {
+inline MediumFlags MakeFlags(const double _sigma_s, const double _sigma_a)
+{
+  return ((_sigma_s>0.) ? IS_SCATTERING : MediumFlags(0)) | IS_HOMOGENEOUS | IS_MONOCHROMATIC;
 
+}
+}
 
 
 MonochromaticHomogeneousMedium::MonochromaticHomogeneousMedium(double _sigma_s, double _sigma_a, int priority)
-  : Medium(priority), sigma_s{_sigma_s}, sigma_ext{_sigma_s + _sigma_a},
+  : Medium(priority, MakeFlags(_sigma_s, _sigma_a)), sigma_s{_sigma_s}, sigma_ext{_sigma_s + _sigma_a},
     phasefunction{new PhaseFunctions::Uniform()}
 {
 }
@@ -1027,3 +1047,4 @@ Medium::MaterialCoefficients MonochromaticHomogeneousMedium::EvaluateCoeffs(cons
   };
 }
 
+} // namespace materials

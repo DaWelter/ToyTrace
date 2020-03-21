@@ -495,6 +495,12 @@ inline float FitImpl::MeanCosineToConc(float r) noexcept
 }
 
 
+float GetAverageWeight(const Data &fitdata)
+{
+  return fitdata.avg_weights;
+}
+
+
 } // namespace incremental
 
 

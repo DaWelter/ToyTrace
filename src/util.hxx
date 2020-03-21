@@ -293,9 +293,12 @@ struct iter_pair : std::pair<I, I>
 };
 
 
+template<class T,int alignment>
+using AlignedAllocator = boost::alignment::aligned_allocator<T, alignment>;
+
 // std::vector with 16 byte aligment as required by Eigen's fixed size types.
 // This class also comes with range checking in debug mode.
-template<class T, class Alloc = boost::alignment::aligned_allocator<T, 16>>
+template<class T, class Alloc = AlignedAllocator<T, 16>>
 class ToyVector : public std::vector<T, Alloc>
 {
   using B = std::vector<T, Alloc>;

@@ -11,12 +11,15 @@
 #include "shader_util.hxx"
 #include "util.hxx"
 
+namespace materials
+{
+
 namespace Atmosphere
 {
 
 template<class ConstituentDistribution_, class Geometry_>
 AtmosphereTemplate<ConstituentDistribution_, Geometry_>::AtmosphereTemplate(const Geometry &geometry_, const ConstituentDistribution &constituents_, int _priority)
-  : Medium(_priority),
+  : Medium(_priority, IS_SCATTERING),
     geometry{geometry_},
     constituents{constituents_},
     phasefunction_hg(0.7) // or 0.76? Peter Kutz used 0.7
@@ -452,4 +455,6 @@ std::unique_ptr<Tabulated> MakeTabulated(const Double3 &planet_center, double ra
 }
 
 
-}
+} // atmosphere
+ 
+} // materials

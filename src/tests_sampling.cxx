@@ -29,6 +29,8 @@
 #include "embreeaccelerator.hxx"
 #include "cubature.h"
 
+using namespace materials;
+
 
 inline void ExpectNear(const Spectral3 &a, const Spectral3 &b, double tol)
 {

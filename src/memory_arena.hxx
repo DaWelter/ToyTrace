@@ -1,3 +1,5 @@
+#pragma once
+
 #include <memory>
 #include <memory_resource>
 
@@ -14,17 +16,28 @@ namespace util
 // ???
 class MemoryArena
 {
+  private:
+    // Compiler did not like my Lambda ...
+    struct Deleter
+    {
+      template<class T>
+      void operator()(T* p) { std::destroy_at(p); }
+    };
+
   public:
     MemoryArena(size_t initial_size)
       : buffer_resource{initial_size}
       {}
 
+    template<class T>
+    using unique_ptr = std::unique_ptr<T, Deleter>;
+
     template<class T, class... Args>
-    auto MakeUnique(Args&&... args)
+    unique_ptr<T> MakeUnique(Args&&... args)
     {
         auto* p = GetAllocator<T>().allocate(1);
         ::new (static_cast<void*>(p)) T(std::forward<Args>(args)...);
-        return std::unique_ptr<T, Deleter>(p, Deleter());
+        return unique_ptr<T>(p, Deleter());
     }
 
     void Release()
@@ -41,14 +54,6 @@ class MemoryArena
     {
       return Allocator<T>{&buffer_resource};
     }
-
-    // Compiler did not like my Lambda ...
-    struct Deleter
-    {
-      template<class T>
-      void operator()(T* p) { std::destroy_at(p); }
-    };
-
   private:
     std::pmr::monotonic_buffer_resource buffer_resource;
 };

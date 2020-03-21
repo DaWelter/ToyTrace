@@ -2,8 +2,10 @@
 #define SHADER_HXX
 
 #include <memory>
+#include <type_traits>
 
 #include "shader_util.hxx"
+#include "memory_arena.hxx"
 
 
 struct TagScatterSample {};
@@ -123,6 +125,49 @@ public:
   Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 };
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Media
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+namespace materials
+{
+
+enum MediumFlags : int
+{
+  IS_SCATTERING = 1,
+  IS_EMISSIVE = 2,
+  IS_MONOCHROMATIC = 4,
+  IS_HOMOGENEOUS = 8
+};
+
+inline constexpr MediumFlags operator | (MediumFlags lhs, MediumFlags rhs) noexcept
+{
+    // Good tip from https://softwareengineering.stackexchange.com/questions/194412/using-scoped-enums-for-bit-flags-in-c
+    using T = std::underlying_type_t <MediumFlags>;
+    return static_cast<MediumFlags>(static_cast<T>(lhs) | static_cast<T>(rhs));
+}
+
+struct MediaCoefficients
+{
+  Spectral3 sigma_s;
+  Spectral3 sigma_t;
+};
+
+using PhaseFunctionPtr = util::MemoryArena::unique_ptr<PhaseFunctions::PhaseFunction>;
+
+class OnTheLine
+{
+  public:
+
+    virtual void AdvancePointer(double dt) = 0;
+    virtual MediaCoefficients GetCoefficients() const = 0;
+    // Needed here because the phase function in the atmospheric model depends on the local composition!
+    virtual PhaseFunctionPtr AllocatePhaseFunction(util::MemoryArena &arena) = 0;
+};
+
+using OnTheLinePtr = util::MemoryArena::unique_ptr<OnTheLine>;
+using MemoryArena = util::MemoryArena;
+
 
 /* Good reference for path tracing with emissive volumes:
     Raab et. al (2008) "Unbiased global illumination with participating media" */
@@ -141,22 +186,26 @@ public:
     Spectral3 sigma_s;
   };
   using PhaseSample = ScatterSample;
-  
+  using MaterialCoefficients = materials::MediaCoefficients;
+
   struct VolumeSample
   {
     Double3 pos;
   };
-  
-  struct MaterialCoefficients
-  {
-    Spectral3 sigma_s;
-    Spectral3 sigma_t;
-  };
-  
+ 
   const bool is_emissive;
+  const bool is_scattering;
+  const bool is_monochromatic;
+  const bool is_homogeneous;
   const int priority;
-  Medium(int _priority, bool is_emissive_ = false) : is_emissive{is_emissive_}, priority(_priority) {}
+  Medium(int _priority, MediumFlags flags) : 
+    is_emissive(flags & IS_EMISSIVE),
+    is_scattering(flags & IS_SCATTERING),
+    is_monochromatic(flags & IS_MONOCHROMATIC),
+    is_homogeneous(flags & IS_HOMOGENEOUS), priority(_priority) {}
   virtual ~Medium() {}
+
+  virtual OnTheLinePtr GetOnTheLine(const RaySegment &segment, const PathContext &context, MemoryArena &arena) const;
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, const Spectral3 &initial_weights, Sampler &sampler, const PathContext &context) const = 0;
   virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const = 0;
   virtual void ConstructShortBeamTransmittance(const RaySegment &segment, Sampler &sampler, const PathContext &context, PiecewiseConstantTransmittance &pct) const = 0;
@@ -168,6 +217,7 @@ public:
   virtual MaterialCoefficients EvaluateCoeffs(const Double3 &pos, const PathContext &context) const = 0;
 };
 
+#if 0
 /* An emissive ball. The geometry of the ball is specified here because I don't have a general
  * boundary representation which would support generating photons within it's volume. So this medium
  * class needs all the details. Using this info, it does the geometric calculations to sample the photon positions.
@@ -192,12 +242,12 @@ public:
   virtual Spectral3 EvaluateEmission(const Double3 &pos, const PathContext &context, double *pos_pdf) const override;
   virtual MaterialCoefficients EvaluateCoeffs(const Double3 &pos, const PathContext &context) const override;
 };
-
+#endif
 
 class VacuumMedium : public Medium
 {
 public:
-  VacuumMedium(int priority = -1) : Medium(priority) {}
+  VacuumMedium(int priority = -1) : Medium(priority, IS_MONOCHROMATIC|IS_HOMOGENEOUS) {}
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, const Spectral3 &initial_weights, Sampler &sampler, const PathContext &context) const override;
   virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const override;
   virtual void ConstructShortBeamTransmittance(const RaySegment &segment, Sampler &sampler, const PathContext &context, PiecewiseConstantTransmittance &pct) const override;
@@ -242,6 +292,12 @@ public:
   virtual Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
   virtual MaterialCoefficients EvaluateCoeffs(const Double3 &pos, const PathContext &context) const override;
 };
+
+
+}  // materials
+
+
+using materials::Medium;
 
 
 #endif

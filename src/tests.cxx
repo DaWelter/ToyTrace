@@ -27,6 +27,7 @@
 #include "lightpicker_ucb.hxx"
 #include "memory_arena.hxx"
 
+using namespace materials;
 
 TEST(TestRaySegment, ExprTemplates)
 {
@@ -784,8 +785,7 @@ TEST_F(TextureLoadTest, Float3Chn)
   CompareTexture(Texture("testing/scenes/texloadtest2.exr"), 2, 5, expected);
 }
 
-
-namespace Atmosphere
+namespace materials { namespace Atmosphere
 {
 
 TEST(SimpleAtmosphereTest, Altitude)
@@ -870,7 +870,7 @@ TEST(AtmosphereTest, LoadTabulatedData)
 }
 #endif
 
-}
+} } // materials::atmosphere
 
 
 TEST(Misc, Sample)

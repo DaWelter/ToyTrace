@@ -68,6 +68,9 @@ SurfacePathGuiding::SurfacePathGuiding(const Box &region, double cellwidth, cons
   auto& cell = cell_data.emplace_back();
   vmf_fitting::InitializeForUnitSphere(cell.mixture_learned);
   vmf_fitting::InitializeForUnitSphere(cell.mixture_sampled);
+  cell.index = 0;
+  cell.cell_size = region.max - region.min;
+  cell.incident_flux_density = 1.;
 }
 
 
@@ -132,12 +135,12 @@ void SurfacePathGuiding::AddSample(
 {
     auto BufferMaybeSendOffSample = [&tl,this](const CellData &cell, const Record &rec)
     {
-      auto& sample_buffer = tl.records_by_cells[cell.num];
+      auto& sample_buffer = tl.records_by_cells[cell.index];
       sample_buffer.push_back(rec);
 
       if (sample_buffer.size() >= CELL_BUFFER_SIZE)
       {
-        Enqueue(cell.num, sample_buffer);
+        Enqueue(cell.index, sample_buffer);
       }
     };
 
@@ -361,13 +364,7 @@ void SurfacePathGuiding::PrepareAdaptedStructures()
     kdtree::TreeAdaptor adaptor(DetermineSplit);
     recording_tree = adaptor.Adapt(recording_tree);
   
-    ToyVector<CellData> new_data(recording_tree.NumLeafs());
-
-    {
-      int i =0;  
-      for (auto &cd : new_data)
-        cd.num = i++;
-    }
+    decltype(cell_data) new_data(recording_tree.NumLeafs());
 
     // This should initialize all sampling mixtures with
     // the previously learned ones. If node is split, assignment
@@ -379,11 +376,15 @@ void SurfacePathGuiding::PrepareAdaptedStructures()
       {
         new_data[m.new_first].mixture_sampled = cell_data[i].mixture_learned;
         new_data[m.new_first].mixture_learned = cell_data[i].mixture_learned;
+        new_data[m.new_first].incident_flux_density = vmf_fitting::incremental::GetAverageWeight(cell_data[i].fitdata);
+        new_data[m.new_first].index = m.new_first;
       }
       if (m.new_second >= 0)
       {
         new_data[m.new_second].mixture_sampled = cell_data[i].mixture_learned;
         new_data[m.new_second].mixture_learned = cell_data[i].mixture_learned;
+        new_data[m.new_second].incident_flux_density = vmf_fitting::incremental::GetAverageWeight(cell_data[i].fitdata);
+        new_data[m.new_second].index = m.new_second;
       }
       ++i;
     }

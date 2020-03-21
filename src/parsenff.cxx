@@ -211,6 +211,8 @@ Scope NFFParser::CreateScope()
 
 void NFFParser::Parse(Scope &scope)
 {
+  using namespace materials;
+
   char token[LINESIZE+1];
   while (NextLine())
   {
@@ -630,7 +632,7 @@ void NFFParser::Parse(Scope &scope)
       continue;
     }
     
-    
+#if 0
     if (!strcmp(token, "emissivedemomedium"))
     {
       double sigma_s, sigma_a, temperature;
@@ -647,6 +649,7 @@ void NFFParser::Parse(Scope &scope)
       else throw MakeException("Error");
       continue;
     }
+#endif
     
     if (!strcmp(token, "vacuummedium"))
     {

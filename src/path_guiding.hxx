@@ -37,6 +37,7 @@ struct RenderingParameters;
 namespace guiding
 {
 
+inline static constexpr int CACHE_LINE_SIZE = 64;
 boost::filesystem::path GetDebugFilePrefix();
 
 using Color::Spectral3f;
@@ -128,11 +129,12 @@ struct CellData
 {
     CellData() = default;
     
-    vmf_fitting::VonMisesFischerMixture mixture_sampled;
+    alignas (CACHE_LINE_SIZE) vmf_fitting::VonMisesFischerMixture mixture_sampled;
     Double3 cell_size = Double3::Constant(NaN);
-    int num = 0;
+    double incident_flux_density{0.};
+    int index{-1};
 
-    vmf_fitting::VonMisesFischerMixture mixture_learned;
+    alignas (CACHE_LINE_SIZE) vmf_fitting::VonMisesFischerMixture mixture_learned;
     vmf_fitting::incremental::Data fitdata;
     LeafStatistics leaf_stats;
 };
@@ -223,7 +225,7 @@ class SurfacePathGuiding
 
         Box region;
         kdtree::Tree recording_tree;
-        ToyVector<CellData> cell_data;
+        ToyVector<CellData, AlignedAllocator<CellData, CACHE_LINE_SIZE>> cell_data;
         std::unique_ptr<CellDataTemporary[]> cell_data_temp;
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
         std::unique_ptr<CellDebug[]> cell_data_debug;
@@ -239,7 +241,6 @@ class SurfacePathGuiding
         tbb::task_arena *the_task_arena;
         tbb::task_group the_task_group;
 };
-
 
 
 } // namespace guiding

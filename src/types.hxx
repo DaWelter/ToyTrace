@@ -12,10 +12,12 @@ using MediumIndex = very_strong_typedef<short, tag_MaterialIndex>;
 inline static constexpr size_t MAX_NUM_MATERIALS = std::numeric_limits<short>::max();
 
 class Shader;
-class Medium;
 class Scene;
 class Shader;
-class Medium;
+namespace materials {
+    class Medium;
+}
+using materials::Medium;
 class Camera;
 class Sampler;
 class Geometry;

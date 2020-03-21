@@ -10,7 +10,7 @@
 Scene::Scene()
     : camera(nullptr)
 { 
-    auto vac_medium = std::make_unique<VacuumMedium>();
+    auto vac_medium = std::make_unique<materials::VacuumMedium>();
     auto inv_shader = std::make_unique<InvisibleShader>();
     auto def_shader = std::make_unique<DiffuseShader>(Color::RGBToSpectrum({0.8_rgb, 0.8_rgb, 0.8_rgb}), nullptr);
     this->empty_space_medium = vac_medium.get();
