@@ -9,6 +9,8 @@
 
 #include <tbb/parallel_for_each.h>
 
+#include <range/v3/view/enumerate.hpp>
+
 #ifdef _MSC_VER
 static const char* DEBUG_FILE_PREFIX = "D:\\tmp2\\";
 #else
@@ -149,14 +151,12 @@ void SurfacePathGuiding::AddSample(
     auto& cell = LookupCellData(surface.pos);
     BufferMaybeSendOffSample(cell, rec);
 
-    for (int i = 0; i < 1; ++i)
-    {
-      const auto new_rec = ComputeStochasticFilterPosition(rec, cell, sampler);
 
-      auto& other_cell = LookupCellData(new_rec.pos);
-      if (&other_cell != &cell)
-        BufferMaybeSendOffSample(other_cell, new_rec);
-    }
+    const auto new_rec = ComputeStochasticFilterPosition(rec, cell, sampler);
+
+    auto& other_cell = LookupCellData(new_rec.pos);
+    if (&other_cell.index != &cell.index)
+      BufferMaybeSendOffSample(other_cell, new_rec);
 }
 
 
@@ -169,10 +169,10 @@ SurfacePathGuiding::Record SurfacePathGuiding::ComputeStochasticFilterPosition(c
   }
 
   {
-    const double prob = 0.1;
-    const double pdf = vmf_fitting::Pdf(cd.mixture_sampled, rec.reverse_incident_dir);
-    const double a = -prob/(pdf*2.*Pi + 1.e-9) + 1.;
-    const double scatter_open_angle = std::min(std::max(a, -1.), 1.);
+    const float prob = 0.1f;
+    const float pdf = vmf_fitting::Pdf(cd.mixture_sampled, rec.reverse_incident_dir);
+    const float a = -prob/(pdf*float(2.*Pi) + 1.e-9f) + 1.f;
+    const float scatter_open_angle = std::min(std::max(a, -1.f), 1.f);
     Double3 scatter_offset = SampleTrafo::ToUniformSphereSection(scatter_open_angle, sampler.UniformUnitSquare());
     new_rec.reverse_incident_dir = OrthogonalSystemZAligned(rec.reverse_incident_dir) * scatter_offset.cast<float>();
   }
@@ -369,8 +369,8 @@ void SurfacePathGuiding::PrepareAdaptedStructures()
     // This should initialize all sampling mixtures with
     // the previously learned ones. If node is split, assignment
     // is done to both children.
-    int i = 0;
-    for (auto m : adaptor.GetNodeMappings())
+    auto bla = adaptor.GetNodeMappings();
+    for (const auto [i, m] : ranges::views::enumerate(bla))
     {
       if (m.new_first >=0)
       {
@@ -386,7 +386,6 @@ void SurfacePathGuiding::PrepareAdaptedStructures()
         new_data[m.new_second].incident_flux_density = vmf_fitting::incremental::GetAverageWeight(cell_data[i].fitdata);
         new_data[m.new_second].index = m.new_second;
       }
-      ++i;
     }
 
     cell_data = std::move(new_data);
@@ -477,12 +476,11 @@ void SurfacePathGuiding::WriteDebugData()
 
   auto &a = doc.GetAllocator();
 
-  int cell_idx = 0;
   for (const auto cd : cell_data)
   {
     //std::cout << "cell " << idx << " contains" << celldata.incident_radiance.size() << " records " << std::endl;
     rj::Value jcell(rj::kObjectType);
-    jcell.AddMember("id", cell_idx, a);
+    jcell.AddMember("id", cd.index, a);
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
     jcell.AddMember("filename", ToJSON(cell_data_debug[cd->num].GetFilename(), a), a);
 #endif
@@ -508,7 +506,6 @@ void SurfacePathGuiding::WriteDebugData()
     jcell.AddMember("mixture_sampled", ToJSON(cd.mixture_sampled, a), a);
 
     records.PushBack(jcell.Move(), a);
-    ++cell_idx;
   }
 
   doc.AddMember("records", records.Move(), a);
