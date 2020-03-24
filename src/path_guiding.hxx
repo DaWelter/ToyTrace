@@ -128,15 +128,27 @@ static_assert(sizeof(tbb::spin_mutex) <= 16);
 struct CellData
 {
     CellData() = default;
-    
-    alignas (CACHE_LINE_SIZE) vmf_fitting::VonMisesFischerMixture mixture_sampled;
-    Double3 cell_size = Double3::Constant(NaN);
-    double incident_flux_density{0.};
-    int index{-1};
 
-    alignas (CACHE_LINE_SIZE) vmf_fitting::VonMisesFischerMixture mixture_learned;
-    vmf_fitting::incremental::Data fitdata;
-    LeafStatistics leaf_stats;
+    CellData(const CellData &) = delete;
+    CellData& operator=(const CellData &) = delete;
+    
+    CellData(CellData &&) = default;
+    CellData& operator=(CellData &&) = default;
+
+    alignas (CACHE_LINE_SIZE) struct CurrentEstimate {
+      // Normalized to the total incident flux. So radiance_distribution(w) * incident_flux_density is the actual radiance from direction w.
+      vmf_fitting::VonMisesFischerMixture radiance_distribution;
+      Double3 cell_size = Double3::Constant(NaN);
+      double incident_flux_density{0.};
+    } current_estimate;
+    
+    int index = -1;
+
+    alignas (CACHE_LINE_SIZE) struct Learned { 
+      vmf_fitting::VonMisesFischerMixture radiance_distribution;
+      vmf_fitting::incremental::Data fitdata;
+      LeafStatistics leaf_stats;
+    } learned;
 };
 
 

@@ -68,11 +68,11 @@ SurfacePathGuiding::SurfacePathGuiding(const Box &region, double cellwidth, cons
     the_task_arena{ &the_task_arena }
 {
   auto& cell = cell_data.emplace_back();
-  vmf_fitting::InitializeForUnitSphere(cell.mixture_learned);
-  vmf_fitting::InitializeForUnitSphere(cell.mixture_sampled);
+  vmf_fitting::InitializeForUnitSphere(cell.current_estimate.radiance_distribution);
+  vmf_fitting::InitializeForUnitSphere(cell.learned.radiance_distribution);
   cell.index = 0;
-  cell.cell_size = region.max - region.min;
-  cell.incident_flux_density = 1.;
+  cell.current_estimate.cell_size = region.max - region.min;
+  cell.current_estimate.incident_flux_density = 1.;
 }
 
 
@@ -84,7 +84,7 @@ CellData& SurfacePathGuiding::LookupCellData(const Double3 &p)
 
 const vmf_fitting::VonMisesFischerMixture* SurfacePathGuiding::FindSamplingMixture(const Double3 &p) const
 {
-    return &cell_data[recording_tree.Lookup(p)].mixture_sampled;
+    return &cell_data[recording_tree.Lookup(p)].current_estimate.radiance_distribution;
 }
 
 
@@ -165,12 +165,12 @@ SurfacePathGuiding::Record SurfacePathGuiding::ComputeStochasticFilterPosition(c
   Record new_rec{rec};
   for (int axis = 0; axis < 3; ++axis)
   {
-    new_rec.pos[axis] += 2.*Lerp(-cd.cell_size[axis], cd.cell_size[axis], sampler.Uniform01());
+    new_rec.pos[axis] += 2.*Lerp(-cd.current_estimate.cell_size[axis], cd.current_estimate.cell_size[axis], sampler.Uniform01());
   }
 
   {
     const float prob = 0.1f;
-    const float pdf = vmf_fitting::Pdf(cd.mixture_sampled, rec.reverse_incident_dir);
+    const float pdf = vmf_fitting::Pdf(cd.current_estimate.radiance_distribution, rec.reverse_incident_dir);
     const float a = -prob/(pdf*float(2.*Pi) + 1.e-9f) + 1.f;
     const float scatter_open_angle = std::min(std::max(a, -1.f), 1.f);
     Double3 scatter_offset = SampleTrafo::ToUniformSphereSection(scatter_open_angle, sampler.UniformUnitSquare());
@@ -227,19 +227,19 @@ void SurfacePathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRa
   params.prior_alpha = param_prior_strength;
   params.prior_nu = param_prior_strength;
   params.prior_tau = 0.1*param_prior_strength;
-  params.prior_mode = &cell.mixture_sampled;
+  params.prior_mode = &cell.current_estimate.radiance_distribution;
 
   for (const auto &in : buffer)
   {
     //if (in.is_original)
-    cell.leaf_stats += in.pos;
+    cell.learned.leaf_stats += in.pos;
     //else
     //if (in.is_original)
     {
       float weight = in.weight;
       const auto xs = Span<const Eigen::Vector3f>(&in.reverse_incident_dir, 1);
       const auto ws = Span<const float>(&weight, 1);
-      incremental::Fit(cell.mixture_learned, cell.fitdata, params, xs, ws);
+      incremental::Fit(cell.learned.radiance_distribution, cell.learned.fitdata, params, xs, ws);
     }
   }
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
@@ -321,7 +321,7 @@ void ComputeLeafBoxes(const Tree &tree, Handle node, const Box &node_box, Span<C
   if (node.is_leaf)
   {
     // Assign lateral extents.
-    out[node.idx].cell_size = (node_box.max - node_box.min);
+    out[node.idx].current_estimate.cell_size = (node_box.max - node_box.min);
   }
   else
   {
@@ -345,7 +345,7 @@ void SurfacePathGuiding::PrepareAdaptedStructures()
     auto DetermineSplit = [this, max_samples_per_cell](int cell_idx) -> std::pair<int, double>
     {
       // If too many samples fell into this cell -> split it at the sample's centroid.
-      const auto& stats = cell_data[cell_idx].leaf_stats;
+      const auto& stats = cell_data[cell_idx].learned.leaf_stats;
       if (stats.Count() > max_samples_per_cell)
       {
         const auto mean = stats.Mean();
@@ -374,16 +374,16 @@ void SurfacePathGuiding::PrepareAdaptedStructures()
     {
       if (m.new_first >=0)
       {
-        new_data[m.new_first].mixture_sampled = cell_data[i].mixture_learned;
-        new_data[m.new_first].mixture_learned = cell_data[i].mixture_learned;
-        new_data[m.new_first].incident_flux_density = vmf_fitting::incremental::GetAverageWeight(cell_data[i].fitdata);
+        new_data[m.new_first].current_estimate.radiance_distribution = cell_data[i].learned.radiance_distribution;
+        new_data[m.new_first].learned.radiance_distribution          = cell_data[i].learned.radiance_distribution;
+        new_data[m.new_first].current_estimate.incident_flux_density = vmf_fitting::incremental::GetAverageWeight(cell_data[i].learned.fitdata);
         new_data[m.new_first].index = m.new_first;
       }
       if (m.new_second >= 0)
       {
-        new_data[m.new_second].mixture_sampled = cell_data[i].mixture_learned;
-        new_data[m.new_second].mixture_learned = cell_data[i].mixture_learned;
-        new_data[m.new_second].incident_flux_density = vmf_fitting::incremental::GetAverageWeight(cell_data[i].fitdata);
+        new_data[m.new_second].current_estimate.radiance_distribution = cell_data[i].learned.radiance_distribution;
+        new_data[m.new_second].learned.radiance_distribution = cell_data[i].learned.radiance_distribution;
+        new_data[m.new_second].current_estimate.incident_flux_density = vmf_fitting::incremental::GetAverageWeight(cell_data[i].learned.fitdata);
         new_data[m.new_second].index = m.new_second;
       }
     }
@@ -476,7 +476,7 @@ void SurfacePathGuiding::WriteDebugData()
 
   auto &a = doc.GetAllocator();
 
-  for (const auto cd : cell_data)
+  for (const auto &cd : cell_data)
   {
     //std::cout << "cell " << idx << " contains" << celldata.incident_radiance.size() << " records " << std::endl;
     rj::Value jcell(rj::kObjectType);
@@ -485,11 +485,11 @@ void SurfacePathGuiding::WriteDebugData()
     jcell.AddMember("filename", ToJSON(cell_data_debug[cd->num].GetFilename(), a), a);
 #endif
     auto[mean, stddev] = [&]() {
-      if (cd.leaf_stats.Count())
+      if (cd.learned.leaf_stats.Count())
       {
         return std::make_pair(
-          cd.leaf_stats.Mean(),
-          cd.leaf_stats.Stddev());
+          cd.learned.leaf_stats.Mean(),
+          cd.learned.leaf_stats.Stddev());
       }
       else
       {
@@ -498,12 +498,12 @@ void SurfacePathGuiding::WriteDebugData()
     }();
     jcell.AddMember("point_distribution_statistics_mean", ToJSON(mean, a), a);
     jcell.AddMember("point_distribution_statistics_stddev", ToJSON(stddev, a), a);
-    jcell.AddMember("size", ToJSON(cd.cell_size, a), a);
-    jcell.AddMember("num_points", cd.leaf_stats.Count(), a);
-    jcell.AddMember("average_weight", cd.fitdata.avg_weights, a);
+    jcell.AddMember("size", ToJSON(cd.current_estimate.cell_size, a), a);
+    jcell.AddMember("num_points", cd.learned.leaf_stats.Count(), a);
+    jcell.AddMember("average_weight", cd.learned.fitdata.avg_weights, a);
 
-    jcell.AddMember("mixture_learned", ToJSON(cd.mixture_learned, a), a);
-    jcell.AddMember("mixture_sampled", ToJSON(cd.mixture_sampled, a), a);
+    jcell.AddMember("mixture_learned", ToJSON(cd.learned.radiance_distribution, a), a);
+    jcell.AddMember("mixture_sampled", ToJSON(cd.current_estimate.radiance_distribution, a), a);
 
     records.PushBack(jcell.Move(), a);
   }
