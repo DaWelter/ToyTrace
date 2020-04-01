@@ -82,21 +82,9 @@ CellData& SurfacePathGuiding::LookupCellData(const Double3 &p)
 }
 
 
-const vmf_fitting::VonMisesFischerMixture* SurfacePathGuiding::FindSamplingMixture(const Double3 &p) const
+const SurfacePathGuiding::RadianceEstimate& SurfacePathGuiding::FindRadianceEstimate(const Double3 &p) const
 {
-    return &cell_data[recording_tree.Lookup(p)].current_estimate.radiance_distribution;
-}
-
-
-namespace {
-SurfacePathGuiding::Record MakeSampleRecord(const SurfaceInteraction &surface, const Double3 &reverse_incident_dir, const Spectral3 &radiance)
-{
-  return {
-        surface.pos,
-        reverse_incident_dir.cast<float>(),
-        radiance.cast<float>().sum()
-  };
-}
+    return cell_data[recording_tree.Lookup(p)].current_estimate;
 }
 
 
@@ -132,7 +120,7 @@ void  SurfacePathGuiding::Enqueue(int cell_num, ToyVector<Record> &sample_buffer
 
 
 void SurfacePathGuiding::AddSample(
-  ThreadLocal& tl, const SurfaceInteraction &surface,
+  ThreadLocal& tl, const Double3 &pos,
   Sampler &sampler, const Double3 &reverse_incident_dir, const Spectral3 &radiance)
 {
     auto BufferMaybeSendOffSample = [&tl,this](const CellData &cell, const Record &rec)
@@ -146,11 +134,14 @@ void SurfacePathGuiding::AddSample(
       }
     };
 
-    auto rec = MakeSampleRecord(surface, reverse_incident_dir, radiance);
+    auto rec = Record{
+            pos,
+            reverse_incident_dir.cast<float>(),
+            radiance.cast<float>().sum(),
+    };
 
-    auto& cell = LookupCellData(surface.pos);
+    auto& cell = LookupCellData(pos);
     BufferMaybeSendOffSample(cell, rec);
-
 
     const auto new_rec = ComputeStochasticFilterPosition(rec, cell, sampler);
 

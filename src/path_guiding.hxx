@@ -70,46 +70,6 @@ void FreeSpan(Span<T> &v)
 }
 
 
-
-
-template<class T>
-inline Vec<T,2> StereographicProjection(const Vec<T,3> &p) noexcept
-{
-    // https://en.wikipedia.org/wiki/Stereographic_projection
-    // except I flip the z direction
-    Vec<T,2> xy{ p[0], p[1] };
-    xy /= T(1)+p[2];
-    return xy;
-}
-
-
-template<class T>
-inline Vec<T,3> InvStereographicProjection(const Vec<T,2> &p) noexcept
-{
-    // https://en.wikipedia.org/wiki/Stereographic_projection
-    // except I flip the z direction
-    T rec_denom = T(1)/(T(1) + Sqr(p[0]) + Sqr(p[1]));
-    return Vec<T,3>{
-      T(2)*rec_denom*p[0],
-      T(2)*rec_denom*p[1],
-      -rec_denom*(T(-1) + Sqr(p[0]) + Sqr(p[1]))
-    };
-}
-
-// See https://en.wikipedia.org/wiki/Stereographic_projection
-// This function returns 
-//                         dx dy
-//                         ------ = Det(J JT) (??)
-//                           dA
-// So I can compute p(v) = dx dy / dA p(x,y)
-inline float StereoprojectionJacobianDet(const Float2 &p) noexcept
-{
-  float tmp = 0.5f*(1.f + Sqr(p[0]) + Sqr(p[1]));
-  return tmp * tmp;
-}
-
-
-
 struct IncidentRadiance
 {
     Double3 pos;
@@ -204,6 +164,7 @@ class SurfacePathGuiding
     public:
         using Record = IncidentRadiance;
         using RecordBuffer = ToyVector<Record>;
+        using RadianceEstimate = CellData::CurrentEstimate;
 
         struct ThreadLocal 
         {
@@ -216,11 +177,12 @@ class SurfacePathGuiding
         void WriteDebugData();
 
         void AddSample(
-          ThreadLocal& tl, const SurfaceInteraction &surface, 
+          ThreadLocal& tl, const Double3 &pos, 
           Sampler &sampler, const Double3 &reverse_incident_dir, 
           const Spectral3 &radiance);
 
-        const vmf_fitting::VonMisesFischerMixture* FindSamplingMixture(const Double3 &p) const;
+        
+        const RadianceEstimate& FindRadianceEstimate(const Double3 &p) const;
 
         void FinalizeRound(Span<ThreadLocal*> thread_locals);
 

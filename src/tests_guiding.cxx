@@ -1,12 +1,19 @@
 #include "gtest/gtest.h"
 
+#include <range/v3/view/enumerate.hpp>
+
 //#include "path_guiding.hxx"
 #include "path_guiding_tree.hxx"
 #include "distribution_mixture_models.hxx"
+#include "json.hxx"
 
 using namespace guiding;
 
-namespace guiding { namespace kdtree {
+
+namespace {
+
+using namespace guiding::kdtree;
+
 
 std::pair<Box, Box> ChildrenBoxes(const Tree &tree, Handle node, const Box &node_box)
 {
@@ -39,7 +46,81 @@ void ComputeLeafBoxes(const Tree &tree, Handle node, const Box &node_box, ToyVec
 }
 
 
-}}  // guiding::tree
+auto BuildTree(ToyVector<int> split_axes)
+{
+  Box rootbox;
+  rootbox.min = Double3::Constant(-4.);
+  rootbox.max = Double3::Constant(4.);
+
+  ToyVector<Box> leafboxes;
+  Tree tree{};
+  for (int axis : split_axes)
+  {
+    leafboxes.resize(tree.NumLeafs());
+    ComputeLeafBoxes(tree, tree.GetRoot(), rootbox, leafboxes);
+
+    auto SplitDecision = [&](int cellidx)
+    {
+      const double pos = (leafboxes[cellidx].max[axis]+leafboxes[cellidx].min[axis])*0.5;
+      return std::make_pair(axis, pos);
+    };
+
+    TreeAdaptor adaptor(SplitDecision);
+    tree = adaptor.Adapt(tree);
+  }
+
+  leafboxes.resize(tree.NumLeafs());
+  ComputeLeafBoxes(tree, tree.GetRoot(), rootbox, leafboxes);
+
+  return std::make_pair(std::move(tree), std::move(leafboxes));
+}
+
+
+
+void CheckIterResult(const LeafIterator::ReturnValue &value, 
+                     const LeafIterator::ReturnValue &expected)
+{
+  EXPECT_EQ(value.idx, expected.idx);
+  EXPECT_NEAR(value.tnear, expected.tnear, 1.e-3);
+  EXPECT_NEAR(value.tfar, expected.tfar, 1.e-3);
+}
+
+std::ostream& operator<<(std::ostream& os, const LeafIterator::ReturnValue &value)
+{
+  os << "{ " << value.idx << ", " << value.tnear << ", " << value.tfar << ", }";
+  return os;
+}
+
+
+void CheckIterator(
+  LeafIterator&& iter, 
+  const ToyVector<LeafIterator::ReturnValue> &expected, ToyVector<int> &iterated_leafs)
+{
+  iterated_leafs.clear();
+  int i = 0;
+  for (; iter; ++iter, ++i)
+  {
+    ASSERT_LT(i, isize(expected));
+    CheckIterResult(*iter, expected[i]);
+    iterated_leafs.push_back((*iter).idx);
+    std::cout << *iter << ",\n";
+  }
+  ASSERT_EQ(i, isize(expected));
+}
+
+
+void PrintBoxes(const ToyVector<Box> &boxes, const ToyVector<int> selection)
+{
+  std::printf("| xmin, xmax | ymin, ymax | zmin, zmax |\n");
+  for (int i:selection)
+  {
+    const auto &b = boxes[i];
+    std::printf("| %6.1f, %6.1f | %6.1f, %6.1f | %6.1f, %6.1f |\n",
+      b.min[0], b.max[0], b.min[1], b.max[1], b.min[2], b.max[2]);
+  }
+}
+
+}
 
 
 TEST(Guiding, KdTreeAdaptation)
@@ -136,31 +217,138 @@ TEST(Guiding, KdTreeNoopAdaptation)
 }
 
 
-#if 0
-namespace 
-{
 
-void TestProjection(const Double2 &p)
+TEST(Guiding, KdTreeIterator1)
 {
-  Double3 q = InvStereographicProjection(p);
-  Double2 r = StereographicProjection(q);
-  ASSERT_GE(q[2], 0.);
-  ASSERT_NEAR(q.norm(), 1.0, 1.e-3);
-  ASSERT_NEAR(p[0], r[0], 1.e-3);
-  ASSERT_NEAR(p[1], r[1], 1.e-3);
+  using namespace kdtree;
+  
+  auto [tree, leafboxes] = BuildTree({0, 0, 0});
+
+  // using namespace rapidjson_util;
+  // rj::Document doc;
+  // doc.SetObject();
+  // tree.DumpTo(doc, doc);
+  // std::cout << ToString(doc);
+  ToyVector<int> leafs;
+  {
+    std::cout << "going right --->" << std::endl;
+    Ray r{{-2.5, 0., 0.,}, {1., 0., 0.}};
+    CheckIterator(
+      LeafIterator{tree, r, 0., 5.}, 
+      {
+        { 1, 0, 0.5, },
+        { 2, 0.5, 1.5, },
+        { 3, 1.5, 2.5, },
+        { 4, 2.5, 3.5, },
+        { 5, 3.5, 4.5, },
+        { 6, 4.5, 5, }
+      },
+      leafs);
+    PrintBoxes(leafboxes, leafs);
+  }
+
+  {
+    std::cout << "going left <---" << std::endl;
+    Ray r{{2.5, 0., 0.,}, {-1., 0., 0.}};
+    CheckIterator(
+      LeafIterator{tree, r, 0., 5.}, 
+      {
+        { 6, 0, 0.5, },
+        { 5, 0.5, 1.5, },
+        { 4, 1.5, 2.5, },
+        { 3, 2.5, 3.5, },
+        { 2, 3.5, 4.5, },
+        { 1, 4.5, 5, }
+      }, leafs);
+    PrintBoxes(leafboxes, leafs);
+  }
 }
 
 
-} // anonymous
-
-
-TEST(Guiding, StereographicProjection)
+TEST(Guiding, KdTreeIterator2)
 {
-  TestProjection({0.999999, 0.});
-  TestProjection({0., 0.999999});
-  TestProjection({0.123, 0.456});
+  using namespace kdtree;
+  
+  auto [tree, leafboxes] = BuildTree({0, 0, 0});
+  ToyVector<int> leafs;
+
+  {
+    std::cout << "left side -----" << std::endl;
+    Ray r{{-0.1, 0., 0.,}, {0., 1., 0.}};
+    CheckIterator(
+      LeafIterator{tree, r, 0., 5.}, 
+      {
+        { 3, 0, 5, }
+      }, leafs);
+    PrintBoxes(leafboxes, leafs);
+  }
+
+  {
+    std::cout << "center -----" << std::endl;
+    Ray r{{0., 0., 0.,}, {0., 1., 0.}};
+    CheckIterator(
+      LeafIterator{tree, r, 0., 5.}, 
+      {
+        { 3, 0, 5, }
+      }, leafs);
+    PrintBoxes(leafboxes, leafs);
+  }
+
+  {
+    std::cout << "right side -----" << std::endl;
+    Ray r{{0.1, 0., 0.,}, {0., 1., 0.}};
+    CheckIterator(
+      LeafIterator{tree, r, 0., 5.}, 
+      {
+        { 4, 0, 5, },
+      }, leafs);
+    PrintBoxes(leafboxes, leafs);
+  }
 }
-#endif
+
+
+TEST(Guiding, KdTreeIterator3)
+{
+  using namespace kdtree;
+  
+  auto [tree, leafboxes] = BuildTree({1, 2, 0, 0, 0});
+  ToyVector<int> leafs;
+
+  {
+    std::cout << " straight" << std::endl;
+    ToyVector<int> iterated_leafs;
+    
+    Ray r{{-2., 0., 0.,}, {1., 0., 0.}};
+    CheckIterator(
+      LeafIterator{tree, r, 0., 5.}, 
+      {
+        { 2, 0, 1, },
+        { 3, 1, 2, },
+        { 4, 2, 3, },
+        { 5, 3, 4, },
+        { 6, 4, 5, }
+      }, leafs);
+    PrintBoxes(leafboxes, leafs);
+  }
+
+  {
+    std::cout << " diagonal" << std::endl;
+    ToyVector<int> iterated_leafs;
+    
+    Ray r{{-2., -1., 0.,}, {1., 0.5, 0.}};
+    CheckIterator(
+      LeafIterator{tree, r, 0., 5.}, 
+      {
+        { 2, 0, 1, },
+        { 3, 1, 2, },
+        { 20, 2, 3, },
+        { 21, 3, 4, },
+        { 22, 4, 5, },
+      }, leafs);
+    PrintBoxes(leafboxes, leafs);
+  }
+}
+
 
 
 TEST(Guiding, MovmfSampling)

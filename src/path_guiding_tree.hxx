@@ -5,6 +5,9 @@
 #include "box.hxx"
 #include "span.hxx"
 #include "json_fwd.hxx"
+#include "ray.hxx"
+
+#include <boost/container/static_vector.hpp>
 
 namespace guiding 
 {
@@ -12,6 +15,8 @@ namespace guiding
 
 namespace kdtree
 {
+
+inline static constexpr int MAX_DEPTH = 20;
 
 
 struct AdaptParams
@@ -243,6 +248,60 @@ private:
     return node.is_leaf ? AdaptLeafRecursive(node) : AdaptBranchRecursive(node);
   }
 };
+
+
+class LeafIterator
+{
+  using H = Tree::Handle;
+  const Tree* tree;
+  Ray ray;
+
+  struct Entry
+  {
+    H node;
+    double tnear;
+    double tfar;
+  };
+
+  boost::container::static_vector<Entry, MAX_DEPTH> stack;
+
+public:
+  LeafIterator(const Tree &tree_, const Ray &ray_, double tnear_init, double tfar_init)
+    : tree{&tree_}, ray{ray_}
+    {
+      stack.push_back({tree->GetRoot(), tnear_init, tfar_init});
+      DecentToNextLeaf();
+    }
+
+  void operator++()
+  {
+    stack.pop_back();
+    if (!stack.empty())
+      DecentToNextLeaf();
+  }
+
+  operator bool() const
+  {
+    return !stack.empty();
+  }
+
+  struct ReturnValue {
+    int idx;
+    double tnear, tfar;
+  };
+
+  ReturnValue operator*() const
+  {
+
+    auto e = stack.back();
+    return ReturnValue{e.node.idx, e.tnear, e.tfar};
+  }
+
+private:
+
+  void DecentToNextLeaf();
+};
+
 
 
 } // kdtree

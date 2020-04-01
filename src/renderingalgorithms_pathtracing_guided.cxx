@@ -781,7 +781,7 @@ ScatterSample CameraRenderWorker::SampleScatterer(
   const SurfaceInteraction &interaction, const Double3 &reverse_incident_dir,
   const PathContext &context) const
 {
-  const auto* mixture = this->radiance_recorder->FindSamplingMixture(interaction.pos);
+  const auto* mixture = &this->radiance_recorder->FindRadianceEstimate(interaction.pos).radiance_distribution;
   const double prob_bsdf = 0.5;
   return SampleWithBinaryMixtureDensity(
     GetShaderOf(interaction, master->scene), *mixture,
@@ -917,7 +917,7 @@ void CameraRenderWorker::ProcessGuidingData(const PathCoefficients &coeffs)
       accum_incident /= lit.scatter_pdf;
       radiance_recorder->AddSample(
         this->guiding_local,
-        *lit.surface,
+        lit.surface->pos,
         sampler,
         lit.ray.dir,
         accum_incident);
