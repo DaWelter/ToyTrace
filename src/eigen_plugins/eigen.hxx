@@ -8,6 +8,10 @@ inline static constexpr struct eigen_zero_initialize_t
 
 } zero;
 
+inline static constexpr struct eigen_ones_initialize_t
+{
+} ones;
+
 }
 
 #define EIGEN_MATRIX_PLUGIN "eigen_matrix_plugin.hxx"
