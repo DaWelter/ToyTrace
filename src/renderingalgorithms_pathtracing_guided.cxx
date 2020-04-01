@@ -138,8 +138,9 @@ public:
 */
 struct VertexCoefficients
 {
-  std::optional<SurfaceInteraction> surface;
-  Ray ray; // exitant
+  Double3 pos;
+  Double3 dir; // outgoing ray
+  Double3 normal;
   double scatter_pdf = 0.;
   // T(y, x)/p_T(y,x) where y is the previously visited vertex
   Spectral3 segment_transmission_from_prev = Spectral3::Zero();
@@ -150,7 +151,8 @@ struct VertexCoefficients
   // NEE quantities pertaining to the path segment to the sampled light and the light itself.
   Spectral3 nee_emission = Spectral3::Zero();
   Spectral3 nee_scatter_times_transmission_weight = Spectral3::Zero();
-  bool on_non_specular_surface = false;
+  bool specular = false;
+  bool surface = false;
 };
 
 using PathCoefficients = ToyVector<VertexCoefficients>;
@@ -511,7 +513,6 @@ void CameraRenderWorker::InitializePathState(PathState &p, PathCoefficients &coe
   p.last_scatter_pdf_value = boost::none;
 
   coeffs.clear();
-  coeffs.push_back({}); // Should be zero-initialized
 
   const auto& camera = master->scene.GetCamera();
   p.pixel_index = camera.PixelToUnit({ pixel[0], pixel[1] });
@@ -531,13 +532,11 @@ bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(PathState &ps, Pat
   auto[interaction, tfar, track_weight] = TrackToNextInteraction(master->scene, ps.ray, ps.context, Spectral3::Ones(), sampler, ps.medium_tracker, nullptr);
   ps.weight *= track_weight;
 
-  coeffs.back().ray = ps.ray;
   coeffs.emplace_back();
   coeffs.back().segment_transmission_from_prev = track_weight;
 
   if (auto si = std::get_if<SurfaceInteraction>(&interaction))
   {
-      coeffs.back().surface = *si;
       MaybeAddEmission(*si, ps, coeffs);
       if (enable_nee)
         AddDirectLighting(*si, ps, coeffs);
@@ -663,7 +662,7 @@ public:
   std::array<double,3> dbg{};
 };
 
-
+#if 0
 void Check(const vmf_fitting::VonMisesFischerMixture &mixture, const Double3 x, double pdf, double* rndvars, bool sample_came_from_this)
 {
   static tbb::mutex m;
@@ -690,6 +689,7 @@ void Check(const vmf_fitting::VonMisesFischerMixture &mixture, const Double3 x, 
     assert(ok);
   }
 }
+#endif
 
 
 ScatterSample SampleWithBinaryMixtureDensity(
@@ -721,7 +721,7 @@ ScatterSample SampleWithBinaryMixtureDensity(
         mix_pdf,
         (double)(smpl.pdf_or_pmf),
         prob_bsdf);
-      Check(mixture, smpl.coordinates, mix_pdf, otherDistribution.dbg.data(), false);
+      //Check(mixture, smpl.coordinates, mix_pdf, otherDistribution.dbg.data(), false);
     }
     return smpl;
   }
@@ -729,7 +729,7 @@ ScatterSample SampleWithBinaryMixtureDensity(
   {
     Double3 dir = otherDistribution.Sample(sampler);
     double mix_pdf = otherDistribution.Pdf(dir);
-    Check(mixture, dir, mix_pdf, otherDistribution.dbg.data(), true);
+    //Check(mixture, dir, mix_pdf, otherDistribution.dbg.data(), true);
     double bsdf_pdf = 0.;
     Spectral3 bsdf_val = shader.EvaluateBSDF(reverse_incident_dir, interaction, dir, context, &bsdf_pdf);
     double pdf = Lerp(
@@ -755,8 +755,12 @@ void PrepareStateForAfterScattering(PathState &ps, PathCoefficients &coeff, cons
   ps.last_scatter_pdf_value = scatter_sample.pdf_or_pmf;
 
   coeff.back().this_scatter_path = scatter_factor;
-  coeff.back().on_non_specular_surface = !scatter_sample.pdf_or_pmf.IsFromDelta();
+  coeff.back().normal = interaction.normal;
+  coeff.back().pos = interaction.pos;
   coeff.back().scatter_pdf = (double)scatter_sample.pdf_or_pmf;
+  coeff.back().specular = scatter_sample.pdf_or_pmf.IsFromDelta();
+  coeff.back().surface = true;
+  coeff.back().dir = ps.ray.dir;
 }
 
 void PrepareStateForAfterScattering(PathState &ps, PathCoefficients &coeff, const VolumeInteraction &interaction, const Scene &scene, const ScatterSample &scatter_sample)
@@ -768,7 +772,12 @@ void PrepareStateForAfterScattering(PathState &ps, PathCoefficients &coeff, cons
   ps.last_scatter_pdf_value = scatter_sample.pdf_or_pmf;
 
   coeff.back().this_scatter_path = scatter_factor;
+  coeff.back().normal = Double3::Zero();
+  coeff.back().pos = interaction.pos;
   coeff.back().scatter_pdf = (double)scatter_sample.pdf_or_pmf;
+  coeff.back().specular = false;
+  coeff.back().surface = false;
+  coeff.back().dir = ps.ray.dir;
 }
 
 
@@ -781,10 +790,10 @@ ScatterSample CameraRenderWorker::SampleScatterer(
   const SurfaceInteraction &interaction, const Double3 &reverse_incident_dir,
   const PathContext &context) const
 {
-  const auto* mixture = &this->radiance_recorder->FindRadianceEstimate(interaction.pos).radiance_distribution;
+  const auto& mixture = this->radiance_recorder->FindRadianceEstimate(interaction.pos).radiance_distribution;
   const double prob_bsdf = 0.5;
   return SampleWithBinaryMixtureDensity(
-    GetShaderOf(interaction, master->scene), *mixture,
+    GetShaderOf(interaction, master->scene), mixture,
     interaction, reverse_incident_dir, master->scene, sampler, context, prob_bsdf);
 }
 
@@ -808,7 +817,7 @@ bool CameraRenderWorker::MaybeScatter(const SomeInteraction &interaction, PathSt
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{ 1. }, ps.current_node_count, sampler))
   {
     std::visit([&ps, &coeffs, &scene{ master->scene }, &smpl](auto &&ia) {
-      return PrepareStateForAfterScattering(ps, coeffs, ia, scene, smpl);
+      PrepareStateForAfterScattering(ps, coeffs, ia, scene, smpl);
     }, interaction);
     return true;
   }
@@ -881,6 +890,42 @@ void CameraRenderWorker::RecordMeasurementToCurrentPixel(const Spectral3 &measur
   framebuffer[ps.pixel_index] += color;
 }
 
+namespace {
+
+inline Spectral3 AccumulateIncidentRadiance(
+  PathCoefficients::const_iterator lit_vertex, 
+  PathCoefficients::const_iterator end,
+  const bool estimate_only_indirect_lighting)
+{
+    using I = PathCoefficients::const_iterator;
+
+    Spectral3 accum_incident{Eigen::zero};
+    //lit_vertex->this_scatter_path;  // Previously. But, I believe this should be a 1!
+    Spectral3 path_weight{Eigen::ones};
+
+    bool first = true;
+    // Search forward for light sources
+    for (I node = lit_vertex+1; node != end; ++node)
+    {
+      path_weight *= node->segment_transmission_from_prev;
+      const Spectral3 clamped_weight = ClampPathWeight(path_weight);
+      const Spectral3 nee = clamped_weight*node->nee_scatter_times_transmission_weight*node->nee_emission;
+      accum_incident += nee;
+      if (!estimate_only_indirect_lighting || !first)
+      {
+        const Spectral3 incident = clamped_weight*node->emission;
+        accum_incident += incident;
+      }
+      path_weight *= node->this_scatter_path;
+      first = false;
+    }
+    assert(accum_incident.isFinite().all());
+
+    return accum_incident;
+}
+
+}
+
 
 void CameraRenderWorker::ProcessGuidingData(const PathCoefficients &coeffs)
 {
@@ -890,37 +935,31 @@ void CameraRenderWorker::ProcessGuidingData(const PathCoefficients &coeffs)
   for (int i=0; i<isize(coeffs)-1; ++i)
   {
     auto &lit = coeffs[i];
-    if (!lit.on_non_specular_surface)
+    if (lit.specular)
       continue;
-    if (lit.surface->shading_normal.dot(lit.ray.dir) <= 0.)
+
+    // Don't consider light that comes from below the surface.
+    // If volume, this will be zero, and thus, execution will skip over the continue.
+    if (lit.normal.dot(lit.dir) < 0.)
       continue;
-    Spectral3 accum_incident = Spectral3::Zero();
-    Spectral3 path_weight = lit.this_scatter_path;
-    for (int j=i+1; j<isize(coeffs); ++j)
+
+    const auto accum_incident = AccumulateIncidentRadiance(
+      coeffs.begin() + i,
+      coeffs.end(),
+      /*estimate_only_indirect_lighting=*/lit.surface
+    );
+
+    assert((float)lit.scatter_pdf > 0.f);
+    const Spectral3 sample = accum_incident / lit.scatter_pdf;
+
+    if (accum_incident.nonZeros() & accum_incident.isFinite().all())
     {
-      const auto &node = coeffs[j];
-      path_weight *= node.segment_transmission_from_prev;
-      const Spectral3 nee = ClampPathWeight(path_weight)
-          *node.nee_scatter_times_transmission_weight*node.nee_emission;
-      accum_incident += nee;
-      if (j>i+1) // Indirect lighting
-      {
-        const Spectral3 incident = ClampPathWeight(path_weight)*node.emission;
-        accum_incident += incident;
-      }
-      path_weight *= node.this_scatter_path;
-    }
-    assert(accum_incident.isFinite().all());
-    assert(lit.scatter_pdf > 0);
-    if (accum_incident.nonZeros())
-    {
-      accum_incident /= lit.scatter_pdf;
       radiance_recorder->AddSample(
         this->guiding_local,
-        lit.surface->pos,
+        lit.pos,
         sampler,
-        lit.ray.dir,
-        accum_incident);
+        lit.dir,
+        sample);
     }
   }
 
