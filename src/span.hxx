@@ -22,7 +22,7 @@ public:
     : _begin{begin}, _size{size}
   {}
   
-  T operator[](const size_t idx) const 
+  const T& operator[](const size_t idx) const 
   {
     assert (idx >= 0 && (size_t)idx < _size);
     return _begin[idx];
