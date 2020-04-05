@@ -137,6 +137,8 @@ int main(int argc, char *argv[])
   
   auto PopAndProcessQueueItem = [&]{
       auto [im, is_complete_pass] = pop(image_queue); // Blocks
+      if (!im)
+        return;
       if (display->IsOkToKeepGoing())
         display->Show(*im);
       if (is_complete_pass) // Partially rendered images are probably useless
@@ -192,7 +194,8 @@ int main(int argc, char *argv[])
   algo->Run();
   
   stop_flag.store(true);
-  
+  image_queue.push({ nullptr, true});
+
   watchdog_and_image_updater.join();
   image_handling_thread.join();
   
