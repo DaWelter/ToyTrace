@@ -286,7 +286,7 @@ inline std::unique_ptr<Image> PathTracingAlgo2::GenerateImage()
     const auto tile = tileset[i];
     if (this->samplesPerTile[i] > 0)
     {
-      framebuffer::ToImage(*bm, tile, AsSpan(this->framebuffer), this->samplesPerTile[i]);
+      framebuffer::ToImage(*bm, tile, AsSpan(this->framebuffer), this->samplesPerTile[i], !render_params.linear_output);
     }
   });
   return bm;

@@ -171,7 +171,7 @@ public:
 
   void Next(const Ray& ray, MediumTracker &medium_tracker)
   {
-    assert(static_cast<float>(tnear) < static_cast<float>(tfar)); // Not done yet
+    //assert(static_cast<float>(tnear) < static_cast<float>(tfar)); // Not done yet
     if (start == end)
     {
       // Mark as invalid.

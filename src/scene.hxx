@@ -37,6 +37,8 @@ struct RenderingParameters
   double guiding_prior_strength = 10000.;
   int guiding_em_every = 1024;
   int guiding_tree_subdivision_factor = 100;
+  int guiding_max_spp = 512;
+  bool linear_output = false;
 };
 
 

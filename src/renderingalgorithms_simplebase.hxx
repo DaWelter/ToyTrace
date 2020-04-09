@@ -173,7 +173,7 @@ public:
   {
     auto bm = std::make_unique<Image>(render_params.width, render_params.height);
     tbb::parallel_for(0, render_params.height, [&](int row){
-      buffer.ToImage(*bm, row, row+1);  
+      buffer.ToImage(*bm, row, row+1, !render_params.linear_output);  
     });
     return bm;
   }

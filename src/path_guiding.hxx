@@ -25,7 +25,7 @@
 struct SurfaceInteraction;
 struct RenderingParameters;
 
-#define WRITE_DEBUG_OUT 
+//#define WRITE_DEBUG_OUT 
 //#define PATH_GUIDING_WRITE_SAMPLES
 
 #if (defined PATH_GUIDING_WRITE_SAMPLES & !defined NDEBUG & defined HAVE_JSON)
@@ -159,7 +159,7 @@ struct CellDataTemporary
 
 
 
-class SurfacePathGuiding
+class PathGuiding
 {
     public:
         using Record = IncidentRadiance;
@@ -171,10 +171,10 @@ class SurfacePathGuiding
             ToyVector<RecordBuffer> records_by_cells;
         };
 
-        SurfacePathGuiding(const Box &region, double cellwidth, const RenderingParameters &params, tbb::task_arena &the_task_arena);
+        PathGuiding(const Box &region, double cellwidth, const RenderingParameters &params, tbb::task_arena &the_task_arena);
 
         void BeginRound(Span<ThreadLocal*> thread_locals);
-        void WriteDebugData();
+        void WriteDebugData(const std::string name_prefix);
 
         void AddSample(
           ThreadLocal& tl, const Double3 &pos, 

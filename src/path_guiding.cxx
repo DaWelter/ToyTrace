@@ -59,7 +59,7 @@ boost::filesystem::path GetDebugFilePrefix()
 static constexpr size_t CELL_BUFFER_SIZE = 1024;
 
 
-SurfacePathGuiding::SurfacePathGuiding(const Box &region, double cellwidth, const RenderingParameters &params, tbb::task_arena &the_task_arena) :
+PathGuiding::PathGuiding(const Box &region, double cellwidth, const RenderingParameters &params, tbb::task_arena &the_task_arena) :
     region{ region },
     recording_tree{},
     param_num_initial_samples{ params.guiding_tree_subdivision_factor },
@@ -76,19 +76,19 @@ SurfacePathGuiding::SurfacePathGuiding(const Box &region, double cellwidth, cons
 }
 
 
-CellData& SurfacePathGuiding::LookupCellData(const Double3 &p)
+CellData& PathGuiding::LookupCellData(const Double3 &p)
 {
   return cell_data[recording_tree.Lookup(p)];
 }
 
 
-const SurfacePathGuiding::RadianceEstimate& SurfacePathGuiding::FindRadianceEstimate(const Double3 &p) const
+const PathGuiding::RadianceEstimate& PathGuiding::FindRadianceEstimate(const Double3 &p) const
 {
     return cell_data[recording_tree.Lookup(p)].current_estimate;
 }
 
 
-void  SurfacePathGuiding::Enqueue(int cell_num, ToyVector<Record> &sample_buffer)
+void  PathGuiding::Enqueue(int cell_num, ToyVector<Record> &sample_buffer)
 {  
   auto buffer = CopyToSpan(sample_buffer);
   sample_buffer.clear();
@@ -119,7 +119,7 @@ void  SurfacePathGuiding::Enqueue(int cell_num, ToyVector<Record> &sample_buffer
 }
 
 
-void SurfacePathGuiding::AddSample(
+void PathGuiding::AddSample(
   ThreadLocal& tl, const Double3 &pos,
   Sampler &sampler, const Double3 &reverse_incident_dir, const Spectral3 &radiance)
 {
@@ -137,21 +137,20 @@ void SurfacePathGuiding::AddSample(
     auto rec = Record{
             pos,
             reverse_incident_dir.cast<float>(),
-            radiance.cast<float>().sum(),
+            radiance.cast<float>().mean(),
     };
 
     auto& cell = LookupCellData(pos);
     BufferMaybeSendOffSample(cell, rec);
 
-    const auto new_rec = ComputeStochasticFilterPosition(rec, cell, sampler);
-
-    auto& other_cell = LookupCellData(new_rec.pos);
-    if (&other_cell.index != &cell.index)
-      BufferMaybeSendOffSample(other_cell, new_rec);
+    // const auto new_rec = ComputeStochasticFilterPosition(rec, cell, sampler);
+    // auto& other_cell = LookupCellData(new_rec.pos);
+    // if (&other_cell.index != &cell.index)
+    //   BufferMaybeSendOffSample(other_cell, new_rec);
 }
 
 
-SurfacePathGuiding::Record SurfacePathGuiding::ComputeStochasticFilterPosition(const Record & rec, const CellData &cd, Sampler &sampler)
+PathGuiding::Record PathGuiding::ComputeStochasticFilterPosition(const Record & rec, const CellData &cd, Sampler &sampler)
 {
   Record new_rec{rec};
   for (int axis = 0; axis < 3; ++axis)
@@ -173,7 +172,7 @@ SurfacePathGuiding::Record SurfacePathGuiding::ComputeStochasticFilterPosition(c
 }
 
 
-void SurfacePathGuiding::ProcessSamples(int cell_idx)
+void PathGuiding::ProcessSamples(int cell_idx)
 {
   CellDataTemporary& cdtmp = cell_data_temp[cell_idx];
   CellData& cd = cell_data[cell_idx];
@@ -209,7 +208,7 @@ void SurfacePathGuiding::ProcessSamples(int cell_idx)
 }
 
 
-void SurfacePathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRadiance> buffer)
+void PathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRadiance> buffer)
 {
   using namespace vmf_fitting;
 
@@ -240,7 +239,7 @@ void SurfacePathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRa
 
 
 
-void SurfacePathGuiding::BeginRound(Span<ThreadLocal*> thread_locals)
+void PathGuiding::BeginRound(Span<ThreadLocal*> thread_locals)
 {
   const auto n = recording_tree.NumLeafs();
 
@@ -266,7 +265,7 @@ void SurfacePathGuiding::BeginRound(Span<ThreadLocal*> thread_locals)
 }
 
 
-void SurfacePathGuiding::FinalizeRound(Span<ThreadLocal*> thread_locals)
+void PathGuiding::FinalizeRound(Span<ThreadLocal*> thread_locals)
 {
   for (auto* tl : thread_locals)
   {
@@ -326,7 +325,7 @@ void ComputeLeafBoxes(const Tree &tree, Handle node, const Box &node_box, Span<C
 } // namespace
 
 
-void SurfacePathGuiding::PrepareAdaptedStructures()
+void PathGuiding::PrepareAdaptedStructures()
 {
   std::cout << strconcat("round ", round, ": num_samples=", num_recorded_samples, ", num_cells=", recording_tree.NumLeafs()) << std::endl;
 
@@ -451,10 +450,10 @@ void CellDebug::Close()
 #endif
 
 
-void SurfacePathGuiding::WriteDebugData()
+void PathGuiding::WriteDebugData(const std::string name_prefix)
 {
 #if (defined WRITE_DEBUG_OUT & defined HAVE_JSON & !defined NDEBUG)
-  const auto filename = strconcat(DEBUG_FILE_PREFIX, "radiance_records_", round, ".json");
+  const auto filename = strconcat(DEBUG_FILE_PREFIX, name_prefix, "radiance_records_", round, ".json");
   std::ofstream file(filename);
 
   using namespace rapidjson_util;

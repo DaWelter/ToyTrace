@@ -239,12 +239,14 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
       ("guide-em-every", po::value<int>(), "Guiding: Expectancy maximization every x samples.")
       ("guide-prior-strength", po::value<double>(), "Guiding: Roughly the number of samples were prior becomes insignificant.")
       ("guide-subdiv-factor", po::value<int>(), "Guiding: Less makes the tree more refined. Value ranges around 100 to 10000.")
+      ("guide-max-spp", po::value<int>(), "Guiding: The maximal number of samples per pixel. Sample count will double until this value is reached.")
       ("algo", po::value<std::string>()->default_value("pt"), "Rendering algorithm: pt or bdpt")
       ("phm-radius", po::value<double>(), "Initial photon radius for photon mapping")
       ("pt-sample-mode", po::value<std::string>(), "Light sampling: 'bsdf' - bsdf importance sampling, 'lights' - sample lights aka. next event estimation, 'both' - both combined by MIS.")
       ("no-display", po::bool_switch()->default_value(false), "Don't open a display window")
       ("include,I", po::value<std::vector<std::string>>(), "Include paths")
       ("output-file,o", po::value<fs::path>(), "Output file")
+      ("linear-out", po::bool_switch()->default_value(false), "Output image in linear color space. Like sRGB but without doing the gamma correction.")
       ("input-file", po::value<fs::path>(), "Input file");
     po::positional_options_description pos_desc;
     pos_desc.add("input-file", -1);
@@ -277,6 +279,17 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
       render_params.guiding_tree_subdivision_factor = vm["guide-subdiv-factor"].as<int>();
       if (render_params.guiding_tree_subdivision_factor <= 0)
         throw po::error("guide-subdiv-factor must be positive");
+    }
+    if (vm.count("guide-max-spp"))
+    {
+      render_params.guiding_max_spp = vm["guide-max-spp"].as<int>();
+      if (render_params.guiding_max_spp <= 0)
+        throw po::error("guide-max-spp must be positive");
+    }
+
+    if (vm["linear-out"].as<bool>())
+    {
+      render_params.linear_output = true;
     }
 
     int n = 4;
