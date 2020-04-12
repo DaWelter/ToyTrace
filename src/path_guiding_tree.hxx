@@ -162,7 +162,7 @@ public:
   Tree Adapt(Tree &tree)
   {
     this->tree = &tree;
-    new_tree.root = AdaptRecursive(tree.root);
+    new_tree.root = AdaptRecursive(tree.root, 1);
     Tree tmp{Tree::TagUninitialized()};
     std::swap(tmp, new_tree);
     return tmp;
@@ -215,9 +215,9 @@ private:
     // return { axis, pos };
   }
 
-  Handle AdaptLeafRecursive(Tree::Handle node)
+  Handle AdaptLeafRecursive(Tree::Handle node, int depth)
   {
-    if (auto [axis, pos] = DetermineSplit(node); axis>=0)
+    if (auto [axis, pos] = DetermineSplit(node); axis>=0 && depth<MAX_DEPTH)
     {
       auto left = new_tree.AllocateLeaf();
       auto right = new_tree.AllocateLeaf();
@@ -233,19 +233,19 @@ private:
     }
   }
 
-  Handle AdaptBranchRecursive(Tree::Handle node)
+  Handle AdaptBranchRecursive(Tree::Handle node, int depth)
   {
     auto [old_left, old_right] = tree->Children(node);
     auto [axis, pos] = tree->Split(node);
-    auto left = AdaptRecursive(old_left);
-    auto right = AdaptRecursive(old_right);
+    auto left = AdaptRecursive(old_left, depth+1);
+    auto right = AdaptRecursive(old_right, depth+1);
     auto branch = new_tree.AllocateBranch(left, right, axis, pos);
     return branch;
   }
 
-  Handle AdaptRecursive(Tree::Handle node)
+  Handle AdaptRecursive(Tree::Handle node, int depth)
   {
-    return node.is_leaf ? AdaptLeafRecursive(node) : AdaptBranchRecursive(node);
+    return node.is_leaf ? AdaptLeafRecursive(node, depth) : AdaptBranchRecursive(node, depth);
   }
 };
 
@@ -266,21 +266,21 @@ class LeafIterator
   boost::container::static_vector<Entry, MAX_DEPTH> stack;
 
 public:
-  LeafIterator(const Tree &tree_, const Ray &ray_, double tnear_init, double tfar_init)
+  LeafIterator(const Tree &tree_, const Ray &ray_, double tnear_init, double tfar_init)  noexcept
     : tree{&tree_}, ray{ray_}
     {
       stack.push_back({tree->GetRoot(), tnear_init, tfar_init});
       DecentToNextLeaf();
     }
 
-  void operator++()
+  void operator++()  noexcept
   {
     stack.pop_back();
     if (!stack.empty())
       DecentToNextLeaf();
   }
 
-  operator bool() const
+  operator bool() const  noexcept
   {
     return !stack.empty();
   }
@@ -290,16 +290,27 @@ public:
     double tnear, tfar;
   };
 
-  ReturnValue operator*() const
+  ReturnValue operator*() const  noexcept
   {
-
     auto e = stack.back();
     return ReturnValue{e.node.idx, e.tnear, e.tfar};
   }
 
+  std::pair<double, double> Interval() const  noexcept
+  {
+    const auto& e = stack.back();
+    return std::make_pair(e.tnear, e.tfar);
+  }
+
+  int Payload() const  noexcept
+  {
+    const auto& e = stack.back();
+    return e.node.idx;
+  }
+
 private:
 
-  void DecentToNextLeaf();
+  void DecentToNextLeaf() noexcept;
 };
 
 

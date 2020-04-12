@@ -44,11 +44,11 @@ Spectral3 TransmittanceEstimate(const Scene &scene, RaySegment seg, MediumTracke
     if (scene.IsOccluded(seg.ray, 0., seg.length))
       return Spectral3::Zero();
 
-    auto iter = VolumeSegmentIterator(scene, seg.ray, 0., seg.length);
-    for (; iter; iter.Next(seg.ray, medium_tracker))
+    auto iter = VolumeSegmentIterator(scene, seg.ray, medium_tracker, 0., seg.length);
+    for (; iter; ++iter)
     {
       auto[snear, sfar] = iter.Interval();
-      const Medium& medium = medium_tracker.getCurrentMedium();
+      const Medium& medium = *iter;
       const RaySegment subsegment{ seg.ray, snear, sfar };
 
       if (volume_pdf_coeff)

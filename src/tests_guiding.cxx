@@ -2,7 +2,7 @@
 
 #include <range/v3/view/enumerate.hpp>
 
-//#include "path_guiding.hxx"
+#include "path_guiding.hxx"
 #include "path_guiding_tree.hxx"
 #include "distribution_mixture_models.hxx"
 #include "json.hxx"
@@ -348,6 +348,68 @@ TEST(Guiding, KdTreeIterator3)
     PrintBoxes(leafboxes, leafs);
   }
 }
+
+
+TEST(Guiding, CombinedIntervalsIterator)
+{
+  class DummyIter
+  {
+      Span<double> boundaries;
+      int end_idx = 1;
+    public:
+      explicit DummyIter(Span<double> boundaries)
+        : boundaries{boundaries} {}
+      
+      operator bool() const { return end_idx < isize(boundaries); }
+
+      auto Interval() const { return std::make_pair(boundaries[end_idx-1], boundaries[end_idx]); }
+
+      auto operator*() const {
+        return end_idx-1;
+      }
+
+      void operator++() {
+        ++end_idx;
+      }
+  };
+
+  ToyVector<double> boundaries1{1., 2.,     4.,              8., 9., 10., 11. };
+  ToyVector<double> boundaries2{0., 2., 3.,     5., 6., 7.,          10.      };
+  ToyVector<std::tuple<double, double, int , int>> expected({
+    { 1., 2. , 0, 0},
+    { 2., 2. , 1, 0},
+    { 2., 3. , 1, 1},
+    { 3., 4. , 1, 2},
+    { 4., 5. , 2, 2},
+    { 5., 6. , 2, 3},
+    { 6., 7. , 2, 4},
+    { 7., 8. , 2, 5},
+    { 8., 9. , 3, 5},
+    { 9., 10., 4, 5},
+    { 10.,10., 5, 5},
+  });
+
+  CombinedIntervalsIterator<DummyIter, DummyIter> it{
+    DummyIter{AsSpan(boundaries1)},
+    DummyIter{AsSpan(boundaries2)}
+  };
+
+  int n = 0;
+  auto iter_expected = expected.begin();
+  for (; it; ++it, ++iter_expected, ++n)
+  {
+    auto i = it.Interval();
+    auto v1 = it.DereferenceFirst();
+    auto v2 = it.DereferenceSecond();
+    std::string state = strconcat("@  state N=", n, " I0=", v1, " I1=", v2);
+    EXPECT_EQ(i.first , std::get<0>(*iter_expected)) << state;
+    EXPECT_EQ(i.second, std::get<1>(*iter_expected)) << state;
+    EXPECT_EQ(v1, std::get<2>(*iter_expected)) << state;
+    EXPECT_EQ(v2, std::get<3>(*iter_expected)) << state;
+  }
+}
+
+
 
 
 

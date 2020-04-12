@@ -138,14 +138,150 @@ public:
 };
 #endif
 
-// Requried to compute the indirect incident radiance at every vertex
-/*              Li(x)_nee (light source here)
-                |
-         T      |
-   y ---------- x -------- .... >  tracing direction
-              Le(x)  (surface at x may emit)
+#if 0
+inline double ScatterInCellProbability(double sigma_s, double sigma_t, double transmittance, double li_distribution) noexcept
+{
+  // Volume Path Guiding Based on Zero-Variance Random Walk Theory
+  // Eq 20
+  assert (std::isfinite(sigma_s));
+  assert (std::isfinite(sigma_t));
+  assert (std::isfinite(transmittance));
+  assert (std::isfinite(li_distribution));
 
-*/
+  static constexpr double MIN_PROB = 0.1;
+  static constexpr double MAX_PROB = 0.9;
+
+  const double prob_interact = 
+    (1. - transmittance)*sigma_s/(sigma_t*UnitSphereSurfaceArea*li_distribution);
+  // 0 / 0 -> MIN_PROB
+  // inf -> MAX_PROB
+  // Output clamped to [MIN_PROB, MAX_PROB] 
+  return prob_interact > MIN_PROB ? (prob_interact < MAX_PROB ? prob_interact : MAX_PROB) : MIN_PROB;
+}
+
+
+inline std::pair<double,double> SampleTransmittanceWithinRange(double sigma_t, double r, double tnear, double tfar) noexcept
+{
+  // Kulla & M. Fajardo / Importance Sampling Techniques for Path Tracing in Participating Media
+  // Eq (9)
+  assert (tnear >= tfar);
+  assert (sigma_t >= 0.);
+  const double t1 = 1. - std::exp(-(tfar-tnear)*sigma_t);
+  const double t2 = std::log(1. - r * t1);
+  const double t3 = tnear - t2/sigma_t;
+  assert (t2 <= 0.);
+  // Should sigma_t be 0, we'd get t3 == nan. This means that the mean free path length is
+  // much larger then tfar-tnear. Same if tfar==tnear. In this case we may assume a uniform distribution.
+  // (The profile of the exponential can be assumed to be constant or flat.)
+  const double t = t3 < tfar ? (t3 > tnear ? t3 : tnear) : (tnear + r * (tfar-tnear));
+  // Now the pdf, with a slightly rearranged equation that is numerically stable
+  const double t4 = sigma_t * std::exp((tnear - t)*sigma_t);
+  const double pdf = t4/t1;
+  // pdf can be 0/0==nan if the tfar-tnear << the mean free path length. 
+  // In this case it may make sense to set pdf==1./(tfar-tnear)
+  const double fixed_pdf = std::isfinite(pdf) ? pdf : (1./(tfar-tnear));
+  return std::make_pair(t, fixed_pdf);
+}
+
+
+inline std::pair<double, double> RadianceFilter(
+  double current_l, 
+  double previous_l,
+  double previous_l_1,
+  double previous_l_2,
+  double previous_bin_transmittance, 
+  double previous_albedo, 
+  double previous_inscatter)
+{
+  constexpr double A = 0.75;
+  const double t1 = previous_l_1 - (1.-previous_bin_transmittance)*previous_albedo*previous_inscatter;
+  const double t2 = t1 / previous_bin_transmittance;
+  const double current_l_2 = std::max(0., t2);
+  const double current_l_1 = (1.-A)*current_l_2 + A*previous_l;
+  return std::make_pair(current_l_1, current_l_2);
+}
+
+/* Ray is the ray to shoot. It must already include the anti-self-intersection offset.
+  */
+std::tuple<MaybeSomeInteraction, double, Spectral3>
+inline TrackToNextInteraction(
+  const Scene &scene,
+  const guiding::PathGuiding &pathguiding,
+  const Ray &ray,
+  const PathContext &context,
+  const Spectral3 &initial_weight,
+  Sampler &sampler,
+  MediumTracker &medium_tracker)
+{
+  // Volume Path Guiding Based on Zero-Variance Random Walk Theory
+  // Algo 1
+
+  using RetType = std::tuple<MaybeSomeInteraction, double, Spectral3>;
+
+  double tfar = LargeNumber;
+  const auto hit = scene.FirstIntersection(ray, 0., tfar);
+  // The factor by which tfar is decreased is meant to prevent intersections which lie close to the end of the query segment.
+  tfar *= 0.9999;
+  
+  double pdf = 1.;
+  Spectral3 transmittance{Eigen::ones};
+
+  auto iter = guiding::CombinedIntervalsIterator<guiding::CellIterator, SegmentIterator>{
+    pathguiding.MakeCellIterator(ray, 0., tfar),
+    VolumeSegmentIterator(scene, ray, medium_tracker, 0., tfar)
+  };
+  for (; iter; ++iter)
+  {
+    auto[snear, sfar] = iter.Interval();
+    if (snear == sfar)
+      continue;
+
+    const Medium& medium = iter.DereferenceSecond();
+    const guiding::CellData::CurrentEstimate& radiance_estimate = iter.DereferenceFirst();
+    
+    // For now assume constant coefficients
+    const auto material_coeffs = medium.EvaluateCoeffs(ray.PointAt(0.5*(snear+sfar)), context);
+    const Spectral3 bin_transmittance = medium.EvaluateTransmission(RaySegment{ray, snear, sfar}, sampler, context);
+    
+    // Simplified for uniform phase function
+    // TODO: Generalize
+    const double prob_scatter_within_boundaries = ScatterInCellProbability(
+      material_coeffs.sigma_s[0], material_coeffs.sigma_t[0], bin_transmittance[0], 
+      vmf_fitting::Pdf(radiance_estimate.radiance_distribution, -ray.dir));
+    
+    if (sampler.Uniform01() < prob_scatter_within_boundaries)
+    {
+      pdf *= prob_scatter_within_boundaries;
+      auto [s, pdf_bin] = SampleTransmittanceWithinRange(material_coeffs.sigma_t[0], sampler.Uniform01(), snear, sfar);
+      pdf *= pdf_bin;
+
+      // The usual stuff
+      const VolumeInteraction vi{ ray.PointAt(s), medium, Spectral3{ 0. }, material_coeffs.sigma_s };
+      const Spectral3 transmittance_to_s = medium.EvaluateTransmission(RaySegment{ray, snear, s}, sampler, context);
+      const Spectral3 weight = transmittance*transmittance_to_s / pdf;
+      return RetType{ vi, s, weight };
+    }
+    else
+    {
+      pdf *= 1.-prob_scatter_within_boundaries;
+      transmittance *= bin_transmittance;
+    }
+  }
+
+  const Spectral3 weight = transmittance / pdf;
+  // If we get here, there was no scattering in the medium.
+  if (hit)
+  {
+    return RetType{ *hit, tfar, weight };
+  }
+  else
+  {
+    return RetType{ std::monostate{}, LargeNumber, weight };
+  }
+};
+#endif
+
+
 struct VertexCoefficients
 {
   Double3 pos;
@@ -497,7 +633,7 @@ void PathTracingAlgo2::RenderRadianceEstimates(fs::path filename)
     auto bm = Image(render_params.width, render_params.height);
     tbb::parallel_for(0, tileset.size(), [this, &bm, fb=AsSpan(framebuffer)](int i) {
       const auto tile = tileset[i];
-      framebuffer::ToImage(bm, tile, fb, 1, false);
+      framebuffer::ToImage(bm, tile, fb, 1, !render_params.linear_output);
     });
 
     bm.write(filename.string());
@@ -623,11 +759,14 @@ inline void PathTracingAlgo2::Run()
 
       RenderRadianceEstimates(guiding::GetDebugFilePrefix() / fs::path{strconcat("guiderad_",num_samples,".png")});
 
-      num_samples *= 2;
+      num_samples = num_samples + std::max(1, int(num_samples*0.5));
     } // Pass iteration
   }
 
   this->record_samples_for_guiding = false;
+
+  std::fill(framebuffer.begin(), framebuffer.end(), RGB::Zero());
+  std::fill(samplesPerTile.begin(), samplesPerTile.end(), 0ul);
 
   while (!stop_flag.load() && spp_schedule.GetPerIteration() > 0)
   {
@@ -664,7 +803,7 @@ inline std::unique_ptr<Image> PathTracingAlgo2::GenerateImage()
       const auto tile = tileset[i];
       if (this->samplesPerTile[i] > 0)
       {
-        framebuffer::ToImage(*bm, tile, AsSpan(this->framebuffer), this->samplesPerTile[i], false);
+        framebuffer::ToImage(*bm, tile, AsSpan(this->framebuffer), this->samplesPerTile[i], !render_params.linear_output);
       }
     });
   });
@@ -872,7 +1011,9 @@ void CameraRenderWorker::AddDirectLighting(const SomeInteraction & interaction, 
   }
 
   pickers->ObserveReturnNee(this->picker_local, light_ref, measurement_estimator);
-  //RecordMeasurementToCurrentPixel(measurement_estimator, ps);
+
+  if (!master->record_samples_for_guiding)
+    RecordMeasurementToCurrentPixel(measurement_estimator, ps);
 }
 
 namespace
@@ -883,7 +1024,7 @@ class GmmRefDistribution
 {
   const vmf_fitting::VonMisesFischerMixture *mixture;
 public:
-  GmmRefDistribution(const vmf_fitting::VonMisesFischerMixture& mixture, const Double3 &) :
+  GmmRefDistribution(const vmf_fitting::VonMisesFischerMixture& mixture) :
     mixture{ &mixture }
   {
   }
@@ -893,7 +1034,7 @@ public:
     auto r1 = sampler.Uniform01();
     auto r2 = sampler.Uniform01();
     auto r3 = sampler.Uniform01();
-    dbg = { r1, r2, r3 };
+    //dbg = { r1, r2, r3 };
     return vmf_fitting::Sample(*mixture, { r1,r2,r3 }).cast<double>();
   }
 
@@ -902,7 +1043,7 @@ public:
     return vmf_fitting::Pdf(*mixture, dir.cast<float>());
   }
 
-  std::array<double,3> dbg{};
+  //std::array<double,3> dbg{};
 };
 
 #if 0
@@ -935,24 +1076,56 @@ void Check(const vmf_fitting::VonMisesFischerMixture &mixture, const Double3 x, 
 #endif
 
 
+class ScatterFunctionSurface
+{
+  const SurfaceInteraction *surface;
+  const Shader* shader;
+  Double3 reverse_incident_dir;
+public:
+  ScatterFunctionSurface(const Shader& shader, const SurfaceInteraction& surface, const Double3& reverse_incident_dir)
+    : surface{&surface}, shader{&shader}, reverse_incident_dir{reverse_incident_dir} 
+    {}
+
+  ScatterSample Sample(Sampler &sampler, const PathContext &context) const { return shader->SampleBSDF(reverse_incident_dir, *surface, sampler, context); }
+  Spectral3 Evaluate(Double3 &dir, const PathContext& context, double *pdf) const { return shader->EvaluateBSDF(reverse_incident_dir, *surface, dir, context, pdf); }
+};
+
+
+class ScatterFunctionVolume
+{
+  const VolumeInteraction *vi;
+  const Double3 &reverse_incident_dir;
+public:
+  ScatterFunctionVolume(const VolumeInteraction &vi, const Double3& reverse_incident_dir)
+    : vi{&vi}, reverse_incident_dir{reverse_incident_dir}
+    {}
+
+  ScatterSample Sample(Sampler &sampler, const PathContext &context) const { return vi->medium().SamplePhaseFunction(reverse_incident_dir, vi->pos, sampler, context); }
+  Spectral3 Evaluate(Double3 &dir, const PathContext& context, double *pdf) const { return vi->medium().EvaluatePhaseFunction(reverse_incident_dir, vi->pos, dir, context, pdf); }
+};
+
+
+template<class ScatterFunction>
 ScatterSample SampleWithBinaryMixtureDensity(
-  const Shader &shader, const vmf_fitting::VonMisesFischerMixture& mixture, const SurfaceInteraction &interaction, const Double3 &reverse_incident_dir, 
+  const ScatterFunction &scatter_function,
+  const vmf_fitting::VonMisesFischerMixture& mixture, 
+  const Double3 &reverse_incident_dir, 
   const Scene &scene, Sampler &sampler, const PathContext &context, double prob_bsdf)
 {
-  auto otherDistribution = GmmRefDistribution{mixture, interaction.normal };
+  auto otherDistribution = GmmRefDistribution{mixture};
   //auto otherDistribution = Rotated<UniformHemisphericalDistribution>(frame, UniformHemisphericalDistribution{});
 
   // This terrible hack won't work with a mixture of delta and continuous distribution.
   // I.e. clear coated plastic, etc ...
-  ScatterSample smpl = shader.SampleBSDF(reverse_incident_dir, interaction, sampler, context);
-  assert(reverse_incident_dir.array().isFinite().all() && interaction.normal.array().isFinite().all());
+  ScatterSample smpl = scatter_function.Sample(sampler, context);
+  assert(reverse_incident_dir.array().isFinite().all());
 
   if (smpl.pdf_or_pmf.IsFromDelta())
     return smpl;
 
   if (sampler.Uniform01() < prob_bsdf)
   {
-    ScatterSample smpl = shader.SampleBSDF(reverse_incident_dir, interaction, sampler, context);
+    ScatterSample smpl = scatter_function.Sample(sampler, context);
     if (smpl.pdf_or_pmf.IsFromDelta())
     {
       smpl.pdf_or_pmf *= prob_bsdf;
@@ -964,7 +1137,6 @@ ScatterSample SampleWithBinaryMixtureDensity(
         mix_pdf,
         (double)(smpl.pdf_or_pmf),
         prob_bsdf);
-      //Check(mixture, smpl.coordinates, mix_pdf, otherDistribution.dbg.data(), false);
     }
     return smpl;
   }
@@ -974,7 +1146,7 @@ ScatterSample SampleWithBinaryMixtureDensity(
     double mix_pdf = otherDistribution.Pdf(dir);
     //Check(mixture, dir, mix_pdf, otherDistribution.dbg.data(), true);
     double bsdf_pdf = 0.;
-    Spectral3 bsdf_val = shader.EvaluateBSDF(reverse_incident_dir, interaction, dir, context, &bsdf_pdf);
+    Spectral3 bsdf_val = scatter_function.Evaluate(dir, context, &bsdf_pdf);
     double pdf = Lerp(
       mix_pdf,
       bsdf_pdf,
@@ -986,6 +1158,7 @@ ScatterSample SampleWithBinaryMixtureDensity(
     };
   } 
 }
+
 
 void PrepareStateForAfterScattering(PathState &ps, PathCoefficients &coeff, const SurfaceInteraction &interaction, const Scene &scene, const ScatterSample &scatter_sample)
 {
@@ -1034,10 +1207,11 @@ ScatterSample CameraRenderWorker::SampleScatterer(
   const PathContext &context) const
 {
   const auto& mixture = this->radiance_recorder_surface->FindRadianceEstimate(interaction.pos).radiance_distribution;
-  const double prob_bsdf = 0.5;
+  const double prob_scatter_func = 0.5;
   return SampleWithBinaryMixtureDensity(
-    GetShaderOf(interaction, master->scene), mixture,
-    interaction, reverse_incident_dir, master->scene, sampler, context, prob_bsdf);
+    ScatterFunctionSurface{GetShaderOf(interaction, master->scene), interaction, reverse_incident_dir},
+    mixture,
+    reverse_incident_dir, master->scene, sampler, context, prob_scatter_func);
 }
 
 
@@ -1045,7 +1219,12 @@ ScatterSample CameraRenderWorker::SampleScatterer(
   const VolumeInteraction &interaction, const Double3 &reverse_incident_dir, 
   const PathContext &context) const
 {
-  ScatterSample s = interaction.medium().SamplePhaseFunction(reverse_incident_dir, interaction.pos, sampler, context);
+  const auto& mixture = this->radiance_recorder_volume->FindRadianceEstimate(interaction.pos).radiance_distribution;
+  const double prob_scatter_func = 0.5;
+  ScatterSample s = SampleWithBinaryMixtureDensity(
+    ScatterFunctionVolume{interaction, reverse_incident_dir},
+    mixture,
+    reverse_incident_dir, master->scene, sampler, context, prob_scatter_func);
   s.value *= interaction.sigma_s;
   return s;
 }
@@ -1094,7 +1273,8 @@ void CameraRenderWorker::MaybeAddEmission(const SurfaceInteraction &interaction,
 #ifdef DEBUG_BUFFERS 
   AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_BSDF, 0, radiance*weight_accum);
 #endif
-  //RecordMeasurementToCurrentPixel(mis_weight*radiance*ps.weight, ps);
+  if (!master->record_samples_for_guiding)
+    RecordMeasurementToCurrentPixel(mis_weight*radiance*ps.weight, ps);
 }
 
 
@@ -1116,8 +1296,9 @@ void CameraRenderWorker::AddEnvEmission(const PathState &ps, PathCoefficients &c
 
   coeffs[coeffs.size()-2].this_scatter_path *= mis_weight;
   coeffs.back().emission = radiance;
-
-  //RecordMeasurementToCurrentPixel(mis_weight*radiance*ps.weight, ps);
+  
+  if (!master->record_samples_for_guiding)
+    RecordMeasurementToCurrentPixel(mis_weight*radiance*ps.weight, ps);
 }
 
 
@@ -1202,49 +1383,50 @@ void CameraRenderWorker::ProcessGuidingData(const PathCoefficients &coeffs, cons
     );
 
     assert((float)lit.scatter_pdf > 0.f);
+    assert(accum_incident.isFinite().all());
 
-    if (/*accum_incident.nonZeros() &*/ accum_incident.isFinite().all())
+    const Spectral3 sample = accum_incident / lit.scatter_pdf;
+    if (lit.surface)
     {
-      const Spectral3 sample = accum_incident / lit.scatter_pdf;
-      if (lit.surface)
-      {
-        radiance_recorder_surface->AddSample(
-          this->radrec_local_surface,
-          lit.pos,
-          sampler,
-          lit.dir,
-          sample);
-      }
-      else
-      {
-        radiance_recorder_volume->AddSample(
-          this->radrec_local_volume,
-          lit.pos,
-          sampler,
-          lit.dir,
-          sample);
-      }
+      radiance_recorder_surface->AddSample(
+        this->radrec_local_surface,
+        lit.pos,
+        sampler,
+        lit.dir,
+        sample);
     }
-    
-    if (!lit.surface && i<isize(coeffs)-2) // Add direct light
+    else
     {
-      const Spectral3 sample = 2.*coeffs[i+1].segment_transmission_from_prev*coeffs[i+1].emission / lit.scatter_pdf;
       radiance_recorder_volume->AddSample(
         this->radrec_local_volume,
         lit.pos,
         sampler,
         lit.dir,
         sample);
-    }
-    if (!lit.surface)
-    {
-      const Spectral3 sample = 2.*lit.nee_emission_times_transmission / lit.nee_pdf_conversion_factor;
-      radiance_recorder_volume->AddSample(
-        this->radrec_local_volume,
-        lit.pos,
-        sampler,
-        lit.dir_nee,
-        sample);
+
+      // if (i<isize(coeffs)-2) // Add direct light
+      // {
+      //   const Spectral3 sample = 3.*coeffs[i+1].segment_transmission_from_prev*coeffs[i+1].emission / lit.scatter_pdf;
+      //   radiance_recorder_volume->AddSample(
+      //     this->radrec_local_volume,
+      //     lit.pos,
+      //     sampler,
+      //     lit.dir,
+      //     sample);
+      // }
+
+      // {
+      //   // Conversion is needed to angular pdf. Factor two because combination of MIS weighted samples should
+      //   // only be counted once. However, here hit-emitter and nee contributions are added individually. 
+      //   // Thus the number of samples is 2 n, where it should be n. To compensate I added 2 in the nominator.
+      //   const Spectral3 sample = 3.*lit.nee_emission_times_transmission / lit.nee_pdf_conversion_factor;
+      //   radiance_recorder_volume->AddSample(
+      //     this->radrec_local_volume,
+      //     lit.pos,
+      //     sampler,
+      //     lit.dir_nee,
+      //     sample);
+      // }
     }
   }
 

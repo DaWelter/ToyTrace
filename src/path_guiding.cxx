@@ -56,7 +56,10 @@ boost::filesystem::path GetDebugFilePrefix()
   return DEBUG_FILE_PREFIX;
 }
 
-static constexpr size_t CELL_BUFFER_SIZE = 1024;
+// The buffers use quite a lot of memory.
+// Because there are num_threads*num_cells*buffer_size*sizeof(record),
+// which adds up ...
+static constexpr size_t CELL_BUFFER_SIZE = 32;
 
 
 PathGuiding::PathGuiding(const Box &region, double cellwidth, const RenderingParameters &params, tbb::task_arena &the_task_arena) :
@@ -262,6 +265,14 @@ void PathGuiding::BeginRound(Span<ThreadLocal*> thread_locals)
     );
   }
 #endif
+
+  long mem_thread_local_buffers = thread_locals.size()*(sizeof(ThreadLocal)+n*(sizeof(RecordBuffer)+CELL_BUFFER_SIZE*sizeof(Record)));
+  long mem_cell_data_temp = n*sizeof(CellDataTemporary);
+  long mem_cell_data = n*sizeof(CellData);
+  std::cout << "--- expected mem use [MB] ----" << std::endl;
+  std::cout << "Thread local buffer " << mem_thread_local_buffers/(1024*1024) << std::endl;
+  std::cout << "Cell data temp " << mem_cell_data_temp/(1024*1024) << std::endl;
+  std::cout << "Cell data " << mem_cell_data/(1024*1024) << std::endl;
 }
 
 

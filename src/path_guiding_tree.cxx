@@ -17,7 +17,7 @@ namespace kdtree
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
 
-void LeafIterator::DecentToNextLeaf()
+void LeafIterator::DecentToNextLeaf()  noexcept
 {
   const Double3 o = ray.org;
   const Double3 d = ray.dir;

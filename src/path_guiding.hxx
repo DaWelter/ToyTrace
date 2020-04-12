@@ -157,6 +157,24 @@ struct CellDataTemporary
 };
 
 
+class CellIterator : kdtree::LeafIterator
+{
+    Span<const CellData> celldata;
+  public:
+    CellIterator(const kdtree::Tree &tree_, Span<const CellData> celldata_, const Ray &ray_, double tnear_init, double tfar_init)  noexcept
+      : kdtree::LeafIterator{tree_, ray_, tnear_init, tfar_init}, celldata{celldata_}
+    {}
+
+    const CellData::CurrentEstimate& operator*() const noexcept
+    {
+      return celldata[kdtree::LeafIterator::Payload()].current_estimate;
+    }
+
+    using kdtree::LeafIterator::Interval;
+    using kdtree::LeafIterator::operator bool;
+    using kdtree::LeafIterator::operator++;
+};
+
 
 
 class PathGuiding
@@ -188,6 +206,11 @@ class PathGuiding
 
         void PrepareAdaptedStructures();
 
+        CellIterator MakeCellIterator(const Ray &ray, double tnear_init, double tfar_init) const
+        {
+          return CellIterator{recording_tree, AsSpan(cell_data), ray, tnear_init, tfar_init};
+        }
+
     private:
 
         static Record ComputeStochasticFilterPosition(const Record & rec, const CellData &cd, Sampler &sampler);
@@ -214,6 +237,73 @@ class PathGuiding
 
         tbb::task_arena *the_task_arena;
         tbb::task_group the_task_group;
+};
+
+
+template<class Iter1_, class Iter2_>
+class CombinedIntervalsIterator
+{
+  using Iter1 = Iter1_; //guiding::kdtree::LeafIterator;
+  using Iter2 = Iter2_; //SegmentIterator;
+  Iter1 leaf_iter;
+  Iter2 boundary_iter;
+  double tnear, tfar;
+  double li_tnear, li_tfar;
+  double bi_tnear, bi_tfar;
+
+public: 
+  CombinedIntervalsIterator(Iter1 leaf_iter, Iter2 boundary_iter)
+    : leaf_iter{leaf_iter}, boundary_iter{boundary_iter}
+  {
+    std::tie(li_tnear, li_tfar) = leaf_iter.Interval();
+    std::tie(bi_tnear, bi_tfar) = boundary_iter.Interval();
+    tnear = std::max(li_tnear, bi_tnear);
+    tfar = std::min(li_tfar, bi_tfar);    
+  }
+
+  operator bool() const noexcept
+  {
+    return leaf_iter && boundary_iter;
+  }
+
+  void operator++()
+  {
+    // If the interval ends of the two iterators coincide, then here an interval of length zero 
+    // will be produced, at the place of the boundary.
+    tnear = tfar;
+    if (li_tfar <= bi_tfar)
+    {
+      ++leaf_iter;
+      if (leaf_iter)
+      {
+        std::tie(li_tnear, li_tfar) = leaf_iter.Interval();
+      }
+    }
+    else
+    {
+      ++boundary_iter;
+      if (boundary_iter)
+      {
+        std::tie(bi_tnear, bi_tfar) = boundary_iter.Interval();
+      }
+    }
+    tfar = std::min(li_tfar, bi_tfar);
+  }
+
+  auto Interval() const noexcept
+  {
+    return std::make_pair(tnear, tfar);
+  }
+
+  decltype(*leaf_iter) DereferenceFirst() const
+  {
+    return *leaf_iter;
+  }
+
+  decltype(*boundary_iter) DereferenceSecond() const
+  {
+    return *boundary_iter;
+  }
 };
 
 

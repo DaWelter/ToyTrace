@@ -156,20 +156,22 @@ inline bool ForEachVolumeSegments(const Scene &scene, const Ray &ray, double tne
 
 class SegmentIterator
 {
+  MediumTracker *medium_tracker;
+  Double3 dir; // Ray direction
   BoundaryIntersection const *start, *end;
   double tnear, tfar;
 public:
-  SegmentIterator(const Span<BoundaryIntersection> is, double tnear, double tfar)
-    : start{ is.begin() }, end{ is.end() }, tnear{ tnear }, tfar{ tfar }
+  SegmentIterator(const Ray &ray, MediumTracker &medium_tracker, const Span<BoundaryIntersection> is, double tnear, double tfar) noexcept
+    : medium_tracker{&medium_tracker}, dir{ray.dir}, start{ is.begin() }, end{ is.end() }, tnear{ tnear }, tfar{ tfar }
   {
   }
 
-  operator bool() const
+  operator bool() const  noexcept
   {
     return tnear != tfar;
   }
 
-  void Next(const Ray& ray, MediumTracker &medium_tracker)
+  void operator++()
   {
     //assert(static_cast<float>(tnear) < static_cast<float>(tfar)); // Not done yet
     if (start == end)
@@ -179,21 +181,26 @@ public:
     }
     else
     {
-      medium_tracker.goingThroughSurface(ray.dir, *start);
+      medium_tracker->goingThroughSurface(dir, *start);
       tnear = start->t;
       ++start;
     }
   }
 
-  std::pair<double, double> Interval() const
+  std::pair<double, double> Interval() const noexcept
   {
     return std::make_pair(tnear, (start==end ? tfar : start->t));
   }
+
+  const Medium& operator*() const
+  {
+    return medium_tracker->getCurrentMedium();
+  }
 };
 
-inline SegmentIterator VolumeSegmentIterator(const Scene &scene, const Ray &ray, double tnear, double tfar)
+inline SegmentIterator VolumeSegmentIterator(const Scene &scene, const Ray &ray, MediumTracker &medium_tracker, double tnear, double tfar)
 {
-  return SegmentIterator{ scene.IntersectionsWithVolumes(ray, tnear, tfar), tnear, tfar };
+  return SegmentIterator{ ray, medium_tracker, scene.IntersectionsWithVolumes(ray, tnear, tfar), tnear, tfar };
 }
 
 
@@ -220,11 +227,11 @@ inline TrackToNextInteraction(
   const auto hit = scene.FirstIntersection(ray, 0., tfar);
 
   // The factor by which tfar is decreased is meant to prevent intersections which lie close to the end of the query segment.
-  auto iter = VolumeSegmentIterator(scene, ray, 0., tfar * 0.9999);
-  for (; iter; iter.Next(ray, medium_tracker))
+  auto iter = VolumeSegmentIterator(scene, ray, medium_tracker, 0., tfar * 0.9999);
+  for (; iter; ++iter)
   {
     auto[snear, sfar] = iter.Interval();
-    const Medium& medium = medium_tracker.getCurrentMedium();
+    const Medium& medium = *iter;
     RaySegment segment{ ray, snear, sfar };
     
     const auto medium_smpl = medium.SampleInteractionPoint(segment, weight*initial_weight, sampler, context);
@@ -306,12 +313,12 @@ inline void TrackBeam(
   PiecewiseConstantTransmittance pct;
   
   // TODO: if the active medium does not change at a boundary, we can aggregate the adjacent segments.
-  auto iter = VolumeSegmentIterator(scene, ray, 0., tfar);
-  for (; iter; iter.Next(ray, medium_tracker))
+  auto iter = VolumeSegmentIterator(scene, ray, medium_tracker, 0., tfar);
+  for (; iter; ++iter)
   {
     const auto[snear, sfar] = iter.Interval();
     const RaySegment segment{ ray, snear, sfar };
-    const auto &medium = medium_tracker.getCurrentMedium();
+    const auto &medium = *iter;
     
     medium.ConstructShortBeamTransmittance(segment, sampler, context, pct);
     
