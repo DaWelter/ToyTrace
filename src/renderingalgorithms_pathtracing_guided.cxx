@@ -290,6 +290,7 @@ struct VertexCoefficients
   Double3 normal;
   double scatter_pdf = 0.;
   double nee_pdf_conversion_factor = 1.;
+  double nee_mis_factor = 1.;
   // T(y, x)/p_T(y,x) where y is the previously visited vertex
   Spectral3 segment_transmission_from_prev{Eigen::zero};
   // rho(x) / p_rho(x). BSDF + Dfactors evaluated for the traced path (not NEE sampling)
@@ -297,6 +298,7 @@ struct VertexCoefficients
   Spectral3 this_scatter_nee{Eigen::zero};
   // Emission Le(x)
   Spectral3 emission{Eigen::zero};
+  double emission_mis_factor = 1.;
   // NEE quantities pertaining to the path segment to the sampled light and the light itself.
   Spectral3 nee_emission_times_transmission{Eigen::zero};
   bool specular = false;
@@ -371,7 +373,7 @@ public:
 class PathTracingAlgo2 : public RenderingAlgo
 {
   friend class CameraRenderWorker;
-  friend class DebugRenderWorker;
+  friend class ApproximatePixelWorker;
 private:
   ToyVector<RGB> framebuffer;
   ImageTileSet tileset;
@@ -428,7 +430,7 @@ protected:
 ////////////////////////////////////////////////////////////////////////////
 
 
-class alignas(128) DebugRenderWorker
+class alignas(128) ApproximatePixelWorker
 {
   PathTracingAlgo2 const * master;
   guiding::PathGuiding const * radiance_recorder_surface;
@@ -440,7 +442,7 @@ class alignas(128) DebugRenderWorker
   static constexpr int num_lambda_sweeps = decltype(lambda_selection_factory)::NUM_SAMPLES_REQUIRED;
 
 public:
-  DebugRenderWorker(PathTracingAlgo2* master, Span<RGB> framebuffer)
+  ApproximatePixelWorker(PathTracingAlgo2* master, Span<RGB> framebuffer)
     : master{ master },
     radiance_recorder_surface{master->radiance_recorder_surface.get()},
     radiance_recorder_volume{master->radiance_recorder_volume.get()},
@@ -506,11 +508,13 @@ public:
           else
           {
             // Stop on a diffuse surface
-            auto [incident_radiance_estimator, segment_to_light] = ComputeDirectLighting(*si, medium_tracker, sampler, context);
-
-            const double dfactor = DFactorPBRT(*si, segment_to_light.ray.dir);
-            const Spectral3 bsdf_weight = GetShaderOf(*si, master->scene).EvaluateBSDF(-ray.dir, *si, segment_to_light.ray.dir, context, nullptr);
-            measurement_estimator += weight * track_weight * bsdf_weight * dfactor * incident_radiance_estimator;
+            auto [incident_radiance_estimator, pdf, segment_to_light] = ComputeDirectLighting(*si, medium_tracker, sampler, context);
+            if (pdf.IsFromDelta())
+            {
+              const double dfactor = DFactorPBRT(*si, segment_to_light.ray.dir);
+              const Spectral3 bsdf_weight = GetShaderOf(*si, master->scene).EvaluateBSDF(-ray.dir, *si, segment_to_light.ray.dir, context, nullptr);
+              measurement_estimator += weight * track_weight * bsdf_weight * dfactor * incident_radiance_estimator;
+            }
 
             const Spectral3 indirect_lighting = ComputeIndirectLighting(*si, ray.dir, sampler, context);
             measurement_estimator += weight * track_weight * indirect_lighting;
@@ -566,6 +570,7 @@ public:
   Spectral3 ComputeInscatteredRadiance(const VolumeInteraction &interaction, const Double3& /*rev_incident_dir*/, Sampler& /*sampler*/, const PathContext& /*context*/)
   {
     const auto& estimate = radiance_recorder_volume->FindRadianceEstimate(interaction.pos);
+    // TODO: Abolish assumption of uniform phase function
     Spectral3 result = Spectral3::Constant(estimate.incident_flux_density / UnitSphereSurfaceArea);
     return result;
   }
@@ -578,7 +583,7 @@ public:
     framebuffer[pixel_index] += color;
   }
 
-  std::tuple<Spectral3, RaySegment> ComputeDirectLighting(const SurfaceInteraction & interaction, const MediumTracker &medium_tracker, Sampler &sampler, const PathContext &context) const
+  std::tuple<Spectral3, Pdf, RaySegment> ComputeDirectLighting(const SurfaceInteraction & interaction, const MediumTracker &medium_tracker, Sampler &sampler, const PathContext &context) const
   {
     RaySegment segment_to_light;
     Pdf pdf;
@@ -588,7 +593,8 @@ public:
     pickers->GetDistributionNee().Sample(sampler, [&](auto &&light, double prob, const LightRef &light_ref_)
     {
       std::tie(segment_to_light, pdf, light_radiance) = light.SampleConnection(interaction, master->scene, sampler, context);
-      path_weight /= ((double)(pdf)*prob);
+      pdf *= prob;
+      path_weight /= (double)(pdf);
       if constexpr (!std::remove_reference<decltype(light)>::type::IsAngularDistribution())
       {
         path_weight *= 1./Sqr(segment_to_light.length);
@@ -605,10 +611,10 @@ public:
     path_weight *= transmittance;
 
     Spectral3 incident_radiance_estimator = path_weight*light_radiance;
-    return std::make_tuple(incident_radiance_estimator, segment_to_light);
+    return std::make_tuple(incident_radiance_estimator, pdf, segment_to_light);
   }
 
-}; // class DebugRenderWorker
+}; // class ApproximatePixelWorker
 
 
 void PathTracingAlgo2::RenderRadianceEstimates(fs::path filename)
@@ -620,7 +626,7 @@ void PathTracingAlgo2::RenderRadianceEstimates(fs::path filename)
     auto num_pixels = render_params.width * render_params.height;
     ToyVector<RGB> framebuffer(num_pixels);
 
-    ToyVector<DebugRenderWorker> workers; workers.reserve(the_task_arena.max_concurrency());
+    ToyVector<ApproximatePixelWorker> workers; workers.reserve(the_task_arena.max_concurrency());
     for (int i = 0; i<the_task_arena.max_concurrency(); ++i)
       workers.emplace_back(this, AsSpan(framebuffer));
 
@@ -1005,14 +1011,15 @@ void CameraRenderWorker::AddDirectLighting(const SomeInteraction & interaction, 
     auto& coeff = coeffs.back();
     coeff.nee_pdf_conversion_factor = pdf_conversion_factor;
     coeff.specular_nee = pdf.IsFromDelta();
-    coeff.nee_emission_times_transmission = light_radiance*transmittance*mis_weight;
+    coeff.nee_emission_times_transmission = light_radiance*transmittance;
+    coeff.nee_mis_factor = mis_weight;
     coeff.this_scatter_nee = scatter_kernel;
     coeff.dir_nee = segment_to_light.ray.dir;
   }
 
   pickers->ObserveReturnNee(this->picker_local, light_ref, measurement_estimator);
 
-  if (!master->record_samples_for_guiding)
+  //if (!master->record_samples_for_guiding)
     RecordMeasurementToCurrentPixel(measurement_estimator, ps);
 }
 
@@ -1268,12 +1275,13 @@ void CameraRenderWorker::MaybeAddEmission(const SurfaceInteraction &interaction,
   }
 
   //coeffs[coeffs.size()-2].this_scatter_path *= mis_weight;
-  coeffs.back().emission = radiance * mis_weight;
+  coeffs.back().emission = radiance;
+  coeffs.back().emission_mis_factor = mis_weight;
 
 #ifdef DEBUG_BUFFERS 
   AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_BSDF, 0, radiance*weight_accum);
 #endif
-  if (!master->record_samples_for_guiding)
+  //if (!master->record_samples_for_guiding)
     RecordMeasurementToCurrentPixel(mis_weight*radiance*ps.weight, ps);
 }
 
@@ -1297,7 +1305,7 @@ void CameraRenderWorker::AddEnvEmission(const PathState &ps, PathCoefficients &c
   coeffs[coeffs.size()-2].this_scatter_path *= mis_weight;
   coeffs.back().emission = radiance;
   
-  if (!master->record_samples_for_guiding)
+  //if (!master->record_samples_for_guiding)
     RecordMeasurementToCurrentPixel(mis_weight*radiance*ps.weight, ps);
 }
 
@@ -1336,9 +1344,17 @@ inline Spectral3 AccumulateIndirectRadiance(
 
       accum_incident += clamped_weight*node->nee_emission_times_transmission*node->this_scatter_nee;
       
-      if (i > 0)
+      // (i > 0) // Ignore the first hit on an emissive surface. Thus we truely only consider indirect light. But is this the right thing to do?
+      // Maybe it is not ...
+      // See "Adjoint-Driven Russian Roulette and Splitting in Light Transport Simulation" Sec 5.4
+      //
       {
-        accum_incident += clamped_weight*node->emission;
+        // For the first hit, I cannot combine NEE and direct hits with MIS because the irradiance from the
+        // direct hit is backed into the mixture. So, to get a proper radiance estimate one has to take
+        // the hit, with weight 1. Perhaps I could add a NEE sample, but what about point sources?
+        // It's not a continuous radiance distribution, so one cannot fit it with the vmf mixture, right?
+        const double use_mis = (i > 0) ? node->emission_mis_factor : 1.;
+        accum_incident += clamped_weight*node->emission*use_mis;
       }
       path_weight *= node->this_scatter_path;
     }
@@ -1355,16 +1371,16 @@ void CameraRenderWorker::ProcessGuidingData(const PathCoefficients &coeffs, cons
   if (coeffs.size() < 3)
     return;
 
-  {
-    const Spectral3 accum_incident = AccumulateIndirectRadiance(
-          coeffs.begin() + 1,
-          coeffs.end());
+  // {
+  //   const Spectral3 accum_incident = AccumulateIndirectRadiance(
+  //         coeffs.begin() + 1,
+  //         coeffs.end());
     
-    const Spectral3 radiance_in = coeffs[0].this_scatter_path*coeffs[1].segment_transmission_from_prev*
-      (coeffs[1].this_scatter_path*accum_incident + coeffs[1].nee_emission_times_transmission*coeffs[1].this_scatter_nee);
+  //   const Spectral3 radiance_in = coeffs[0].this_scatter_path*coeffs[1].segment_transmission_from_prev*
+  //     (coeffs[1].this_scatter_path*accum_incident + coeffs[1].nee_emission_times_transmission*coeffs[1].this_scatter_nee);
 
-    RecordMeasurementToCurrentPixel(radiance_in, ps);
-  }
+  //   RecordMeasurementToCurrentPixel(radiance_in, ps);
+  // }
 
   for (int i=1; i<isize(coeffs)-1; ++i)
   {
