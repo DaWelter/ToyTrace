@@ -138,7 +138,7 @@ public:
 };
 #endif
 
-#if 0
+
 inline double ScatterInCellProbability(double sigma_s, double sigma_t, double transmittance, double li_distribution) noexcept
 {
   // Volume Path Guiding Based on Zero-Variance Random Walk Theory
@@ -148,8 +148,8 @@ inline double ScatterInCellProbability(double sigma_s, double sigma_t, double tr
   assert (std::isfinite(transmittance));
   assert (std::isfinite(li_distribution));
 
-  static constexpr double MIN_PROB = 0.1;
-  static constexpr double MAX_PROB = 0.9;
+  static constexpr double MIN_PROB = 0.;
+  static constexpr double MAX_PROB = 1.;
 
   const double prob_interact = 
     (1. - transmittance)*sigma_s/(sigma_t*UnitSphereSurfaceArea*li_distribution);
@@ -159,12 +159,11 @@ inline double ScatterInCellProbability(double sigma_s, double sigma_t, double tr
   return prob_interact > MIN_PROB ? (prob_interact < MAX_PROB ? prob_interact : MAX_PROB) : MIN_PROB;
 }
 
-
 inline std::pair<double,double> SampleTransmittanceWithinRange(double sigma_t, double r, double tnear, double tfar) noexcept
 {
   // Kulla & M. Fajardo / Importance Sampling Techniques for Path Tracing in Participating Media
   // Eq (9)
-  assert (tnear >= tfar);
+  assert (tnear <= tfar);
   assert (sigma_t >= 0.);
   const double t1 = 1. - std::exp(-(tfar-tnear)*sigma_t);
   const double t2 = std::log(1. - r * t1);
@@ -201,15 +200,16 @@ inline std::pair<double, double> RadianceFilter(
   return std::make_pair(current_l_1, current_l_2);
 }
 
+
+#if 0
 /* Ray is the ray to shoot. It must already include the anti-self-intersection offset.
   */
 std::tuple<MaybeSomeInteraction, double, Spectral3>
-inline TrackToNextInteraction(
+inline TrackToNextInteractionGuided(
   const Scene &scene,
   const guiding::PathGuiding &pathguiding,
   const Ray &ray,
   const PathContext &context,
-  const Spectral3 &initial_weight,
   Sampler &sampler,
   MediumTracker &medium_tracker)
 {
@@ -235,7 +235,7 @@ inline TrackToNextInteraction(
     auto[snear, sfar] = iter.Interval();
     if (snear == sfar)
       continue;
-
+    assert (snear < sfar);
     const Medium& medium = iter.DereferenceSecond();
     const guiding::CellData::CurrentEstimate& radiance_estimate = iter.DereferenceFirst();
     
@@ -247,18 +247,22 @@ inline TrackToNextInteraction(
     // TODO: Generalize
     const double prob_scatter_within_boundaries = ScatterInCellProbability(
       material_coeffs.sigma_s[0], material_coeffs.sigma_t[0], bin_transmittance[0], 
-      vmf_fitting::Pdf(radiance_estimate.radiance_distribution, -ray.dir));
-    
+      vmf_fitting::Pdf(radiance_estimate.radiance_distribution, -ray.dir.cast<float>()));
+    assert(prob_scatter_within_boundaries >= 0.);
+
     if (sampler.Uniform01() < prob_scatter_within_boundaries)
     {
+      assert (pdf > 0.);
       pdf *= prob_scatter_within_boundaries;
       auto [s, pdf_bin] = SampleTransmittanceWithinRange(material_coeffs.sigma_t[0], sampler.Uniform01(), snear, sfar);
+      assert (pdf_bin > 0.);
       pdf *= pdf_bin;
-
       // The usual stuff
       const VolumeInteraction vi{ ray.PointAt(s), medium, Spectral3{ 0. }, material_coeffs.sigma_s };
       const Spectral3 transmittance_to_s = medium.EvaluateTransmission(RaySegment{ray, snear, s}, sampler, context);
       const Spectral3 weight = transmittance*transmittance_to_s / pdf;
+      assert(weight.allFinite());
+      assert(0 <= s && s <= tfar);
       return RetType{ vi, s, weight };
     }
     else
@@ -269,6 +273,8 @@ inline TrackToNextInteraction(
   }
 
   const Spectral3 weight = transmittance / pdf;
+  assert(weight.allFinite());
+
   // If we get here, there was no scattering in the medium.
   if (hit)
   {
@@ -279,6 +285,7 @@ inline TrackToNextInteraction(
     return RetType{ std::monostate{}, LargeNumber, weight };
   }
 };
+#else
 #endif
 
 
@@ -483,8 +490,12 @@ public:
       bool keep_going = true;
       for (int ray_depth = 0; ray_depth < master->render_params.max_ray_depth && keep_going; ++ray_depth)
       {
-        auto[interaction, tfar, track_weight] = TrackToNextInteraction(master->scene, ray, context, Spectral3::Ones(), sampler, medium_tracker, nullptr);
+        //auto[interaction, tfar, track_weight] = TrackToNextInteraction(master->scene, ray, context, Spectral3::Ones(), sampler, medium_tracker, nullptr);
+        auto [interaction, tfar, track_weight, inscatter] = RayMarchAccumulatingInscatter(
+          /*master->scene, *radiance_recorder_volume,*/ ray, context, sampler, medium_tracker);
         
+        measurement_estimator += weight * inscatter;
+
         if (auto *si = std::get_if<SurfaceInteraction>(&interaction))
         {
           if (ray_depth == 0) // If camera ray hits an emissive surface ...
@@ -539,6 +550,71 @@ public:
   }
 
 
+  std::tuple<MaybeSomeInteraction, double, Spectral3, Spectral3>
+  inline RayMarchAccumulatingInscatter(
+    const Ray &ray,
+    const PathContext &context,
+    Sampler &sampler,
+    MediumTracker &medium_tracker)
+  {
+    // Volume Path Guiding Based on Zero-Variance Random Walk Theory
+    // Algo 1
+
+    using RetType = std::tuple<MaybeSomeInteraction, double, Spectral3, Spectral3>;
+
+    double tfar = LargeNumber;
+    const auto hit = master->scene.FirstIntersection(ray, 0., tfar);
+    // The factor by which tfar is decreased is meant to prevent intersections which lie close to the end of the query segment.
+    tfar *= 0.9999;
+    
+    Spectral3 transmittance{Eigen::ones};
+    Spectral3 integrated_inscatter{Eigen::zero};
+
+    auto iter = guiding::CombinedIntervalsIterator<guiding::CellIterator, SegmentIterator>{
+      radiance_recorder_volume->MakeCellIterator(ray, 0., tfar),
+      VolumeSegmentIterator(master->scene, ray, medium_tracker, 0., tfar)
+    };
+    for (; iter; ++iter)
+    {
+      auto[snear, sfar] = iter.Interval();
+      if (snear == sfar)
+        continue;
+      assert (snear < sfar);
+      const Medium& medium = iter.DereferenceSecond();
+      
+      // For now assume constant coefficients
+      const auto material_coeffs = medium.EvaluateCoeffs(ray.PointAt(0.5*(snear+sfar)), context);
+      const Spectral3 bin_transmittance = medium.EvaluateTransmission(RaySegment{ray, snear, sfar}, sampler, context);
+      
+      //const double s = Lerp(snear, sfar, 0.5); //sampler.Uniform01());
+      //pdf *= 1./(sfar - snear);
+      auto [s, pdf_bin] = SampleTransmittanceWithinRange(material_coeffs.sigma_t[0], sampler.Uniform01(), snear, sfar);
+      assert (pdf_bin > 0.);
+
+      const Spectral3 transmittance_to_s = medium.EvaluateTransmission(RaySegment{ray, snear, s}, sampler, context);
+      const Spectral3 weight = transmittance*transmittance_to_s / pdf_bin;
+      
+      const Spectral3 inscatter = ComputeInscatteredRadiance(iter.DereferenceFirst());
+      integrated_inscatter += weight * material_coeffs.sigma_s * inscatter;
+
+      assert(weight.allFinite());
+      assert(0 <= s && s <= tfar);
+
+      transmittance *= bin_transmittance;
+    }
+
+    // If we get here, there was no scattering in the medium.
+    if (hit)
+    {
+      return RetType{ *hit, tfar, transmittance, integrated_inscatter };
+    }
+    else
+    {
+      return RetType{ std::monostate{}, LargeNumber, transmittance, integrated_inscatter };
+    }
+  }
+
+
   Spectral3 ComputeIndirectLighting(const SurfaceInteraction &interaction, const Double3 &rev_incident_dir, Sampler &sampler, const PathContext &context)
   {
     const auto& estimate = radiance_recorder_surface->FindRadianceEstimate(interaction.pos);
@@ -563,6 +639,14 @@ public:
     }
     // Bad approximation because the estimate incident flux is averaged over wavelengths!
     result *= estimate.incident_flux_density / sample_count;
+    return result;
+  }
+
+
+  Spectral3 ComputeInscatteredRadiance(const guiding::CellData::CurrentEstimate &radiance_fit) const
+  {
+    // TODO: Abolish assumption of uniform phase function
+    Spectral3 result = Spectral3::Constant(radiance_fit.incident_flux_density / UnitSphereSurfaceArea);
     return result;
   }
 
