@@ -9,7 +9,7 @@
 #include <memory>
 #include <boost/functional/hash.hpp>
 #include <variant>
-
+#include <optional>
 
 namespace boost { namespace filesystem {
   class path;
@@ -87,6 +87,12 @@ struct SurfaceInteraction : public InteractionPoint
   SurfaceInteraction(const HitId &hitid, const RaySegment &_incident_segment);
   SurfaceInteraction(const HitId &hitid);
   SurfaceInteraction() = default;
+  
+  SurfaceInteraction(const SurfaceInteraction &) = default;
+  SurfaceInteraction(SurfaceInteraction&&) = default;
+  SurfaceInteraction& operator=(const SurfaceInteraction &) = default;
+  SurfaceInteraction& operator=(SurfaceInteraction &&) = default;
+
   void SetOrientedNormals(const Double3 &incident);
 };
 
@@ -100,12 +106,17 @@ struct VolumeInteraction : public InteractionPoint
   VolumeInteraction(const Double3 &_position, const Medium &_medium, const Spectral3 &radiance_, const Spectral3 &sigma_s_)
     : InteractionPoint{ _position }, _medium{ &_medium }, radiance{ radiance_ }, sigma_s{ sigma_s_ }
   {}
+
+  VolumeInteraction(const VolumeInteraction &) = default;
+  VolumeInteraction(VolumeInteraction&&) = default;
+  VolumeInteraction& operator=(const VolumeInteraction &) = default;
+  VolumeInteraction& operator=(VolumeInteraction &&) = default;
+
   const Medium& medium() const { return *_medium; }
 };
 
-
 using SomeInteraction = std::variant<SurfaceInteraction, VolumeInteraction>;
-using MaybeSomeInteraction = std::variant<std::monostate, SurfaceInteraction, VolumeInteraction>;
+using MaybeSomeInteraction = std::optional<SomeInteraction>;
 
 Double3 AntiSelfIntersectionOffset(const SurfaceInteraction &interaction, const Double3 &exitant_dir);
 

@@ -248,6 +248,10 @@ class Accumulator
     T sqr_deviation_sum{0.};
     CounterType n{0};
   public:
+    Accumulator() = default;
+    template<class U>
+    explicit Accumulator(U zero) : mean{zero}, sqr_deviation_sum{zero} {}
+
     void Update(const T &new_x)
     {
       OnlineVariance::Update(mean, sqr_deviation_sum, n, new_x);
@@ -371,14 +375,16 @@ class Pdf
   double value;
 public:
   operator double () const { return std::abs(value); }
-  Pdf() : value{NaN} {}
-  Pdf(double _value) : value{_value} 
+  Pdf() noexcept : value{NaN} {}
+  Pdf(double _value) noexcept : value{_value} 
   {
     assert(_value>=0);
   }
-  Pdf(const Pdf &other) : value{other.value} {}
-  Pdf& operator=(const Pdf &other) { value = other.value; return *this; }
-  
+  Pdf(const Pdf &) noexcept = default;
+  Pdf(Pdf &&) noexcept = default;
+  Pdf& operator=(const Pdf &) noexcept = default;
+  Pdf& operator=(Pdf &&) noexcept = default;
+
   bool IsFromDelta() const { return std::signbit(value); }  
   
   Pdf& operator *= (double q) 

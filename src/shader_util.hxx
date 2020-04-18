@@ -30,14 +30,16 @@ enum TransportType : char
 struct PathContext
 {
   PathContext() = default;
-  explicit PathContext(const LambdaSelection &_lambdas, TransportType _transport = RADIANCE )
-    : lambda_idx(_lambdas.indices), wavelengths{_lambdas.wavelengths}, transport(_transport)
+  PathContext(const LambdaSelection &_lambdas, TransportType _transport, int pixel_index_)
+    : lambda_idx(_lambdas.indices), wavelengths{_lambdas.wavelengths}, transport(_transport), pixel_index{pixel_index_}
+  {}
+  PathContext(const LambdaSelection &_lambdas, int pixel_index_ = -1)
+    : PathContext{_lambdas, RADIANCE, pixel_index_}
   {}
   Index3 lambda_idx {};
   Wavelengths3 wavelengths {};
   TransportType transport { RADIANCE };
-  int pixel_x = {-1};
-  int pixel_y = {-1};
+  int pixel_index = -1;
 };
 
 

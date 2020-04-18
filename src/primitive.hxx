@@ -9,6 +9,8 @@ static constexpr int INVALID_PRIM_INDEX {-1};
 
 struct PrimRef // Reference to Primitive
 {
+  PrimRef() noexcept = default;
+
   const Geometry *geom = { nullptr };
   int index = INVALID_PRIM_INDEX;
   
@@ -22,8 +24,8 @@ struct PrimRef // Reference to Primitive
 
 struct HitId : public PrimRef
 {
-  HitId() = default;
-  HitId(const Geometry* _geom, int index, const Double3 &_barry) 
+  HitId() noexcept = default;
+  HitId(const Geometry* _geom, int index, const Double3 &_barry) noexcept
     : PrimRef{_geom, index}, barry{_barry}
   {}
   Double3 barry;

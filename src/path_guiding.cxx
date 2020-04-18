@@ -245,6 +245,7 @@ void PathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRadiance>
 void PathGuiding::BeginRound(Span<ThreadLocal*> thread_locals)
 {
   const auto n = recording_tree.NumLeafs();
+  assert(n == cell_data.size());
 
   for (auto* tl : thread_locals)
   {
@@ -256,6 +257,8 @@ void PathGuiding::BeginRound(Span<ThreadLocal*> thread_locals)
     }
   }
   cell_data_temp.reset(new CellDataTemporary[n]);
+
+
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
   cell_data_debug.reset(new CellDebug[n]);
   for (std::ptrdiff_t i = 0; i < n; ++i)
@@ -290,6 +293,10 @@ void PathGuiding::FinalizeRound(Span<ThreadLocal*> thread_locals)
   the_task_arena->execute([&]() { the_task_group.wait(); } );
 
   cell_data_temp.reset();
+
+  // Release memory
+  for (auto* tl : thread_locals)
+    tl->records_by_cells = decltype(tl->records_by_cells){};
 
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
   std::for_each(cell_data_debug.get(), cell_data_debug.get() + celldatas.size(), [](auto& dbg) {

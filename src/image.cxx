@@ -55,7 +55,6 @@ Image::Image( int w, int h )
 
 void Image::init( int w, int h )
 {
-  assert(w>0 && h>0);
   col[0]=col[1]=col[2] = 0;
   opacity=1.0f;
   TOCIMG(priv)->~CImgType();

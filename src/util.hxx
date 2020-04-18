@@ -416,3 +416,17 @@ inline float AtomicAdd(std::atomic<float> &f, float d) {
   }
   return desired;
 }
+
+
+// From https://arne-mertz.de/2018/05/overload-build-a-variant-visitor-on-the-fly/
+template <class ...Fs>
+struct Overload : Fs... {
+  template <class ...Ts>
+  Overload(Ts&& ...ts) : Fs{std::forward<Ts>(ts)}...
+  {} 
+
+  using Fs::operator()...;
+};
+
+template <class ...Ts>
+Overload(Ts&&...) -> Overload<std::remove_reference_t<Ts>...>;

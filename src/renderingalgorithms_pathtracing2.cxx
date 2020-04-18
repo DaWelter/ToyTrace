@@ -132,7 +132,6 @@ struct PathState
   Ray ray;
   Spectral3 weight;
   boost::optional<Pdf> last_scatter_pdf_value; // For MIS.
-  int pixel_index;
   int current_node_count;
   bool monochromatic;
 };
@@ -334,19 +333,18 @@ void CameraRenderWorker::Render(const ImageTileSet::Tile &tile)
 
 void CameraRenderWorker::InitializePathState(PathState &p, Int2 pixel, const LambdaSelection &lambda_selection) const
 {
-  p.context = PathContext(lambda_selection);
-  p.context.pixel_x = pixel[0];
-  p.context.pixel_y = pixel[1];
+  const auto& camera = master->scene.GetCamera();
+  p.context = PathContext(lambda_selection, camera.PixelToUnit({ pixel[0], pixel[1] }));
+  
   p.current_node_count = 2; // First node on camera. We start with the node code of the next interaction.
   p.monochromatic = false;
   p.weight = lambda_selection.weights;
   p.last_scatter_pdf_value = boost::none;
 
-  const auto& camera = master->scene.GetCamera();
-  p.pixel_index = camera.PixelToUnit({ pixel[0], pixel[1] });
-  auto pos = camera.TakePositionSample(p.pixel_index, sampler, p.context);
+
+  auto pos = camera.TakePositionSample(p.context.pixel_index, sampler, p.context);
   p.weight *= pos.value / pos.pdf_or_pmf;
-  auto dir = camera.TakeDirectionSampleFrom(p.pixel_index, pos.coordinates, sampler, p.context);
+  auto dir = camera.TakeDirectionSampleFrom(p.context.pixel_index, pos.coordinates, sampler, p.context);
   p.weight *= dir.value / dir.pdf_or_pmf;
   p.ray = { pos.coordinates, dir.coordinates };
 
@@ -360,24 +358,26 @@ bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(PathState &ps) con
   auto[interaction, tfar, track_weight] = TrackToNextInteraction(master->scene, ps.ray, ps.context, Spectral3::Ones(), sampler, ps.medium_tracker, nullptr);
   ps.weight *= track_weight;
 
-  if (auto si = std::get_if<SurfaceInteraction>(&interaction))
-  {
-      MaybeAddEmission(*si, ps);
-      AddDirectLighting(*si, ps);
-      ps.current_node_count++;
-      return MaybeScatter(*si, ps);
-  }
-  else if (auto vi = std::get_if<VolumeInteraction>(&interaction))
-  {
-    AddDirectLighting(*vi, ps);
-    ps.current_node_count++;
-    return MaybeScatter(*vi, ps);
-  }
-  else
+  if (!interaction)
   {
     AddEnvEmission(ps);
     return false;
   }
+
+  return std::visit(
+    Overload(
+      [&](const SurfaceInteraction &si)  {
+        MaybeAddEmission(si, ps);
+        AddDirectLighting(si, ps);
+        ps.current_node_count++;
+        return MaybeScatter(si, ps);
+      },
+      [&](const VolumeInteraction &vi) {
+        AddDirectLighting(vi, ps);
+        ps.current_node_count++;
+        return MaybeScatter(vi, ps);
+      }
+  ), *interaction);
 }
 
 
@@ -564,7 +564,7 @@ void CameraRenderWorker::RecordMeasurementToCurrentPixel(const Spectral3 &measur
 {
   assert(measurement.isFinite().all());
   auto color = Color::SpectralSelectionToRGB(measurement, ps.context.lambda_idx);
-  framebuffer[ps.pixel_index] += color;
+  framebuffer[ps.context.pixel_index] += color;
 }
 
 

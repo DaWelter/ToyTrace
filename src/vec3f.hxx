@@ -36,15 +36,15 @@ class Vec : public Eigen::Matrix<T, d, 1>
      * ctors
      * -----------------------------------------*/
     
-    Vec() : Base(Base::Constant(0.)) {}
+    Vec() noexcept : Base(Base::Constant(0.)) {}
     
-    explicit Vec(const T &v) : Base() { this->setConstant(d, v); }
+    explicit Vec(const T &v) noexcept : Base() { this->setConstant(d, v); }
     
-    Vec(const T &a, const T &b) : Base(a, b) {}
-    Vec(const T &a, const T &b, const T &c) : Base(a, b, c) {}
+    Vec(const T &a, const T &b) noexcept : Base(a, b) {}
+    Vec(const T &a, const T &b, const T &c) noexcept: Base(a, b, c) {}
     
     template<typename OtherDerived >
-    Vec (const Eigen::MatrixBase< OtherDerived > &other) : Base(other) {}
+    Vec (const Eigen::MatrixBase< OtherDerived > &other) noexcept : Base(other) {}
 };
 
 

@@ -20,15 +20,18 @@ class MediumTracker
   static constexpr int MAX_INTERSECTING_MEDIA = 4;
   const Medium* current;
   std::array<const Medium*, MAX_INTERSECTING_MEDIA> media;
-  const Scene &scene;
+  const Scene *scene;
   void enterVolume(const Medium *medium);
   void leaveVolume(const Medium *medium);
   const Medium* findMediumOfHighestPriority() const;
   bool remove(const Medium *medium);
   bool insert(const Medium *medium);
 public:
-  explicit MediumTracker(const Scene &_scene);
-  MediumTracker(const MediumTracker &_other) = default;
+  explicit MediumTracker(const Scene &_scene) noexcept;
+  MediumTracker(const MediumTracker &) noexcept = default;
+  MediumTracker& operator=(const MediumTracker &) noexcept = default;
+  MediumTracker(MediumTracker &&) noexcept = default;
+  MediumTracker& operator=(MediumTracker &&) noexcept = default;
   void initializePosition(const Double3 &pos);
   void goingThroughSurface(const Double3 &dir_of_travel, const SurfaceInteraction &intersection);
   void goingThroughSurface(const Double3 &dir_of_travel, const BoundaryIntersection &intersection);
@@ -45,7 +48,7 @@ inline const Medium& MediumTracker::getCurrentMedium() const
 
 inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const SurfaceInteraction& intersection)
 {
-  const Medium *m = scene.GetMaterialOf(intersection.hitid).medium;
+  const Medium *m = scene->GetMaterialOf(intersection.hitid).medium;
   if (!m)
     return;
   if (Dot(dir_of_travel, intersection.geometry_normal) < 0)
@@ -57,7 +60,7 @@ inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, con
 
 inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const BoundaryIntersection& intersection)
 {
-  const Medium *m = scene.GetMaterialOf(intersection.geom, intersection.prim).medium;
+  const Medium *m = scene->GetMaterialOf(intersection.geom, intersection.prim).medium;
   if (!m)
     return;
   if (Dot(dir_of_travel.cast<float>(), intersection.n) < 0)
@@ -69,7 +72,7 @@ inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, con
 
 inline const Medium* MediumTracker::findMediumOfHighestPriority() const
 {
-  const Medium* medium_max_prio = &scene.GetEmptySpaceMedium();
+  const Medium* medium_max_prio = &scene->GetEmptySpaceMedium();
   for (int i = 0; i < media.size(); ++i)
   {
     medium_max_prio = (media[i] &&  medium_max_prio->priority < media[i]->priority) ?
@@ -288,7 +291,7 @@ inline TrackToNextInteraction(
   },
       [&](const Spectral3 &weight) -> RetType
   {
-    return RetType{ std::monostate{}, LargeNumber, weight };
+    return RetType{ MaybeSomeInteraction{}, LargeNumber, weight };
   });
 }
 
@@ -385,6 +388,21 @@ inline double DFactorPBRT(const SurfaceInteraction &intersection, const Double3 
   // This one uses the shading normal. Use with PBRT style shading normal correction!
   return std::abs(Dot(intersection.shading_normal, exitant_dir));
 }
+
+
+namespace Lightpickers {
+class LightSelectionProbabilityMap;
+}
+
+
+// Returns pdf w.r.t. radians!
+std::tuple<Spectral3, Pdf, RaySegment, Lights::LightRef> ComputeDirectLighting(
+  const Scene &scene, 
+  const SomeInteraction & interaction, 
+  const Lightpickers::LightSelectionProbabilityMap &light_probabilities, 
+  const MediumTracker &medium_tracker, 
+  const PathContext &context, 
+  Sampler &sampler);
 
 
 class RayTermination

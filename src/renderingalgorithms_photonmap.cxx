@@ -250,7 +250,6 @@ struct PathState
   Ray ray;
   Spectral3 weight;
   boost::optional<Pdf> last_scatter_pdf_value; // For MIS.
-  int pixel_index;
   int current_node_count;
   bool monochromatic;
 };
@@ -827,19 +826,17 @@ void CameraRenderWorker::Render(const ImageTileSet::Tile &tile)
 
 void CameraRenderWorker::InitializePathState(PathState &p, Int2 pixel) const
 {
-    p.context.pixel_x = pixel[0];
-    p.context.pixel_y = pixel[1];
+    const auto& camera = master->scene.GetCamera();
+    p.context.pixel_index = camera.PixelToUnit({ pixel[0], pixel[1] });
+
     p.current_node_count = 2; // First node on camera. We start with the node code of the next interaction.
     p.monochromatic = false;
     p.weight = lambda_selection.weights;
     p.last_scatter_pdf_value = boost::none;
 
-
-    const auto& camera = master->scene.GetCamera();
-    p.pixel_index = camera.PixelToUnit({ pixel[0], pixel[1] });    
-    auto pos = camera.TakePositionSample(p.pixel_index, sampler, p.context);
+    auto pos = camera.TakePositionSample(p.context.pixel_index, sampler, p.context);
     p.weight *= pos.value / pos.pdf_or_pmf;
-    auto dir = camera.TakeDirectionSampleFrom(p.pixel_index, pos.coordinates, sampler, p.context);
+    auto dir = camera.TakeDirectionSampleFrom(p.context.pixel_index, pos.coordinates, sampler, p.context);
     p.weight *= dir.value / dir.pdf_or_pmf;
     p.ray = { pos.coordinates, dir.coordinates };
 
@@ -1137,7 +1134,7 @@ void CameraRenderWorker::AddPhotonBeamContributions(const RaySegment &segment, c
 void CameraRenderWorker::RecordMeasurementToCurrentPixel(const Spectral3 &measurement, const PathState &ps) const
 {
   auto color = Color::SpectralSelectionToRGB(measurement, lambda_selection.indices);
-  framebuffer[ps.pixel_index] += color;
+  framebuffer[ps.context.pixel_index] += color;
 }
 
 

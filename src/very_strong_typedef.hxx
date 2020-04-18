@@ -18,8 +18,9 @@
 template <typename T, typename N>
 struct very_strong_typedef : public \
   boost::field_operators1<very_strong_typedef<T,N>,
-  boost::totally_ordered1<very_strong_typedef<T,N>, 
-  boost::totally_ordered2<very_strong_typedef<T,N>,T>>>
+    boost::dividable2<very_strong_typedef<T,N>, long,
+      boost::totally_ordered1<very_strong_typedef<T,N>, 
+        boost::totally_ordered2<very_strong_typedef<T,N>,T>>>>
 {
     using strong_type = very_strong_typedef<T,N>;
     using type = T; // the wrapped type
@@ -61,6 +62,12 @@ public:
       return *this;
     }
     
+    strong_type& operator/=(long rhs)
+    {
+      value_/=rhs;
+      return *this;
+    }
+
     constexpr strong_type operator-() const
     {
       return strong_type{-value_};
