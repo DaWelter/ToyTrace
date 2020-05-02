@@ -547,5 +547,7 @@ TEST(Guiding, MovmfSampling)
   auto v = vmf_fitting::Sample(m, rnd);
   std::cout << v << std::endl;
   ASSERT_TRUE(v.array().isFinite().all());
-  ASSERT_NORMALIZED(v);
+  const double vmag = v.norm();
+  ASSERT_LE(0.99, vmag);
+  ASSERT_LE(vmag, 1.01);
 }

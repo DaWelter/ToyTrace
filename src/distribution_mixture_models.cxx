@@ -2,19 +2,108 @@
 
 #include <boost/range/combine.hpp>
 #include <iomanip>
+#include <math.h>
 
 
 namespace vmf_fitting
 {
+
+template<int N_>
+void ExpApproximation(Eigen::Array<float, N_, 1> &vals)
+{
+  // From http://spfrnd.de/posts/2018-03-10-fast-exponential.html
+  // It is also implemented in the supplemental code of the Vorba paper about gaussian mixtures for path guiding.
+  // Eigen also does it this way by default but with more precision.
+
+  static_assert(std::numeric_limits<float>::is_iec559);
+  static_assert(sizeof(float) == sizeof(std::uint32_t));
+  constexpr int N = N_;
+  constexpr float log2_e = 1.4426950408889634f;
+  // This polynomial gives less than 0.3% relative error.
+  constexpr float poly_coeffs[3] = { 0.34271437f, 0.6496069f , 1.f + 0.0036554f };
+  constexpr uint32_t exp_mask = 255u << 23u;
+
+  using FloatVals = Eigen::Array<float, N, 1>;
+  using IntVals = Eigen::Array<int, N, 1>;
+
+  vals *= log2_e;
+
+  // Notes:
+  //  floor() needs some fancy instructions sets to be vectorized. Compilation with -march=core2 is not enough. corei7-avx works.
+  //  Apparently my CPU has it
+  //  https://ark.intel.com/content/www/us/en/ark/products/52214/intel-core-i7-2600k-processor-8m-cache-up-to-3-80-ghz.html
+  //  See also the Eigen manual https://eigen.tuxfamily.org/dox/group__CoeffwiseMathFunctions.html
+  auto floored = vals.floor().eval();
+  const IntVals xi = floored.template cast<int>();
+  const FloatVals xf = vals - floored;
+  
+  vals = xf*(xf*poly_coeffs[0] + poly_coeffs[1]) + poly_coeffs[2];
+
+  // memcpy does actually copy stuff :-(
+  //std::uint32_t int_view[N];
+  //std::memcpy(int_view, vals.data(), N*sizeof(float));
+
+  // This is UB afaik. But every reasonable compiler should do the right thing ...
+  std::uint32_t* int_view = reinterpret_cast<uint32_t*>(vals.data());
+
+  // Should be auto-vectorized. Clang 9 in compiler explorer can do it!
+  for (int i=0; i<N; ++i)
+  {
+      int_view[i] = (int_view[i] & ~exp_mask) | ((((xi[i] + 127)) << 23) & exp_mask);
+  }
+
+  //std::memcpy(vals.data(), int_view, N*sizeof(float));
+}
+
+
+float ExpApproximation(float x)
+{
+  // Should compile to ca 10 instructions.
+  // And it can be inlined in contrast to std::exp().
+  static_assert(std::numeric_limits<float>::is_iec559);
+  static_assert(sizeof(float) == sizeof(std::uint32_t));
+
+  constexpr float log2_e = 1.4426950408889634f;
+  constexpr float poly_coeffs[3] = { 0.34271437f, 0.6496069f , 1.f + 0.0036554f };
+  constexpr uint32_t exp_mask = 255u << 23u;
+
+  x *= log2_e;
+
+  const float floored = std::floor(x);
+  const int xi = int(floored);
+  const float xf = x - floored;
+
+  const float mantisse = xf*(xf*poly_coeffs[0] + poly_coeffs[1]) + poly_coeffs[2];
+
+  std::uint32_t int_view;
+  std::memcpy(&int_view, &mantisse, sizeof(float));
+
+  int_view = (int_view & ~exp_mask) | ((((xi + 127)) << 23) & exp_mask);
+
+  float result;
+  std::memcpy(&result, &int_view, sizeof(float));
+
+  return result;
+}
+
+
+
 
 template<int N = 8>
 inline Eigen::Array<float, N, 1> ComponentPdfs(const VonMisesFischerMixture<N> & mixture, const Eigen::Vector3f & pos) noexcept
 {
   const auto& k = mixture.concentrations;
   assert((k >= K_THRESHOLD).all() && (k <= K_THRESHOLD_MAX).all());
-  const auto prefactors = float(Pi)*2.f*(1.f - (-2.f*k).exp());
-  const auto tmp = (k*((mixture.means.matrix() * pos).array() - 1.f)).exp();
-  const auto result = (k / prefactors * tmp).eval();
+  auto t1 = (-2.f*k).eval();
+  ExpApproximation(t1);
+  //assert(t1.isFinite().all());
+  const auto prefactors = (float(Pi)*2.f*(1.f - t1)).eval();
+  //assert((prefactors > -0.1f).all());
+  //assert((prefactors > 0.f).all());
+  auto t2 = (k*((mixture.means.matrix() * pos).array() - 1.f)).eval();
+  ExpApproximation(t2);
+  //assert(t2.isFinite().all());
+  const auto result = (k / prefactors * t2).eval();
   assert(result.isFinite().all() && (result >= 0.f).all());
   return result;
 }
@@ -36,7 +125,7 @@ Eigen::Vector3f Sample(const Eigen::Vector3f& mu, float k, float r1, float r2) n
   const float vy = std::sin((float)(Pi*2.)*r1);
   // if (!std::isfinite(vx) || !std::isfinite(vy))
   //   std::cerr << "Oh noz vx or vy are non-finite! " << vx << ", " << vy << std::endl;
-  const float w = 1.f + std::log(r2 + (1.f - r2)*std::exp(-2.f*k)) / k;
+  const float w = 1.f + std::log(r2 + (1.f - r2)*ExpApproximation(-2.f*k)) / k;
   // if (!std::isfinite(w))
   //   std::cerr << "Oh noz w is not finite! " << w << std::endl;
   const float tmp = 1.f - w * w;
@@ -149,7 +238,7 @@ VonMisesFischerMixture<N*M> Product(const VonMisesFischerMixture<N> &m1, const V
       const int k = i*M + j;
       result.weights[k] = m1.concentrations[i]*m2.concentrations[j]*exponentialsk[k] / 
                           (2.f*PiFloat*result.concentrations[k]*exponentials1[i]*exponentials2[j] + incremental::eps);
-      result.weights[k] *= std::exp(m1.concentrations[i]*(m1.means.row(i).matrix().dot(result.means.row(k).matrix())-1.f) + 
+      result.weights[k] *= ExpApproximation(m1.concentrations[i]*(m1.means.row(i).matrix().dot(result.means.row(k).matrix())-1.f) + 
                                     m2.concentrations[j]*(m2.means.row(j).matrix().dot(result.means.row(k).matrix())-1.f));
       result.weights[k] *= m1.weights[i] * m2.weights[j];
     }
@@ -308,8 +397,9 @@ void MaximizationStep(VonMisesFischerMixture<N> & mixture, const Data<N> &dta, c
   template void vmf_fitting::incremental::Fit<n>(VonMisesFischerMixture<n> &mixture, Data<n> &fitdata, const Params<n> &params, Span<const Eigen::Vector3f> data, Span<const float> data_weights) noexcept; \
   template float  vmf_fitting::Pdf<n>(const VonMisesFischerMixture<n> &mixture, const Eigen::Vector3f &pos) noexcept; \
   template Eigen::Vector3f  vmf_fitting::Sample<n>(const VonMisesFischerMixture<n> &mixture, std::array<double, 3> rs) noexcept; \
-  template void  vmf_fitting::InitializeForUnitSphere<n>(VonMisesFischerMixture<n> &mixture) noexcept; \
-  template void vmf_fitting::Normalize(VonMisesFischerMixture<n> &mixture) noexcept;
+  template void  vmf_fitting::InitializeForUnitSphere(VonMisesFischerMixture<n> &mixture) noexcept; \
+  template void vmf_fitting::Normalize(VonMisesFischerMixture<n> &mixture) noexcept; \
+  template void vmf_fitting::ExpApproximation<n>(Eigen::Array<float, n, 1> &vals);
 
 INSTANTIATE_VonMisesFischerMixture(2)
 INSTANTIATE_VonMisesFischerMixture(8)

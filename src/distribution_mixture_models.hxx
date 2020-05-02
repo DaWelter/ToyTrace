@@ -40,6 +40,10 @@ VonMisesFischerMixture<N*M> Product(const VonMisesFischerMixture<N> &m1, const V
 template<int N>
 void Normalize(VonMisesFischerMixture<N> &mixture) noexcept;
 
+template<int N_>
+void ExpApproximation(Eigen::Array<float, N_, 1> &vals);
+float ExpApproximation(float x);
+
 inline float MeanCosineToConc(float r) noexcept
 {
   static constexpr float THRESHOLD = 1.f - 1.e-6f;

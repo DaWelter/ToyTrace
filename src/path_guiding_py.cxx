@@ -277,4 +277,12 @@ PYBIND11_MODULE(path_guiding, m)
 
     py_shady::RegisterShaders(m);
     py_shady::RegisterSurfaceInteraction(m);
+    
+    m.def("ExpApproximation", [](const Eigen::Array<float, 8, 1> &vals) -> Eigen::Array<float, 8, 1>
+    {
+        Eigen::Array<float, 8, 1> result = vals;
+        vmf_fitting::ExpApproximation(result);
+        return result;
+    });
+    m.def("ExpApproximation", [](float x) { return vmf_fitting::ExpApproximation(x);  });
 }
