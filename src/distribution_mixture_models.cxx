@@ -400,6 +400,7 @@ struct FitImpl : public Data
   void UpdateStatistics(VonMisesFischerMixture &mixture, const Params &params, const Eigen::Vector3f &x, float weight) noexcept;
   void MaximizationStep(VonMisesFischerMixture &mixture, const Params &params) noexcept;
   static float MeanCosineToConc(float r) noexcept;
+  static float ConcToMeanCos(float r) noexcept;
 };
 
 
@@ -477,6 +478,16 @@ void FitImpl::MaximizationStep(VonMisesFischerMixture & mixture, const Params &p
       const float post_conc = 
         (params.prior_mode->concentrations[k]*diminished_alpha + conc_estimate) / (diminished_alpha + 1.f);
       mixture.concentrations[k] = post_conc;
+
+      #if 0
+      // This does not do percievably better than the simpler code above!!
+      // Here the prior is on the mean cosine, forcing me to go back and forth with the cosine-k-conversions.
+      const float prior_cos = ConcToMeanCos(params.prior_mode->concentrations[k]);
+      const float mean_cosine = (1.f/(avg_responsibilities[k] + eps)) * avg_positions.row(k).matrix().norm();
+      const float diminished_alpha = params.prior_alpha/unique_data_count;
+      const float mean_cosine_post = (diminished_alpha*prior_cos + mean_cosine) / (diminished_alpha + 1.f);
+      mixture.concentrations[k] = MeanCosineToConc(mean_cosine_post);
+      #endif
     }
   }
 
@@ -491,7 +502,15 @@ inline float FitImpl::MeanCosineToConc(float r) noexcept
   static constexpr float THRESHOLD = 1.f - 1.e-6f;
   if (r >= THRESHOLD)
     r = THRESHOLD;
-  return r * (3.f - Sqr(r)) / (1.f - r);
+  // "Volume Path Guiding Based on Zero-Variance Random Walk Theory" Eq. 29 is wrong. There is r missing
+  // in the denominator. Correct version is in "Directional Statistics in Machine Learning: a Brief Review", for instance.
+  return r * (3.f - Sqr(r)) / (1.f - Sqr(r));
+}
+
+inline float FitImpl::ConcToMeanCos(float k) noexcept
+{
+  // "Volume Path Guiding Based on Zero-Variance Random Walk Theory" Sec A.2, pg 0:19.
+  return 1.0f / std::tanh(k) - 1.0f/k;
 }
 
 
