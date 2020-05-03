@@ -369,6 +369,8 @@ Eigen::Vector3f Sample(const VonMisesFischerMixture & mixture, std::array<double
 
 void InitializeForUnitSphere(VonMisesFischerMixture & mixture)  noexcept
 {
+  if constexpr(VonMisesFischerMixture::NUM_COMPONENTS == 16)
+  {
   mixture.means <<
     0.49468744,-0.1440351,-0.8570521,
     0.36735174,-0.8573688,-0.36051556,
@@ -385,9 +387,24 @@ void InitializeForUnitSphere(VonMisesFischerMixture & mixture)  noexcept
     0.84576833,-0.47598344,0.24107178,
     0.47158864,0.8217275,0.31995004,
     0.12246728,-0.77039504,0.6256942,
-    0.34670526,0.77106386,-0.5340936
-  ;
-  mixture.concentrations = VonMisesFischerMixture::ConcArray::Constant(5.f);
+    0.34670526,0.77106386,-0.5340936;
+    mixture.concentrations = VonMisesFischerMixture::ConcArray::Constant(5.f);
+  }
+  else if constexpr(VonMisesFischerMixture::NUM_COMPONENTS == 8)
+  {
+    mixture.means <<
+      0.66778004,0.73539025,0.11519922,
+      -0.9836298,-0.008926501,0.1799797,
+      -0.14629413,-0.7809748,0.60718733,
+      0.49043104,0.04368747,-0.87038434,
+      -0.10088497,0.42765132,0.8982965,
+      -0.35999632,-0.6945797,-0.62286574,
+      -0.43178025,0.7588791,-0.48751223,
+      0.860208,-0.47938251,0.17388113;
+    mixture.concentrations = VonMisesFischerMixture::ConcArray::Constant(10.f);
+  }
+  else 
+    assert(!"VonMisesFischerMixture can only have 8 or 16 components");
   mixture.weights = VonMisesFischerMixture::WeightArray(1.f / VonMisesFischerMixture::NUM_COMPONENTS);
 }
 
@@ -427,12 +444,17 @@ void FitImpl::UpdateStatistics(VonMisesFischerMixture & mixture, const Params &p
   assert(responsibilities.isFinite().all() && (responsibilities > 0.f).all());
   responsibilities /= responsibilities.sum();
 
+
+  if (data_count_weights == 0)
+    avg_weights = weight;
+  else
+    avg_weights = Lerp(avg_weights, weight, (float)std::pow(double(data_count_weights), -0.75));
+
   if (data_count == 0)
   {
     avg_responsibilities_unweighted = responsibilities;
     avg_responsibilities = weight * responsibilities;
     avg_positions = weight*(responsibilities.matrix()*x.transpose()).array();
-    avg_weights = weight;
   }
   else
   {
@@ -441,9 +463,9 @@ void FitImpl::UpdateStatistics(VonMisesFischerMixture & mixture, const Params &p
     avg_responsibilities_unweighted += mix_factor*(responsibilities        - avg_responsibilities_unweighted);
     avg_responsibilities            += mix_factor*(weight*responsibilities - avg_responsibilities);
     avg_positions                   += mix_factor*(weight*(responsibilities.matrix()*x.transpose()).array() - avg_positions);
-    avg_weights = Lerp(avg_weights, weight, mix_factor);
   }
   ++data_count;
+  ++data_count_weights;
 } 
 
 
@@ -492,6 +514,8 @@ void FitImpl::MaximizationStep(VonMisesFischerMixture & mixture, const Params &p
   }
 
   mixture.concentrations = mixture.concentrations.max(K_THRESHOLD).min(K_THRESHOLD_MAX).eval();
+
+  this->data_count = 0;
 
   assert(mixture.weights.sum() > 0.f);
   mixture.weights /= mixture.weights.sum();

@@ -34,9 +34,9 @@ struct RenderingParameters
   std::string algo_name = {};
   std::vector<std::string> search_paths = { "" };
   double initial_photon_radius = 0.01;
-  double guiding_prior_strength = 10000.;
-  int guiding_em_every = 1024;
-  int guiding_tree_subdivision_factor = 100;
+  double guiding_prior_strength = 50.;
+  int guiding_em_every = 200;
+  int guiding_tree_subdivision_factor = 10;
   int guiding_max_spp = 512;
   bool linear_output = false;
 };

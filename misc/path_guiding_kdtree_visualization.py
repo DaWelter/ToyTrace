@@ -87,8 +87,10 @@ def generate_colors(polydata, cd):
 
 def make_sphere_from_cell_data(cd):
     center = cd.center
-    size = np.average(cd.stddev)*0.5
+    size = np.average(cd.stddev)*0.5*10
     source = vtk.vtkSphereSource()
+    source.SetThetaResolution(32)
+    source.SetPhiResolution(16)
     source.Update()
     #
     polydata = source.GetOutput()
@@ -99,7 +101,7 @@ def make_sphere_from_cell_data(cd):
     mapper.SetLookupTable(lut)
     mapper.SetColorModeToMapScalars()
     mapper.SetScalarRange(0., vals.max()) #max(1./np.pi*0.25, vals.max()))
-    print (vals.max())
+    #print (vals.max())
     # Actor.
     actor = vtk.vtkActor()
     actor.SetMapper(mapper)
@@ -210,8 +212,8 @@ if __name__ == '__main__':
     iren.SetInteractorStyle(style)
 
     for cd in celldata:
-        if cd.num_points <= 1000:
-            continue
+        # if cd.num_points <= 1000:
+        #     continue
         a = make_sphere_from_cell_data(cd)
         # a = make_cube_actor(
         #     make_cube_from_cell_data(cd),
@@ -219,7 +221,7 @@ if __name__ == '__main__':
         # )
         #actormap[a] = cd
         ren.AddActor(a)
-        if 1:
+        if 0:
             a = make_cube_actor(
                 make_cube_from_cell_box(cd),
                 colors.GetColor3d("Gray")
@@ -236,7 +238,7 @@ if __name__ == '__main__':
         importer.SetFileName("/tmp/scene.obj")
         importer.Update()
         pd = importer.GetOutput()
-        
+
         # ID_TO_REMOVE = 2
         # group_ids = numpy_support.vtk_to_numpy(pd.GetCellData().GetArray("GroupIds")).astype(np.int32)
         # selected_ids, = np.where(group_ids != ID_TO_REMOVE)

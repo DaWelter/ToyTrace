@@ -25,7 +25,7 @@
 struct SurfaceInteraction;
 struct RenderingParameters;
 
-//#define WRITE_DEBUG_OUT 
+#define WRITE_DEBUG_OUT 
 //#define PATH_GUIDING_WRITE_SAMPLES
 
 #if (defined PATH_GUIDING_WRITE_SAMPLES & !defined NDEBUG & defined HAVE_JSON)

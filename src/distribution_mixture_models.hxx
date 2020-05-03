@@ -94,7 +94,7 @@ static constexpr float K_THRESHOLD_MAX = 4.e1f;
 // 320 Bytes
 struct VonMisesFischerMixture
 {
-  static constexpr int NUM_COMPONENTS = 16;
+  static constexpr int NUM_COMPONENTS = 8;
   using WeightArray = Eigen::Array<float, NUM_COMPONENTS, 1>;
   using ConcArray = Eigen::Array<float, NUM_COMPONENTS, 1>;
   using MeansArray = Eigen::Array<float, NUM_COMPONENTS, 3>;
@@ -121,6 +121,7 @@ struct Data
   Eigen::Array<float, NC, 1> avg_responsibilities;
   Eigen::Array<float, NC, 1> avg_responsibilities_unweighted;
   std::uint64_t data_count = 0;
+  std::uint64_t data_count_weights = 0;
   float avg_weights = 0.f;
 };
 

@@ -1009,13 +1009,6 @@ inline void PathTracingAlgo2::Run()
 
   RenderRadianceEstimates(guiding::GetDebugFilePrefix() / fs::path{"prepass_approx.png"});
 
-  for (auto &w : camerarender_workers)
-  {
-    w.max_split = 10;
-    w.min_node_count = 2;
-    w.max_node_count = 20;
-  }
-
   {
     long num_samples = 1;
     while (!stop_flag.load() && num_samples <= render_params.guiding_max_spp)
@@ -1075,6 +1068,13 @@ inline void PathTracingAlgo2::Run()
   }
 
   this->record_samples_for_guiding = false;
+
+  for (auto &w : camerarender_workers)
+  {
+    w.max_split = 10;
+    w.min_node_count = 2;
+    w.max_node_count = 20;
+  }
 
   std::fill(framebuffer.begin(), framebuffer.end(), RGB::Zero());
   std::fill(debugbuffer.begin(), debugbuffer.end(), RGB::Zero());
@@ -1275,8 +1275,9 @@ namespace
 
 std::pair<int, double> ComputeNumberOfSplits2(Color::RGBScalar value, Color::RGBScalar reference, double r, int max_splits, bool must_continue)
 {
-#if 1
-  static constexpr double LARGE_ENGOUGH_SO_THAT_1_OVER_X_IS_LT_INF = std::numeric_limits<double>::min();
+#if 1 
+  // Don't let the weight factor become to large. Lower bound cutoff of denominator.
+  static constexpr double ABSOLUTE_MIN_SPLITS = 0.1; // Aka survival probability. 
 
   const double fractional_n = (double)value/(double)reference;
   if (std::isnan(fractional_n) || fractional_n == 0.) // TODO: unlikely
@@ -1289,7 +1290,7 @@ std::pair<int, double> ComputeNumberOfSplits2(Color::RGBScalar value, Color::RGB
   }
   else
   {
-    const double min_splits = must_continue ? 1. : LARGE_ENGOUGH_SO_THAT_1_OVER_X_IS_LT_INF;
+    const double min_splits = must_continue ? 1. : ABSOLUTE_MIN_SPLITS;
     const double q = std::max(std::min(fractional_n, static_cast<double>(max_splits)), min_splits); // Limit number of splits
     int n = static_cast<int>(q);
     double prob = q - n;
@@ -1339,7 +1340,7 @@ std::pair<int, double> CameraRenderWorker::ComputeNumberOfDirectionSamples(const
 
 std::pair<int, double> CameraRenderWorker::ComputeNumberOfDistanceSamples(const PathNode &ps, const ScatterSample &direction_sample) const
 {
-#if 0 // Causes lots of noise. Maybe the radiance fit is not so good?
+#if 1 // Causes lots of noise. Maybe the radiance fit is not so good?
   // TODO investigate ...
 
   // And this one:
