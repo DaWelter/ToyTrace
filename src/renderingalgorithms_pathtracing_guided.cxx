@@ -572,6 +572,7 @@ private:
   std::pair<int, double> ComputeNumberOfDistanceSamples(const PathNode &pn, const ScatterSample &smpl) const;
   std::pair<int, double> ComputeNumberOfDirectionSamples(const PathNode &pn) const;
   std::pair<int, double> ComputeNumberOfSplits(const PathNode &ps, const Spectral3 &contribution_estimate) const;
+  bool CanUseIlluminationApproximationInRRAndSplit(const PathNode &ps) const;
 
   void AddEmission(const PathNode &ps, VertexCoefficients &coeffs) const;
   void AddEmission(const PathNode &ps, const SurfaceInteraction &si, VertexCoefficients &coeffs) const;
@@ -666,6 +667,7 @@ class alignas(128) ApproximatePixelWorker
   Span<RGB> framebuffer;
   LambdaSelectionStrategyShuffling lambda_selection_factory;
   static constexpr int num_lambda_sweeps = decltype(lambda_selection_factory)::NUM_SAMPLES_REQUIRED;
+  ToyVector<BoundaryIntersection> boundary_intersection_buffer;
 
 public:
   ApproximatePixelWorker(PathTracingAlgo2* master, Span<RGB> framebuffer)
@@ -675,6 +677,7 @@ public:
     pickers{master->pickers.get()},
     framebuffer{framebuffer}
   {
+    boundary_intersection_buffer.reserve(1024);
   }
 
   OnlineVariance::Accumulator<Eigen::Array3d,long> average_intensity{Eigen::Array3d{Eigen::zero}};
@@ -742,15 +745,17 @@ public:
           else
           {
             // Stop on a diffuse surface
-            auto [incident_radiance_estimator, pdf, segment_to_light, _] = ::ComputeDirectLighting(
-              master->scene, *si, pickers->GetDistributionNee(), medium_tracker, context, sampler);
+
+            // Add direct lighting from delta sources. Non-delta sources are baked into the radiance distribution.
+            // auto [incident_radiance_estimator, pdf, segment_to_light, _] = ::ComputeDirectLighting(
+            //   master->scene, *si, pickers->GetDistributionNee(), medium_tracker, context, sampler);
               
-            if (pdf.IsFromDelta())
-            {
-              const double dfactor = DFactorPBRT(*si, segment_to_light.ray.dir);
-              const Spectral3 bsdf_weight = GetShaderOf(*si, master->scene).EvaluateBSDF(-ray.dir, *si, segment_to_light.ray.dir, context, nullptr);
-              measurement_estimator += weight * track_weight * bsdf_weight * dfactor * incident_radiance_estimator;
-            }
+            // if (pdf.IsFromDelta())
+            // {
+            //   const double dfactor = DFactorPBRT(*si, segment_to_light.ray.dir);
+            //   const Spectral3 bsdf_weight = GetShaderOf(*si, master->scene).EvaluateBSDF(-ray.dir, *si, segment_to_light.ray.dir, context, nullptr);
+            //   measurement_estimator += weight * track_weight * bsdf_weight * dfactor * incident_radiance_estimator;
+            // }
 
             const Spectral3 indirect_lighting = ComputeIndirectLighting(*si, ray.dir, sampler, context);
             measurement_estimator += weight * track_weight * indirect_lighting;
@@ -793,9 +798,15 @@ public:
     Spectral3 transmittance{Eigen::ones};
     Spectral3 integrated_inscatter{Eigen::zero};
 
+    Span<BoundaryIntersection> boundary_intersections = master->scene.IntersectionsWithVolumes(ray, 0., tfar);
+    
+    // boundary_intersection_buffer.clear();
+    // std::copy(boundary_intersections.begin(), boundary_intersections.end(), std::back_inserter(boundary_intersection_buffer));
+    // boundary_intersections = AsSpan(boundary_intersection_buffer);
+
     auto iter = guiding::CombinedIntervalsIterator<guiding::CellIterator, SegmentIterator>{
       radiance_recorder_volume->MakeCellIterator(ray, 0., tfar),
-      VolumeSegmentIterator(master->scene, ray, medium_tracker, 0., tfar)
+      SegmentIterator { ray, medium_tracker, boundary_intersections, 0., tfar }
     };
     for (; iter; ++iter)
     {
@@ -819,6 +830,22 @@ public:
       
       const Spectral3 inscatter = ComputeInscatteredRadiance(iter.DereferenceFirst());
       integrated_inscatter += weight * material_coeffs.sigma_s * inscatter;
+
+      // NOT WORKING FOR SOME REASON
+      // toytrace: /mnt/Data/Eigene Dateien/Programmierung/ToyTrace/src/embreeaccelerator.cxx:445: static void EmbreeAccelerator::SphereOccludedFunc(const RTCOccludedFunctionNArguments *): Assertion `std::abs(LengthSqr(ray_dir) - 1.) < 1.e-5' failed.
+      // {
+      //   VolumeInteraction vi{ray.PointAt(s), medium, Spectral3{Eigen::zero}, material_coeffs.sigma_s};
+      //   // Add direct lighting from delta sources. Non-delta sources are baked into the radiance distribution.
+      //   auto [incident_radiance_estimator, pdf, segment_to_light, _] = ::ComputeDirectLighting(
+      //     master->scene, vi, pickers->GetDistributionNee(), medium_tracker, context, sampler);
+          
+      //   if (pdf.IsFromDelta())
+      //   {
+      //     // TODO: remove assumption of uniform phase function
+      //     double pf_val = 1./UnitSphereSurfaceArea;
+      //     integrated_inscatter += weight * pf_val * material_coeffs.sigma_s * incident_radiance_estimator;
+      //   }
+      // }
 
       assert(weight.allFinite());
       assert(0 <= s && s <= tfar);
@@ -1187,8 +1214,15 @@ void CameraRenderWorker::RenderPixel(int pixel)
     auto smpl = std::visit([this, &root](auto &&ia) {
       return SampleScatterKernel(ia, root, -root.incident_ray.dir);
     }, *root.interaction);
-    const PathIntermediateState after_scatter = PrepareStartAfterScatter(root, smpl);
-    auto[interaction, tfar, track_weight] = TrackToNextInteraction(master->scene, after_scatter.ray, context, Spectral3::Ones(), sampler, root.medium_tracker, nullptr);
+    PathIntermediateState after_scatter = PrepareStartAfterScatter(root, smpl);
+    auto[interaction, tfar, track_weight] = TrackToNextInteraction(
+      master->scene, 
+      after_scatter.ray, 
+      context, 
+      Spectral3::Ones(), 
+      sampler, 
+      after_scatter.medium_tracker, 
+      nullptr);
     if (interaction)
     {
       PathNode successor = GeneratePathNode(root, smpl, after_scatter, interaction, track_weight);
@@ -1239,6 +1273,7 @@ void CameraRenderWorker::PathTraceRecursive(PathNode &ps)
 
 void CameraRenderWorker::DoTheSplittingAndRussianRoutlettePartPushingSuccessorNodes(PathNode &ps)
 {
+  // TODO: how about specular surfaces???!!!!!
   auto [successors_dir, rr_dir_weight] = ComputeNumberOfDirectionSamples(ps);
   for (int i=0; i<successors_dir; ++i)
   {
@@ -1251,12 +1286,19 @@ void CameraRenderWorker::DoTheSplittingAndRussianRoutlettePartPushingSuccessorNo
 
     if (successors_dist)
     {
-      const PathIntermediateState after_scatter = PrepareStartAfterScatter(ps, smpl);
-
       for (int j=0; j<successors_dist; ++j)
       {
+          PathIntermediateState after_scatter = PrepareStartAfterScatter(ps, smpl);
+
           // TODO: fix the nonsensical use of initial weight in Atmosphere Material!!
-          auto[interaction, tfar, track_weight] = TrackToNextInteraction(master->scene, after_scatter.ray, context, Spectral3::Ones(), sampler, ps.medium_tracker, nullptr);
+          auto[interaction, tfar, track_weight] = TrackToNextInteraction(
+            master->scene, 
+            after_scatter.ray, 
+            context, 
+            Spectral3::Ones(), 
+            sampler, 
+            after_scatter.medium_tracker, 
+            nullptr);
           track_weight *= rr_dist_weight;
 
           PathNode successor = GeneratePathNode(ps, smpl, after_scatter, interaction, track_weight);
@@ -1264,22 +1306,24 @@ void CameraRenderWorker::DoTheSplittingAndRussianRoutlettePartPushingSuccessorNo
           
           PathTraceRecursive(successor);
 
-          MaybeAddNeeLighting(ps, rr_dir_weight*rr_dist_weight, ps.coeffs);
+          //MaybeAddNeeLighting(ps, rr_dir_weight*rr_dist_weight, ps.coeffs);
       }
     }
   }
+
+  MaybeAddNeeLighting(ps, 1., ps.coeffs);
 }
 
 namespace 
 {
 
-std::pair<int, double> ComputeNumberOfSplits2(Color::RGBScalar value, Color::RGBScalar reference, double r, int max_splits, bool must_continue)
+std::pair<int, double> ComputeNumberOfSplits2(double value, double reference, double r, int max_splits, bool must_continue)
 {
-#if 1 
+#if 1
   // Don't let the weight factor become to large. Lower bound cutoff of denominator.
   static constexpr double ABSOLUTE_MIN_SPLITS = 0.1; // Aka survival probability. 
 
-  const double fractional_n = (double)value/(double)reference;
+  const double fractional_n = value/reference;
   if (std::isnan(fractional_n) || fractional_n == 0.) // TODO: unlikely
   {
     return {0, 1.};
@@ -1306,52 +1350,74 @@ std::pair<int, double> ComputeNumberOfSplits2(Color::RGBScalar value, Color::RGB
 } // anom namespace
 
 
+bool CameraRenderWorker::CanUseIlluminationApproximationInRRAndSplit(const PathNode &ps) const
+{
+  return std::visit(Overload(
+    [scene = &master->scene](const SurfaceInteraction &ia) -> bool {
+      return GetShaderOf(ia, *scene).is_pure_diffuse;
+    },
+    [](const VolumeInteraction &) -> bool{
+      return true;
+    }
+  ), *ps.interaction);
+}
+
+
+
 std::pair<int, double> CameraRenderWorker::ComputeNumberOfSplits(const PathNode &ps, const Spectral3 &contribution_estimate) const
 {
-  if (ps.num >= max_node_count)
-  {
-    return { 0, 1. };
-  }
-  else
-  {
-    const int max_split = (ps.split_budget <= 1) ? 1 : this->max_split;
-    const double r = sampler.Uniform01();
-    const auto reference = pixel_intensity_approximations[context.pixel_index].mean();
-    const auto value = Color::SpectralSelectionToRGB(contribution_estimate, context.lambda_idx).mean();
-    return ComputeNumberOfSplits2(value, reference, r, max_split, /*must_continue=*/ps.num < min_node_count);
-  }
+  const int max_split = (ps.split_budget <= 1) ? 1 : this->max_split;
+  const double r = sampler.Uniform01();
+  const auto reference = pixel_intensity_approximations[context.pixel_index].mean();
+  const auto value = Color::SpectralSelectionToRGB(contribution_estimate, context.lambda_idx).mean();
+  return ComputeNumberOfSplits2((double)value, (double)reference, r, max_split, /*must_continue=*/ps.num < min_node_count);
 }
 
 
 std::pair<int, double> CameraRenderWorker::ComputeNumberOfDirectionSamples(const PathNode &ps) const
 {
+  assert (ps.interaction);
+  if (ps.num >= max_node_count) 
+    return { 0, 1. };
+  if (!CanUseIlluminationApproximationInRRAndSplit(ps))
+    return { 1, 1. };
+#if 1
   // How this works:
   //  * Grab L distribution from cache
   //  * Convolve with phase function to get Li (assume uniform phase function for now. TODO: BSDF and proper PF support)
   //  * Predict path contribution
   //  * Grab pixel estimate
   //  * Compare
-  assert (ps.interaction);
   const Spectral3 li_approximation = std::visit([&](const auto &ia) { return ComputeApproximateInscatter(ps, ia); }, *ps.interaction);
   const Spectral3 path_contribution = ps.weight * li_approximation; 
   return ComputeNumberOfSplits(ps, path_contribution);
+#elif 1 // RR based on throughput
+  return ComputeNumberOfSplits2(ps.weight.mean(), 1., sampler.Uniform01(), max_split, ps.num < min_node_count);
+#else
+  return { 1, 1. };
+#endif
 }
 
 
 std::pair<int, double> CameraRenderWorker::ComputeNumberOfDistanceSamples(const PathNode &ps, const ScatterSample &direction_sample) const
 {
-#if 1 // Causes lots of noise. Maybe the radiance fit is not so good?
-  // TODO investigate ...
-
+  assert (ps.interaction);
+  if (ps.num >= max_node_count) 
+    return { 0, 1. };
+  if (!CanUseIlluminationApproximationInRRAndSplit(ps))
+    return { 1, 1. };
+#if 1 
   // And this one:
   //  * Grab L distribution from the cache
   //  * Compute approximate path contribution 
   //  * Grab pixel estimate
   //  * Compare
-  assert (ps.interaction);
   const Spectral3 l_approximation = Spectral3::Constant(ps.radiance_fit->incident_flux_density * (double)vmf_fitting::Pdf(ps.radiance_fit->radiance_distribution, direction_sample.coordinates.cast<float>()));
   const Spectral3 path_contribution = (ps.weight * direction_sample.value * l_approximation);
   return ComputeNumberOfSplits(ps, path_contribution);
+#elif 1 // RR based on throughput
+  const Spectral3 throughput = ps.weight * direction_sample.value;
+  return ComputeNumberOfSplits2(throughput.mean(), 1., sampler.Uniform01(), max_split, ps.num < min_node_count);
 #else
   return { 1, 1. };
 #endif

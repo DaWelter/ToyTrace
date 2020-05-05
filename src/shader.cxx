@@ -57,6 +57,7 @@ DiffuseShader::DiffuseShader(const SpectralN &_reflectance, std::shared_ptr<Text
     kr_d(_reflectance),
     diffuse_texture(std::move(_diffuse_texture))
 {
+  is_pure_diffuse = true;
   // Wtf? kr_d is the (constant) Lambertian BRDF. Energy conservation
   // demands Int|_Omega kr_d cos(theta) dw <= 1. Working out the math
   // I obtain kr_d <= 1/Pi. 
@@ -109,6 +110,7 @@ SpecularReflectiveShader::SpecularReflectiveShader(const SpectralN& reflectance)
   : Shader(),
     kr_s(reflectance)
 {
+  is_pure_specular = true;
 }
 
 
@@ -151,6 +153,7 @@ inline bool OnSameSide(const Double3 &reverse_incident_dir, const SurfaceInterac
 SpecularTransmissiveDielectricShader::SpecularTransmissiveDielectricShader(double _ior_ratio, double ior_lambda_coeff_) 
   : Shader{}, ior_ratio{_ior_ratio}, ior_lambda_coeff{ior_lambda_coeff_}
 {
+  is_pure_specular = true;
   if (ior_lambda_coeff != 0)
     require_monochromatic = true;
 }
@@ -237,9 +240,10 @@ Spectral3 SpecularTransmissiveDielectricShader::EvaluateBSDF(const Double3 &reve
 
 
 
-SpecularPureRefractiveShader::SpecularPureRefractiveShader(double _ior_ratio) : Shader{}, ior_ratio{_ior_ratio}
+SpecularPureRefractiveShader::SpecularPureRefractiveShader(double _ior_ratio) 
+  : Shader{}, ior_ratio{_ior_ratio}
 {
-
+  is_pure_specular = true;
 }
 
 
@@ -375,6 +379,7 @@ MicrofacetShader::MicrofacetShader(
     alpha_max(_glossy_exponent),
     glossy_exponent_texture(std::move(_glossy_exponent_texture))
 {
+  is_pure_diffuse = true;
 }
 
 
@@ -480,6 +485,7 @@ struct GlossyTransmissiveDielectricWrapper
 GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, double alpha_min_, std::shared_ptr<Texture> glossy_exponent_texture_)
   : ior_ratio{_ior_ratio}, alpha_max{alpha_}, alpha_min{alpha_min_}, glossy_exponent_texture{glossy_exponent_texture_}
 {
+  is_pure_diffuse = true;
 }
 
 
