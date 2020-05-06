@@ -214,12 +214,12 @@ void PathGuiding::ProcessSamples(int cell_idx)
 void PathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRadiance> buffer)
 {
   using namespace vmf_fitting;
-
+  double prior_strength = std::max(10., 0.01*cell.last_num_samples);
   incremental::Params params;
-  params.maximization_step_every = param_em_every;
-  params.prior_alpha = param_prior_strength;
-  params.prior_nu = param_prior_strength;
-  params.prior_tau = 0.5*param_prior_strength;
+  params.prior_alpha = prior_strength;
+  params.prior_nu = prior_strength;
+  params.prior_tau = 0.5*prior_strength;
+  params.maximization_step_every = std::max(1, static_cast<int>(prior_strength)*10); //param_em_every;
   params.prior_mode = &cell.current_estimate.radiance_distribution;
 
   for (const auto &in : buffer)
@@ -386,6 +386,8 @@ void PathGuiding::PrepareAdaptedStructures()
         new_data[m.new_first].learned.radiance_distribution          = cell_data[i].learned.radiance_distribution;
         new_data[m.new_first].current_estimate.incident_flux_density = vmf_fitting::incremental::GetAverageWeight(cell_data[i].learned.fitdata);
         new_data[m.new_first].index = m.new_first;
+        new_data[m.new_first].last_num_samples = cell_data[i].learned.leaf_stats.Count();
+        //new_data[m.new_first].learned.fitdata = cell_data[i].learned.fitdata;
       }
       if (m.new_second >= 0)
       {
@@ -393,6 +395,8 @@ void PathGuiding::PrepareAdaptedStructures()
         new_data[m.new_second].learned.radiance_distribution = cell_data[i].learned.radiance_distribution;
         new_data[m.new_second].current_estimate.incident_flux_density = vmf_fitting::incremental::GetAverageWeight(cell_data[i].learned.fitdata);
         new_data[m.new_second].index = m.new_second;
+        new_data[m.new_second].last_num_samples = cell_data[i].learned.leaf_stats.Count();
+        //new_data[m.new_second].learned.fitdata = cell_data[i].learned.fitdata;
       }
     }
 

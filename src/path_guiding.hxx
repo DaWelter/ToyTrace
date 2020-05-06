@@ -102,13 +102,14 @@ struct CellData
       double incident_flux_density{0.};
     } current_estimate;
     
-    int index = -1;
-
     alignas (CACHE_LINE_SIZE) struct Learned { 
       vmf_fitting::VonMisesFischerMixture radiance_distribution;
       vmf_fitting::incremental::Data fitdata;
       LeafStatistics leaf_stats;
     } learned;
+    
+    int index = -1;
+    long last_num_samples = 0;
 };
 
 
