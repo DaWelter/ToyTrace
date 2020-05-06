@@ -262,7 +262,7 @@ class Accumulator
       Update(new_x);
     }
     
-    int Count() const
+    CounterType Count() const
     {
       return n;
     }

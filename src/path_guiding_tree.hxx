@@ -24,25 +24,30 @@ struct AdaptParams
   std::uint64_t max_num_points = std::numeric_limits<std::uint64_t>::max();
 };
 
-static constexpr int MAX_NODES = std::numeric_limits<short>::max();
+static constexpr int MAX_NODES = (1<<30)-1;
 
 struct Node
 {
   double split_pos = std::numeric_limits<double>::quiet_NaN();
-  short left_idx;
-  short right_idx;
+  std::uint64_t 
+    split_axis : 2, 
+    left_is_leaf : 1, 
+    right_is_leaf : 1,
+    left_idx : 30,
+    right_idx : 30;
 
-  struct {
-    unsigned char split_axis : 2, left_is_leaf : 1, right_is_leaf;
+  // struct {
 
-  } flags;
+
+  // } flags;
 };
 
+static_assert(sizeof(Node) == 16);
 
 struct Handle 
 {
-  short idx = -1;
-  unsigned char is_leaf = false;
+  int idx = -1;
+  bool is_leaf = false;
 };
 
 
@@ -60,22 +65,20 @@ private:
   Handle AllocateLeaf()
   {
     assert (num_leafs < MAX_NODES);
-    return Handle{ (short)num_leafs++, true };
+    return Handle{ num_leafs++, true };
   }
 
   Handle AllocateBranch(Handle left, Handle right, int axis, double pos)
   {
-    Node nd {
-      pos,
-      left.idx,
-      right.idx,
-      {}
-    };
-    nd.flags.split_axis = axis;
-    nd.flags.left_is_leaf = left.is_leaf;
-    nd.flags.right_is_leaf = right.is_leaf;
+    Node nd;
+    nd.split_pos = pos;
+    nd.split_axis = axis;
+    nd.left_is_leaf = left.is_leaf;
+    nd.right_is_leaf = right.is_leaf;
+    nd.left_idx = left.idx;
+    nd.right_idx = right.idx;
     storage.push_back(nd);
-    return { (short)(storage.size()-1), false };
+    return { static_cast<int>(storage.size()-1), false };
   }
 
   struct TagUninitialized {};
@@ -108,15 +111,15 @@ public:
   {
     assert (!node.is_leaf);
     const auto& b = storage[node.idx];
-    return std::make_pair(Handle{b.left_idx, b.flags.left_is_leaf},
-                          Handle{b.right_idx, b.flags.right_is_leaf});
+    return std::make_pair(Handle{b.left_idx, static_cast<bool>(b.left_is_leaf)},
+                          Handle{b.right_idx, static_cast<bool>(b.right_is_leaf)});
   }
 
   auto Split(Handle node) const
   {
     assert (!node.is_leaf);
     const auto& b = storage[node.idx];
-    return std::make_pair(b.flags.split_axis, b.split_pos);
+    return std::make_pair(static_cast<int>(b.split_axis), b.split_pos);
   }
 
   int Lookup(const Double3 &p)
@@ -131,7 +134,7 @@ public:
       else
       {
         const auto& b = storage[current.idx];
-        const bool go_left = p[b.flags.split_axis] < b.split_pos;
+        const bool go_left = p[b.split_axis] < b.split_pos;
         auto [left, right] = Children(current);
         current = go_left ? left : right;
       }
