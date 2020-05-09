@@ -155,12 +155,11 @@ public:
 #endif
 
 
-inline double ScatterInCellProbability(double sigma_s, double sigma_t, double transmittance, double li_distribution) noexcept
+inline double ScatterInCellProbability(double albedo, double transmittance, double l_at_cell_start, double li_distribution) noexcept
 {
   // Volume Path Guiding Based on Zero-Variance Random Walk Theory
   // Eq 20
-  assert (std::isfinite(sigma_s));
-  assert (std::isfinite(sigma_t));
+  assert (std::isfinite(albedo));
   assert (std::isfinite(transmittance));
   assert (std::isfinite(li_distribution));
 
@@ -168,7 +167,7 @@ inline double ScatterInCellProbability(double sigma_s, double sigma_t, double tr
   static constexpr double MAX_PROB = 1.;
 
   const double prob_interact = 
-    (1. - transmittance)*sigma_s/(sigma_t*UnitSphereSurfaceArea*li_distribution);
+    (1. - transmittance)*albedo*li_distribution/(l_at_cell_start);
   // 0 / 0 -> MIN_PROB
   // inf -> MAX_PROB
   // Output clamped to [MIN_PROB, MAX_PROB] 
@@ -199,30 +198,46 @@ inline std::pair<double,double> SampleTransmittanceWithinRange(double sigma_t, d
 }
 
 
-inline std::pair<double, double> RadianceFilter(
-  double current_l, 
-  double previous_l,
-  double previous_l_1,
-  double previous_l_2,
-  double previous_bin_transmittance, 
-  double previous_albedo, 
-  double previous_inscatter)
+struct RadianceFilterState
 {
-  constexpr double A = 0.75;
-  const double t1 = previous_l_1 - (1.-previous_bin_transmittance)*previous_albedo*previous_inscatter;
-  const double t2 = t1 / previous_bin_transmittance;
+  // l: Fused radiance. Convex combination of value in current bin and extrapolation.
+  double l;
+};
+
+inline RadianceFilterState RadianceFilterExtrapolate(
+  const RadianceFilterState state,
+  double inscatter,
+  double bin_transmittance,
+  double albedo)
+{
+  // Volume path guiding paper. Eq 23
+  const auto l_1 = state.l;
+  const double t1 = l_1 - (1.-bin_transmittance)*albedo*inscatter;
+  const double t2 = t1 / bin_transmittance;
   const double current_l_2 = std::max(0., t2);
-  const double current_l_1 = (1.-A)*current_l_2 + A*previous_l;
-  return std::make_pair(current_l_1, current_l_2);
+  return { current_l_2 };
+}
+
+inline RadianceFilterState RadianceFilterFuse(const RadianceFilterState &state, double l)
+{
+    constexpr double A = 0.75;
+    const double current_l_1 = (1.-A)*state.l + A*l;
+    return { current_l_1 };
 }
 
 
-#if 0
+inline double GetValue(const RadianceFilterState &state)
+{
+  return state.l;
+}
+
+
 /* Ray is the ray to shoot. It must already include the anti-self-intersection offset.
   */
 std::tuple<MaybeSomeInteraction, double, Spectral3>
 inline TrackToNextInteractionGuided(
   const Scene &scene,
+  double initial_radiance, // incident from the direction in which the ray is shot
   const guiding::PathGuiding &pathguiding,
   const Ray &ray,
   const PathContext &context,
@@ -233,6 +248,8 @@ inline TrackToNextInteractionGuided(
   // Algo 1
 
   using RetType = std::tuple<MaybeSomeInteraction, double, Spectral3>;
+
+  RadianceFilterState filt_l{ initial_radiance };
 
   double tfar = LargeNumber;
   const auto hit = scene.FirstIntersection(ray, 0., tfar);
@@ -258,12 +275,33 @@ inline TrackToNextInteractionGuided(
     // For now assume constant coefficients
     const auto material_coeffs = medium.EvaluateCoeffs(ray.PointAt(0.5*(snear+sfar)), context);
     const Spectral3 bin_transmittance = medium.EvaluateTransmission(RaySegment{ray, snear, sfar}, sampler, context);
+    const Spectral3 half_transmittance = bin_transmittance.sqrt(); // Because the product from the half-segments has to equal total transmittance.
+
+    // Simplified for uniform phase function!
+    // And monochromatic medium!
+    // TODO: Generalize!
+    // This should be the convolution of the radiance with the phase function!
+    const double inscatter_radiance = radiance_estimate.incident_flux_density / UnitSphereSurfaceArea;
+    const double albedo = material_coeffs.sigma_s[0]/(material_coeffs.sigma_t[0] + Epsilon);
+
+    filt_l = RadianceFilterExtrapolate(filt_l, inscatter_radiance, half_transmittance[0], albedo);
+    filt_l = RadianceFilterFuse(filt_l, guiding::FittedRadiance(radiance_estimate, ray.dir));
+
+    const double prob_scatter_within_boundaries_guided = ScatterInCellProbability(
+      albedo, 
+      bin_transmittance[0],
+      GetValue(filt_l),
+      inscatter_radiance);
+
+    // MIS combination of guided transmisstion probability with regular transmission based sampling.
+    // TODO: generalize to chromatic media!
+    const double prob_scatter_transmittance = 1. - bin_transmittance[0];
     
-    // Simplified for uniform phase function
-    // TODO: Generalize
-    const double prob_scatter_within_boundaries = ScatterInCellProbability(
-      material_coeffs.sigma_s[0], material_coeffs.sigma_t[0], bin_transmittance[0], 
-      vmf_fitting::Pdf(radiance_estimate.radiance_distribution, -ray.dir.cast<float>()));
+    const double prob_scatter_within_boundaries = 0.5*(
+      prob_scatter_within_boundaries_guided + 
+      prob_scatter_transmittance
+    );
+
     assert(prob_scatter_within_boundaries >= 0.);
 
     if (sampler.Uniform01() < prob_scatter_within_boundaries)
@@ -285,6 +323,7 @@ inline TrackToNextInteractionGuided(
     {
       pdf *= 1.-prob_scatter_within_boundaries;
       transmittance *= bin_transmittance;
+      filt_l = RadianceFilterExtrapolate(filt_l, inscatter_radiance, half_transmittance[0], albedo);
     }
   }
 
@@ -298,11 +337,10 @@ inline TrackToNextInteractionGuided(
   }
   else
   {
-    return RetType{ std::monostate{}, LargeNumber, weight };
+    return RetType{ MaybeSomeInteraction{}, LargeNumber, weight };
   }
 };
-#else
-#endif
+
 
 namespace
 {
@@ -353,7 +391,14 @@ public:
     auto r2 = sampler.Uniform01();
     auto r3 = sampler.Uniform01();
     //dbg = { r1, r2, r3 };
-    return vmf_fitting::Sample(*mixture, { r1,r2,r3 }).cast<double>();
+    // Float32 can be lower precision than I have otherwise. So renormalize the direction.
+    Eigen::Vector3d w = vmf_fitting::Sample(*mixture, { r1,r2,r3 }).cast<double>();
+    const double n2 = w.squaredNorm();
+    if (std::abs(n2 - 1.) >= 1.e-11)
+    {
+      w /= std::sqrt(n2);
+    }
+    return w;
   }
 
   double Pdf(const Double3 &dir) const
@@ -746,17 +791,6 @@ public:
           {
             // Stop on a diffuse surface
 
-            // Add direct lighting from delta sources. Non-delta sources are baked into the radiance distribution.
-            // auto [incident_radiance_estimator, pdf, segment_to_light, _] = ::ComputeDirectLighting(
-            //   master->scene, *si, pickers->GetDistributionNee(), medium_tracker, context, sampler);
-              
-            // if (pdf.IsFromDelta())
-            // {
-            //   const double dfactor = DFactorPBRT(*si, segment_to_light.ray.dir);
-            //   const Spectral3 bsdf_weight = GetShaderOf(*si, master->scene).EvaluateBSDF(-ray.dir, *si, segment_to_light.ray.dir, context, nullptr);
-            //   measurement_estimator += weight * track_weight * bsdf_weight * dfactor * incident_radiance_estimator;
-            // }
-
             const Spectral3 indirect_lighting = ComputeIndirectLighting(*si, ray.dir, sampler, context);
             measurement_estimator += weight * track_weight * indirect_lighting;
 
@@ -830,22 +864,6 @@ public:
       
       const Spectral3 inscatter = ComputeInscatteredRadiance(iter.DereferenceFirst());
       integrated_inscatter += weight * material_coeffs.sigma_s * inscatter;
-
-      // NOT WORKING FOR SOME REASON
-      // toytrace: /mnt/Data/Eigene Dateien/Programmierung/ToyTrace/src/embreeaccelerator.cxx:445: static void EmbreeAccelerator::SphereOccludedFunc(const RTCOccludedFunctionNArguments *): Assertion `std::abs(LengthSqr(ray_dir) - 1.) < 1.e-5' failed.
-      // {
-      //   VolumeInteraction vi{ray.PointAt(s), medium, Spectral3{Eigen::zero}, material_coeffs.sigma_s};
-      //   // Add direct lighting from delta sources. Non-delta sources are baked into the radiance distribution.
-      //   auto [incident_radiance_estimator, pdf, segment_to_light, _] = ::ComputeDirectLighting(
-      //     master->scene, vi, pickers->GetDistributionNee(), medium_tracker, context, sampler);
-          
-      //   if (pdf.IsFromDelta())
-      //   {
-      //     // TODO: remove assumption of uniform phase function
-      //     double pf_val = 1./UnitSphereSurfaceArea;
-      //     integrated_inscatter += weight * pf_val * material_coeffs.sigma_s * incident_radiance_estimator;
-      //   }
-      // }
 
       assert(weight.allFinite());
       assert(0 <= s && s <= tfar);
@@ -1036,6 +1054,13 @@ inline void PathTracingAlgo2::Run()
 
   RenderRadianceEstimates(guiding::GetDebugFilePrefix() / fs::path{"prepass_approx.png"});
 
+  for (auto &w : camerarender_workers)
+  {
+    w.max_split = 10;
+    w.min_node_count = 2;
+    w.max_node_count = 20;
+  }
+
   {
     long num_samples = 1;
     while (!stop_flag.load() && num_samples <= render_params.guiding_max_spp)
@@ -1085,9 +1110,9 @@ inline void PathTracingAlgo2::Run()
         Image img;
         ::GenerateImage(img, AsSpan(framebuffer), AsSpan(samplesPerTile), tileset, {render_params.width, render_params.height}, !render_params.linear_output);
         img.write((guiding::GetDebugFilePrefix() / fs::path{strconcat("trainpass_backimg_",num_samples,".png")}).string());
-        img.clear();
-        ::GenerateImage(img, AsSpan(debugbuffer), AsSpan(samplesPerTile), tileset, {render_params.width, render_params.height}, !render_params.linear_output);
-        img.write((guiding::GetDebugFilePrefix() / fs::path{strconcat("trainpass_fwdimg_",num_samples,".png")}).string());
+        // img.clear();
+        // ::GenerateImage(img, AsSpan(debugbuffer), AsSpan(samplesPerTile), tileset, {render_params.width, render_params.height}, !render_params.linear_output);
+        // img.write((guiding::GetDebugFilePrefix() / fs::path{strconcat("trainpass_fwdimg_",num_samples,".png")}).string());
       });
 
       num_samples = num_samples + std::max(1, int(num_samples*0.5));
@@ -1095,13 +1120,6 @@ inline void PathTracingAlgo2::Run()
   }
 
   this->record_samples_for_guiding = false;
-
-  for (auto &w : camerarender_workers)
-  {
-    w.max_split = 10;
-    w.min_node_count = 2;
-    w.max_node_count = 20;
-  }
 
   std::fill(framebuffer.begin(), framebuffer.end(), RGB::Zero());
   std::fill(debugbuffer.begin(), debugbuffer.end(), RGB::Zero());
@@ -1135,9 +1153,9 @@ inline void PathTracingAlgo2::Run()
       Image img;
       ::GenerateImage(img, AsSpan(framebuffer), AsSpan(samplesPerTile), tileset, {render_params.width, render_params.height}, !render_params.linear_output);
       img.write((guiding::GetDebugFilePrefix() / fs::path{strconcat("mainpass_backimg_",num_samples,".png")}).string());
-      img.clear();
-      ::GenerateImage(img, AsSpan(debugbuffer), AsSpan(samplesPerTile), tileset, {render_params.width, render_params.height}, !render_params.linear_output);
-      img.write((guiding::GetDebugFilePrefix() / fs::path{strconcat("mainpass_fwdimg_",num_samples,".png")}).string());
+      // img.clear();
+      // ::GenerateImage(img, AsSpan(debugbuffer), AsSpan(samplesPerTile), tileset, {render_params.width, render_params.height}, !render_params.linear_output);
+      // img.write((guiding::GetDebugFilePrefix() / fs::path{strconcat("mainpass_fwdimg_",num_samples,".png")}).string());
     });
 
     spp_schedule.UpdateForNextPass();
@@ -1273,6 +1291,11 @@ void CameraRenderWorker::PathTraceRecursive(PathNode &ps)
 
 void CameraRenderWorker::DoTheSplittingAndRussianRoutlettePartPushingSuccessorNodes(PathNode &ps)
 {
+  const guiding::PathGuiding* guiding_records = std::visit(Overload(
+    [this](const SurfaceInteraction&) { return this->radiance_recorder_surface; },
+    [this](const VolumeInteraction&) { return this->radiance_recorder_volume; }
+  ), *ps.interaction);
+
   // TODO: how about specular surfaces???!!!!!
   auto [successors_dir, rr_dir_weight] = ComputeNumberOfDirectionSamples(ps);
   for (int i=0; i<successors_dir; ++i)
@@ -1291,14 +1314,14 @@ void CameraRenderWorker::DoTheSplittingAndRussianRoutlettePartPushingSuccessorNo
           PathIntermediateState after_scatter = PrepareStartAfterScatter(ps, smpl);
 
           // TODO: fix the nonsensical use of initial weight in Atmosphere Material!!
-          auto[interaction, tfar, track_weight] = TrackToNextInteraction(
-            master->scene, 
+          auto[interaction, tfar, track_weight] = TrackToNextInteractionGuided(
+            master->scene,
+            guiding::FittedRadiance(*ps.radiance_fit, after_scatter.ray.dir),
+            *guiding_records,
             after_scatter.ray, 
-            context, 
-            Spectral3::Ones(), 
+            context,
             sampler, 
-            after_scatter.medium_tracker, 
-            nullptr);
+            after_scatter.medium_tracker);
           track_weight *= rr_dist_weight;
 
           PathNode successor = GeneratePathNode(ps, smpl, after_scatter, interaction, track_weight);
@@ -1755,6 +1778,9 @@ void CameraRenderWorker::AddToTrainingData(const PathNode &lit, const Spectral3 
   assert(radiance.isFinite().all());
 
   const Spectral3 estimator = radiance / (double)pdf;
+
+  // TODO: I don't want to get zero-valued samples into the fitting routine.
+  // (They don't do anything ???). But I need them to estimate the mean incident radiance.
 
   std::visit(Overload(
     [&](const SurfaceInteraction &ia) {

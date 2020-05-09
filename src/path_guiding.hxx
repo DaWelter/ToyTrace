@@ -113,6 +113,12 @@ struct CellData
 };
 
 
+inline double FittedRadiance(const CellData::CurrentEstimate &estimate, const Double3 &dir)
+{
+  return vmf_fitting::Pdf(estimate.radiance_distribution, dir.cast<float>()) * estimate.incident_flux_density;
+}
+
+
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
 class CellDebug
 {
