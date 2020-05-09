@@ -14,6 +14,11 @@
 #include <boost/functional/hash.hpp>
 #include <boost/align/aligned_allocator.hpp>
 
+
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#define likely(x) __builtin_expect(!!(x), 1)
+
+
 template<class T>
 inline T Sqr(const T &x)
 {
