@@ -218,8 +218,8 @@ void PathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRadiance>
   incremental::Params params;
   params.prior_alpha = prior_strength;
   params.prior_nu = prior_strength;
-  params.prior_tau = 0.5*prior_strength;
-  params.maximization_step_every = std::max(1, static_cast<int>(prior_strength)*10); //param_em_every;
+  params.prior_tau = 0.2*prior_strength;
+  params.maximization_step_every = std::max(1, static_cast<int>(prior_strength)*20); //param_em_every;
   params.prior_mode = &cell.current_estimate.radiance_distribution;
 
   for (const auto &in : buffer)

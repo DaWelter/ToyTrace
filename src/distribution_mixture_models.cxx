@@ -401,7 +401,7 @@ void InitializeForUnitSphere(VonMisesFischerMixture & mixture)  noexcept
       -0.35999632,-0.6945797,-0.62286574,
       -0.43178025,0.7588791,-0.48751223,
       0.860208,-0.47938251,0.17388113;
-    mixture.concentrations = VonMisesFischerMixture::ConcArray::Constant(10.f);
+    mixture.concentrations = VonMisesFischerMixture::ConcArray::Constant(2.f);
   }
   else 
     assert(!"VonMisesFischerMixture can only have 8 or 16 components");
@@ -495,7 +495,7 @@ void FitImpl::MaximizationStep(VonMisesFischerMixture & mixture, const Params &p
       // Note: Don't use avg_responsibilities_unweighted[k]*avg_weights here. It computes the average position wrong
       // in a way that mean_cosine is way overestimated.
       const float mean_cosine = (1.f/(avg_responsibilities[k] + eps)) * avg_positions.row(k).matrix().norm();
-      const float conc_estimate = MeanCosineToConc(mean_cosine);
+      const float conc_estimate = MeanCosineToConc(mean_cosine*0.9);
       const float diminished_alpha = params.prior_alpha/unique_data_count;
       const float post_conc = 
         (params.prior_mode->concentrations[k]*diminished_alpha + conc_estimate) / (diminished_alpha + 1.f);
@@ -515,7 +515,7 @@ void FitImpl::MaximizationStep(VonMisesFischerMixture & mixture, const Params &p
 
   mixture.concentrations = mixture.concentrations.max(K_THRESHOLD).min(K_THRESHOLD_MAX).eval();
 
-  this->data_count = 0;
+  //this->data_count = 0;
 
   assert(mixture.weights.sum() > 0.f);
   mixture.weights /= mixture.weights.sum();
