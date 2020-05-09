@@ -1320,28 +1320,35 @@ namespace
 std::pair<int, double> ComputeNumberOfSplits2(double value, double reference, double r, int max_splits, bool must_continue)
 {
 #if 1
-  // Don't let the weight factor become to large. Lower bound cutoff of denominator.
-  static constexpr double ABSOLUTE_MIN_SPLITS = 0.1; // Aka survival probability. 
+  // Weight window based on "Adjoint-Driven Russian Roulette and Splitting in Light Transport Simulation"
+  const double ww_s = 5.; // See Sec 5.1
+  const double ww_low_tmp = (2.*reference)/(1.+ww_s);
+  const double ww_high = ww_s * ww_low_tmp;
+  const double ww_low = must_continue ? 0. :  ww_low_tmp;
 
-  const double fractional_n = value/reference;
-  if (std::isnan(fractional_n) || fractional_n == 0.) // TODO: unlikely
+  if (value < ww_low)
   {
-    return {0, 1.};
+    // Survival probability is value/ww_low = q
+    if (r * ww_low < value)
+    {
+      return { 1, ww_low/value };
+    }
+    else
+    {
+      return { 0, 1. };
+    }
   }
-  if (std::isinf(fractional_n))
+  else if ((value > ww_high) & (ww_high > 0.))
   {
-    return {1, 0.};
-  }
-  else
-  {
-    const double min_splits = must_continue ? 1. : ABSOLUTE_MIN_SPLITS;
-    const double q = std::max(std::min(fractional_n, static_cast<double>(max_splits)), min_splits); // Limit number of splits
+    const double q = std::min(value/ww_high, static_cast<double>(max_splits));
     int n = static_cast<int>(q);
     double prob = q - n;
     if (r < prob)
       ++n;
     return {n, 1./q};
   }
+  else
+    return {1, 1.};
 #else
   return { 1, 1.};
 #endif
