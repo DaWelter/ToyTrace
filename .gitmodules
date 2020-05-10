@@ -7,3 +7,6 @@
 [submodule "external/pcg32"]
 	path = external/pcg32
 	url = https://github.com/wjakob/pcg32.git
+[submodule "external/variant"]
+	path = external/variant
+	url = https://github.com/mpark/variant.git

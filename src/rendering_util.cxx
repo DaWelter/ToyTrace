@@ -104,7 +104,7 @@ std::tuple<Spectral3, Pdf, RaySegment, Lights::LightRef> ComputeDirectLighting(
 
   MediumTracker medium_tracker_copy{ medium_tracker }; // Copy because well don't want to keep modifications.
   
-  if (const SurfaceInteraction* si = std::get_if<SurfaceInteraction>(&interaction); si)
+  if (const SurfaceInteraction* si = mpark::get_if<SurfaceInteraction>(&interaction); si)
   {
     MaybeGoingThroughSurface(medium_tracker_copy, segment_to_light.ray.dir, *si);
   }

@@ -163,6 +163,7 @@ target_include_directories(commonstuff PUBLIC
     ${YAML_CPP_INCLUDE_DIR} 
     ${TBB_INCLUDE_DIRS} 
     "external/cubature"
+    "external/variant/include"
     "external")
 
 

@@ -364,7 +364,7 @@ bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(PathState &ps) con
     return false;
   }
 
-  return std::visit(
+  return mpark::visit(
     Overload(
       [&](const SurfaceInteraction &si)  {
         MaybeAddEmission(si, ps);
@@ -423,7 +423,7 @@ void CameraRenderWorker::AddDirectLighting(const SomeInteraction & interaction, 
   
   double bsdf_pdf = 0.;
 
-  if (auto si = std::get_if<SurfaceInteraction>(&interaction))
+  if (auto si = mpark::get_if<SurfaceInteraction>(&interaction))
   {
     // Surface specific
     path_weight *= DFactorPBRT(*si, ray.dir);
@@ -433,7 +433,7 @@ void CameraRenderWorker::AddDirectLighting(const SomeInteraction & interaction, 
   }
   else // must be volume interaction
   {
-    auto vi = std::get_if<VolumeInteraction>(&interaction);
+    auto vi = mpark::get_if<VolumeInteraction>(&interaction);
     Spectral3 bsdf_weight = vi->medium().EvaluatePhaseFunction(-ps.ray.dir, vi->pos, ray.dir, ps.context, &bsdf_pdf);
     path_weight *= bsdf_weight;
     path_weight *= vi->sigma_s;
@@ -490,13 +490,13 @@ void PrepareStateForAfterScattering(PathState &ps, const VolumeInteraction &inte
 
 bool CameraRenderWorker::MaybeScatter(const SomeInteraction &interaction, PathState &ps) const
 {
-  auto smpl = std::visit([this, &ps, &scene{ master->scene }](auto &&ia) {
+  auto smpl = mpark::visit([this, &ps, &scene{ master->scene }](auto &&ia) {
     return SampleScatterer(ia, -ps.ray.dir, scene, sampler, ps.context);
   }, interaction);
 
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{ 1. }, ps.current_node_count, sampler))
   {
-    std::visit([&ps, &scene{ master->scene }, &smpl](auto &&ia) {
+    mpark::visit([&ps, &scene{ master->scene }, &smpl](auto &&ia) {
       return PrepareStateForAfterScattering(ps, ia, scene, smpl);
     }, interaction);
     return true;

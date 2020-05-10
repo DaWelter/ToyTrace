@@ -404,7 +404,7 @@ public:
   LightConnectionSample SampleConnection(const SomeInteraction &from, const Scene &scene, Sampler &sampler, const PathContext &context)
   {
     const auto smpl = env->TakeDirectionSample(sampler, context);
-    const auto seg = std::visit([&scene, &smpl](auto && ia) -> RaySegment { return Detail::SegmentToEnv(ia, scene, smpl.coordinates); }, from);
+    const auto seg = mpark::visit([&scene, &smpl](auto && ia) -> RaySegment { return Detail::SegmentToEnv(ia, scene, smpl.coordinates); }, from);
     return { seg, smpl.pdf_or_pmf, smpl.value };
   }
 };
@@ -438,7 +438,7 @@ public:
 
   LightConnectionSample SampleConnection(const SomeInteraction &from, const Scene &scene, Sampler &sampler, const PathContext &context)
   {
-    const auto seg = std::visit([this](auto && ia) -> RaySegment { return Detail::SegmentToPoint(ia, light->Position()); }, from);
+    const auto seg = mpark::visit([this](auto && ia) -> RaySegment { return Detail::SegmentToPoint(ia, light->Position()); }, from);
     const auto val = light->Evaluate(light->Position(), -seg.ray.dir, context, nullptr);
     return { seg, Pdf::MakeFromDelta(1.), val };
   }

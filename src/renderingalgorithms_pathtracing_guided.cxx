@@ -767,7 +767,7 @@ public:
 
         if (!interaction)
           keep_going = false;
-        else if (auto *si = std::get_if<SurfaceInteraction>(&*interaction))
+        else if (auto *si = mpark::get_if<SurfaceInteraction>(&*interaction))
         {
           if (ray_depth == 0) // If camera ray hits an emissive surface ...
           {
@@ -797,7 +797,7 @@ public:
             keep_going = false;
           }
         }
-        else if (auto *vi = std::get_if<VolumeInteraction>(&*interaction))
+        else if (auto *vi = mpark::get_if<VolumeInteraction>(&*interaction))
         {
           // track weight ~= 1/sigma_t * 1/p_lambda = 100 * 12
           const Spectral3 radiance_estimate = ComputeInscatteredRadiance(*vi, ray.dir, sampler, context);
@@ -1229,7 +1229,7 @@ void CameraRenderWorker::RenderPixel(int pixel)
   if (root.interaction)
   {
     MaybeAddNeeLighting(root, 1., root.coeffs);
-    auto smpl = std::visit([this, &root](auto &&ia) {
+    auto smpl = mpark::visit([this, &root](auto &&ia) {
       return SampleScatterKernel(ia, root, -root.incident_ray.dir);
     }, *root.interaction);
     PathIntermediateState after_scatter = PrepareStartAfterScatter(root, smpl);
@@ -1291,7 +1291,7 @@ void CameraRenderWorker::PathTraceRecursive(PathNode &ps)
 
 void CameraRenderWorker::DoTheSplittingAndRussianRoutlettePartPushingSuccessorNodes(PathNode &ps)
 {
-  const guiding::PathGuiding* guiding_records = std::visit(Overload(
+  const guiding::PathGuiding* guiding_records = mpark::visit(Overload(
     [this](const SurfaceInteraction&) { return this->radiance_recorder_surface; },
     [this](const VolumeInteraction&) { return this->radiance_recorder_volume; }
   ), *ps.interaction);
@@ -1300,7 +1300,7 @@ void CameraRenderWorker::DoTheSplittingAndRussianRoutlettePartPushingSuccessorNo
   auto [successors_dir, rr_dir_weight] = ComputeNumberOfDirectionSamples(ps);
   for (int i=0; i<successors_dir; ++i)
   {
-    auto smpl = std::visit([this, &ps](auto &&ia) {
+    auto smpl = mpark::visit([this, &ps](auto &&ia) {
       return SampleScatterKernel(ia, ps, -ps.incident_ray.dir);
     }, *ps.interaction);
     smpl.value *= rr_dir_weight;
@@ -1382,7 +1382,7 @@ std::pair<int, double> ComputeNumberOfSplits2(double value, double reference, do
 
 bool CameraRenderWorker::CanUseIlluminationApproximationInRRAndSplit(const PathNode &ps) const
 {
-  return std::visit(Overload(
+  return mpark::visit(Overload(
     [scene = &master->scene](const SurfaceInteraction &ia) -> bool {
       return GetShaderOf(ia, *scene).is_pure_diffuse;
     },
@@ -1418,7 +1418,7 @@ std::pair<int, double> CameraRenderWorker::ComputeNumberOfDirectionSamples(const
   //  * Predict path contribution
   //  * Grab pixel estimate
   //  * Compare
-  const Spectral3 li_approximation = std::visit([&](const auto &ia) { return ComputeApproximateInscatter(ps, ia); }, *ps.interaction);
+  const Spectral3 li_approximation = mpark::visit([&](const auto &ia) { return ComputeApproximateInscatter(ps, ia); }, *ps.interaction);
   const Spectral3 path_contribution = ps.weight * li_approximation; 
   return ComputeNumberOfSplits(ps, path_contribution);
 #elif 1 // RR based on throughput
@@ -1509,7 +1509,7 @@ PathNode CameraRenderWorker::GenerateFirstInteractionNode(const LambdaSelection 
 
 const RadianceFit* CameraRenderWorker::FindRadianceEstimate(const SomeInteraction &interaction) const
 {
-    return std::visit(Overload(
+    return mpark::visit(Overload(
       [&](const SurfaceInteraction &ia) { return &radiance_recorder_surface->FindRadianceEstimate(ia.pos); },
       [&](const VolumeInteraction& ia) { return &radiance_recorder_volume->FindRadianceEstimate(ia.pos); }
     ), interaction);
@@ -1590,7 +1590,7 @@ void CameraRenderWorker::MaybeAddNeeLighting(const PathNode & ps, double rr_weig
   auto [incident_radiance_estimator, pdf, segment_to_light, light_ref] = ::ComputeDirectLighting(
     master->scene, *ps.interaction, pickers->GetDistributionNee(), ps.medium_tracker, context, sampler);
   
-  auto [scatter_kernel, bsdf_pdf] = std::visit([&,segment_to_light=segment_to_light](auto &&ia) {
+  auto [scatter_kernel, bsdf_pdf] = mpark::visit([&,segment_to_light=segment_to_light](auto &&ia) {
     return EvaluateScatterKernel(-ps.incident_ray.dir, ia, ps, segment_to_light.ray.dir);
   }, *ps.interaction);
 
@@ -1616,13 +1616,13 @@ PathIntermediateState CameraRenderWorker::PrepareStartAfterScatter(const PathNod
   PathIntermediateState result {
     pn.medium_tracker,
     {
-      /*pos = */ std::visit([](const auto &ia) { return ia.pos; }, *pn.interaction),
+      /*pos = */ mpark::visit([](const auto &ia) { return ia.pos; }, *pn.interaction),
       /*dir = */ smpl.coordinates
     },
     false
   };
 
-  if (const SurfaceInteraction* si = std::get_if<SurfaceInteraction>(&*pn.interaction); si)
+  if (const SurfaceInteraction* si = mpark::get_if<SurfaceInteraction>(&*pn.interaction); si)
   {
     result.ray.org += AntiSelfIntersectionOffset(*si, result.ray.dir);
     result.monochromatic = GetShaderOf(*si, master->scene).require_monochromatic;
@@ -1662,7 +1662,7 @@ ScatterSample CameraRenderWorker::SampleScatterKernel(
 void CameraRenderWorker::AddEmission(const PathNode &ps, VertexCoefficients &coeffs) const
 {
   assert(ps.interaction);
-  std::visit([this, &ps,&coeffs](auto &ia) { AddEmission(ps, ia, coeffs); }, *ps.interaction);
+  mpark::visit([this, &ps,&coeffs](auto &ia) { AddEmission(ps, ia, coeffs); }, *ps.interaction);
 }
 
 
@@ -1782,7 +1782,7 @@ void CameraRenderWorker::AddToTrainingData(const PathNode &lit, const Spectral3 
   // TODO: I don't want to get zero-valued samples into the fitting routine.
   // (They don't do anything ???). But I need them to estimate the mean incident radiance.
 
-  std::visit(Overload(
+  mpark::visit(Overload(
     [&](const SurfaceInteraction &ia) {
       if (ia.normal.dot(dir) <= 0.)
         return;

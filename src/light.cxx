@@ -260,7 +260,7 @@ LightConnectionSample Area::SampleConnection(const SomeInteraction & somewhere, 
 {
   auto area_smpl = emitter->TakeAreaSample(prim_ref, sampler, context);
   this->light_surf = SurfaceInteraction{ area_smpl.coordinates };
-  const auto seg = std::visit([this](auto && ia) -> RaySegment {
+  const auto seg = mpark::visit([this](auto && ia) -> RaySegment {
     return Detail::SegmentToPoint(ia, light_surf.pos);
   }, somewhere);
   const auto val = emitter->Evaluate(area_smpl.coordinates, -seg.ray.dir, context, nullptr);

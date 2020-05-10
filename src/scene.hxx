@@ -8,7 +8,7 @@
 
 #include <memory>
 #include <boost/functional/hash.hpp>
-#include <variant>
+#include <mpark/variant.hpp>
 #include <optional>
 
 namespace boost { namespace filesystem {
@@ -115,7 +115,7 @@ struct VolumeInteraction : public InteractionPoint
   const Medium& medium() const { return *_medium; }
 };
 
-using SomeInteraction = std::variant<SurfaceInteraction, VolumeInteraction>;
+using SomeInteraction = mpark::variant<SurfaceInteraction, VolumeInteraction>;
 using MaybeSomeInteraction = std::optional<SomeInteraction>;
 
 Double3 AntiSelfIntersectionOffset(const SurfaceInteraction &interaction, const Double3 &exitant_dir);
