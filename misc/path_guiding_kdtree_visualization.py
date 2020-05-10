@@ -78,35 +78,43 @@ def make_cube_from_cell_data(cd):
 
 def generate_colors(polydata, cd):
     pts = numpy_support.vtk_to_numpy(polydata.GetPoints().GetData())
-    #print(pts)
     vals = cd.mixture_learned.pdf(pts)
-    vtkdata = numpy_support.numpy_to_vtk(vals.astype(np.float32))
-    polydata.GetPointData().SetScalars(vtkdata)
+    vals /= vals.max()
     return vals
 
 
-def make_sphere_from_cell_data(cd):
+def make_sphere_poly_data(cd):
     center = cd.center
-    size = np.average(cd.stddev)*0.5*10
+    size = np.average(cd.stddev)*0.5*5
     source = vtk.vtkSphereSource()
     source.SetThetaResolution(32)
     source.SetPhiResolution(16)
     source.Update()
-    #
+    vals = generate_colors(source.GetOutput(), cd)
+    source.SetCenter(*center)
+    source.SetRadius(size)
+    source.Update()
     polydata = source.GetOutput()
-    vals = generate_colors(polydata, cd)
+    polydata.GetPointData().SetScalars(numpy_support.numpy_to_vtk(vals.astype(np.float32)))
+    return polydata, vals.max()
+
+
+def make_the_all_spheres_poly_data(datas):
+    appendFilter = vtk.vtkAppendPolyData()
+    maxval = 0.
+    for pd, vals in datas:
+        appendFilter.AddInputData(pd)
+        maxval = max(maxval, vals)
+    appendFilter.Update()
     # mapper
     mapper = vtk.vtkPolyDataMapper()
-    mapper.SetInputData(polydata)
+    mapper.SetInputData(appendFilter.GetOutput())
     mapper.SetLookupTable(lut)
     mapper.SetColorModeToMapScalars()
-    mapper.SetScalarRange(0., vals.max()) #max(1./np.pi*0.25, vals.max()))
-    #print (vals.max())
+    mapper.SetScalarRange(0., 1.)
     # Actor.
     actor = vtk.vtkActor()
     actor.SetMapper(mapper)
-    actor.SetPosition(*center)
-    actor.SetScale(size, size, size)
     return actor
 
 
@@ -211,16 +219,17 @@ if __name__ == '__main__':
     style.SetDefaultRenderer(ren)
     iren.SetInteractorStyle(style)
 
+    spheredatas = []
     for cd in celldata:
         # if cd.num_points <= 1000:
         #     continue
-        a = make_sphere_from_cell_data(cd)
+        spheredatas.append(make_sphere_poly_data(cd))
         # a = make_cube_actor(
         #     make_cube_from_cell_data(cd),
         #     colors.GetColor3d("Banana")
         # )
         #actormap[a] = cd
-        ren.AddActor(a)
+        #ren.AddActor(a)
         if 0:
             a = make_cube_actor(
                 make_cube_from_cell_box(cd),
@@ -230,6 +239,8 @@ if __name__ == '__main__':
             a.GetProperty().SetRepresentationToWireframe()
             a.GetProperty().LightingOff()
             ren.AddActor(a)
+    a = make_the_all_spheres_poly_data(spheredatas)
+    ren.AddActor(a)
     
     if os.path.isfile("/tmp/scene.obj"):
         # Because of the number format
