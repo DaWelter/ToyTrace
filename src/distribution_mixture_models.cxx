@@ -492,14 +492,16 @@ void FitImpl::MaximizationStep(VonMisesFischerMixture & mixture, const Params &p
     }
 
     {
+      #if 1
       // Note: Don't use avg_responsibilities_unweighted[k]*avg_weights here. It computes the average position wrong
       // in a way that mean_cosine is way overestimated.
       const float mean_cosine = (1.f/(avg_responsibilities[k] + eps)) * avg_positions.row(k).matrix().norm();
-      const float conc_estimate = MeanCosineToConc(mean_cosine*0.9);
+      const float conc_estimate = MeanCosineToConc(mean_cosine);
       const float diminished_alpha = params.prior_alpha/unique_data_count;
       const float post_conc = 
         (params.prior_mode->concentrations[k]*diminished_alpha + conc_estimate) / (diminished_alpha + 1.f);
       mixture.concentrations[k] = post_conc;
+      #endif
 
       #if 0
       // This does not do percievably better than the simpler code above!!
@@ -515,7 +517,7 @@ void FitImpl::MaximizationStep(VonMisesFischerMixture & mixture, const Params &p
 
   mixture.concentrations = mixture.concentrations.max(K_THRESHOLD).min(K_THRESHOLD_MAX).eval();
 
-  //this->data_count = 0;
+  this->data_count = 0;
 
   assert(mixture.weights.sum() > 0.f);
   mixture.weights /= mixture.weights.sum();
@@ -536,13 +538,6 @@ inline float FitImpl::ConcToMeanCos(float k) noexcept
   // "Volume Path Guiding Based on Zero-Variance Random Walk Theory" Sec A.2, pg 0:19.
   return 1.0f / std::tanh(k) - 1.0f/k;
 }
-
-
-float GetAverageWeight(const Data &fitdata)
-{
-  return fitdata.avg_weights;
-}
-
 
 } // namespace incremental
 

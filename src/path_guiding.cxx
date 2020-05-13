@@ -146,10 +146,10 @@ void PathGuiding::AddSample(
     auto& cell = LookupCellData(pos);
     BufferMaybeSendOffSample(cell, rec);
 
-    // const auto new_rec = ComputeStochasticFilterPosition(rec, cell, sampler);
-    // auto& other_cell = LookupCellData(new_rec.pos);
-    // if (&other_cell.index != &cell.index)
-    //   BufferMaybeSendOffSample(other_cell, new_rec);
+    const auto new_rec = ComputeStochasticFilterPosition(rec, cell, sampler);
+    auto& other_cell = LookupCellData(new_rec.pos);
+    if (&other_cell.index != &cell.index)
+      BufferMaybeSendOffSample(other_cell, new_rec);
 }
 
 
@@ -214,16 +214,21 @@ void PathGuiding::ProcessSamples(int cell_idx)
 void PathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRadiance> buffer)
 {
   using namespace vmf_fitting;
-  double prior_strength = std::max(10., 0.01*cell.last_num_samples);
+  double prior_strength = std::max(1., 0.01*cell.last_num_samples);
   incremental::Params params;
   params.prior_alpha = prior_strength;
   params.prior_nu = prior_strength;
-  params.prior_tau = 0.2*prior_strength;
-  params.maximization_step_every = std::max(1, static_cast<int>(prior_strength)*20); //param_em_every;
+  params.prior_tau = prior_strength;
+  params.maximization_step_every = std::max(1, static_cast<int>(prior_strength)*10); //param_em_every;
   params.prior_mode = &cell.current_estimate.radiance_distribution;
 
   for (const auto &in : buffer)
   {
+    cell.learned.incident_flux_density_accum += in.weight;
+
+    if (in.weight <= 0.)
+      continue;
+
     //if (in.is_original)
     cell.learned.leaf_stats += in.pos;
     //else
@@ -345,7 +350,10 @@ void ComputeLeafBoxes(const Tree &tree, Handle node, const Box &node_box, Span<C
 
 void PathGuiding::PrepareAdaptedStructures()
 {
-  std::cout << strconcat("round ", round, ": num_samples=", num_recorded_samples, ", num_cells=", recording_tree.NumLeafs()) << std::endl;
+  std::cout << strconcat(
+    "round ", round,
+    ": num_samples=", num_recorded_samples,
+    ", current num_cells=", recording_tree.NumLeafs()) << std::endl;
 
   { // Start tree adaptation
     const std::uint64_t max_samples_per_cell = std::sqrt(num_recorded_samples.load()) * std::sqrt(param_num_initial_samples);
@@ -374,6 +382,11 @@ void PathGuiding::PrepareAdaptedStructures()
   
     decltype(cell_data) new_data(recording_tree.NumLeafs());
 
+    int num_cell_over_2x_limit = 0;
+    int num_cell_over_1_5x_limit = 0;
+    int num_cell_over1x_limit = 0;
+    int num_cell_else = 0;
+
     // This should initialize all sampling mixtures with
     // the previously learned ones. If node is split, assignment
     // is done to both children.
@@ -384,7 +397,7 @@ void PathGuiding::PrepareAdaptedStructures()
       {
         new_data[m.new_first].current_estimate.radiance_distribution = cell_data[i].learned.radiance_distribution;
         new_data[m.new_first].learned.radiance_distribution          = cell_data[i].learned.radiance_distribution;
-        new_data[m.new_first].current_estimate.incident_flux_density = vmf_fitting::incremental::GetAverageWeight(cell_data[i].learned.fitdata);
+        new_data[m.new_first].current_estimate.incident_flux_density = cell_data[i].learned.incident_flux_density_accum();
         new_data[m.new_first].index = m.new_first;
         new_data[m.new_first].last_num_samples = cell_data[i].learned.leaf_stats.Count();
         //new_data[m.new_first].learned.fitdata = cell_data[i].learned.fitdata;
@@ -393,14 +406,31 @@ void PathGuiding::PrepareAdaptedStructures()
       {
         new_data[m.new_second].current_estimate.radiance_distribution = cell_data[i].learned.radiance_distribution;
         new_data[m.new_second].learned.radiance_distribution = cell_data[i].learned.radiance_distribution;
-        new_data[m.new_second].current_estimate.incident_flux_density = vmf_fitting::incremental::GetAverageWeight(cell_data[i].learned.fitdata);
+        new_data[m.new_second].current_estimate.incident_flux_density = cell_data[i].learned.incident_flux_density_accum();
         new_data[m.new_second].index = m.new_second;
         new_data[m.new_second].last_num_samples = cell_data[i].learned.leaf_stats.Count();
         //new_data[m.new_second].learned.fitdata = cell_data[i].learned.fitdata;
       }
+
+      const int num_samples = cell_data[i].learned.leaf_stats.Count();
+      if (num_samples > 2*max_samples_per_cell)
+        ++num_cell_over_2x_limit;
+      else if (2*num_samples > 3*max_samples_per_cell)
+        ++num_cell_over_1_5x_limit;
+      else if(num_samples > max_samples_per_cell)
+        ++num_cell_over1x_limit;
+      else
+        ++num_cell_else;
     }
 
     cell_data = std::move(new_data);
+
+    std::cout << strconcat(
+      "num_cell_over_2x_limit = ", num_cell_over_2x_limit, "\n",
+      "num_cell_over_1_5x_limit = ", num_cell_over_1_5x_limit, "\n",
+      "num_cell_over1x_limit = ", num_cell_over1x_limit, "\n",
+      "num_cell_else = ", num_cell_else) << std::endl;
+
   } // End tree adaption
 
   ComputeLeafBoxes(recording_tree, recording_tree.GetRoot(), region, AsSpan(cell_data));

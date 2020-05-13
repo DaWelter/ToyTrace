@@ -106,6 +106,7 @@ struct CellData
       vmf_fitting::VonMisesFischerMixture radiance_distribution;
       vmf_fitting::incremental::Data fitdata;
       LeafStatistics leaf_stats;
+      Accumulators::OnlineAverage<double, int64_t> incident_flux_density_accum;
     } learned;
     
     int index = -1;
@@ -240,10 +241,10 @@ class PathGuiding
         int param_em_every;
         double param_prior_strength;
 
-        int round = 0;
-
         tbb::task_arena *the_task_arena;
         tbb::task_group the_task_group;
+
+        int round = 0;
 };
 
 

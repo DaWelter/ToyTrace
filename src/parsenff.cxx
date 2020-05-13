@@ -1257,7 +1257,6 @@ private:
     }
     else
       mesh.uvs.setConstant(0.);
-    
     scene.Append(mesh, material);
   }
   
@@ -1278,18 +1277,25 @@ private:
       aiString ainame;
       mat->Get(AI_MATKEY_NAME,ainame);
       auto name = std::string(ainame.C_Str());
+
+      std::cout << "Lookup material " << name << ", ";
+      
       if (name != "DefaultMaterial")
       {
         if (auto it = scope.materials.find(name); it != scope.materials.end())
         {
+          std::cout << " found. Emitter = " << (void*)(it->second.emitter) << "\n";
           return it->second;
         }
         else
         {
+          std::cout << " found a shader\n";
           scope.shaders.activate(name);
           return MakeMaterialFromActiveThings(scope);
         }
       }
+      else
+        std::cout << " ... not found\n";
     }
     return MakeMaterialFromActiveThings(scope);
   }

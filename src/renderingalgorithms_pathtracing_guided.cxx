@@ -198,6 +198,7 @@ inline std::pair<double,double> SampleTransmittanceWithinRange(double sigma_t, d
 }
 
 
+#if 0
 struct RadianceFilterState
 {
   // l: Fused radiance. Convex combination of value in current bin and extrapolation.
@@ -340,6 +341,7 @@ inline TrackToNextInteractionGuided(
     return RetType{ MaybeSomeInteraction{}, LargeNumber, weight };
   }
 };
+#endif
 
 
 namespace
@@ -778,8 +780,9 @@ public:
             }
           }
 
-          auto bsdf_sample = GetShaderOf(*si, master->scene).SampleBSDF(-ray.dir, *si, sampler, context);
-          if (bsdf_sample.pdf_or_pmf.IsFromDelta())
+          const Shader& shader = GetShaderOf(*si, master->scene);
+          auto bsdf_sample = shader.SampleBSDF(-ray.dir, *si, sampler, context);
+          if (bsdf_sample.pdf_or_pmf.IsFromDelta() || shader.prefer_path_tracing_over_photonmap)
           {
             // Sample next direction
             weight *= track_weight * bsdf_sample.value * DFactorPBRT(*si, bsdf_sample.coordinates) / bsdf_sample.pdf_or_pmf;
@@ -896,8 +899,8 @@ public:
     {
       const Eigen::Vector3f dir = vmf_fitting::Sample(distribution, { sampler.Uniform01(), sampler.Uniform01(), sampler.Uniform01() });
 
-      if (dir.dot(interaction.normal.cast<float>()) <= 0.)
-        continue;
+      // if (dir.dot(interaction.normal.cast<float>()) <= 0.)
+      //   continue;
 
       // Drops out because Li = pdf * estimate.incident_flux_density. Dividing by pdf because Monte Carlo,
       // makes pdf drop out of the equation.
@@ -1116,6 +1119,7 @@ inline void PathTracingAlgo2::Run()
       });
 
       num_samples = num_samples + std::max(1, int(num_samples*0.5));
+      //num_samples *= 2;
     } // Pass iteration
   }
 
@@ -1314,14 +1318,24 @@ void CameraRenderWorker::DoTheSplittingAndRussianRoutlettePartPushingSuccessorNo
           PathIntermediateState after_scatter = PrepareStartAfterScatter(ps, smpl);
 
           // TODO: fix the nonsensical use of initial weight in Atmosphere Material!!
-          auto[interaction, tfar, track_weight] = TrackToNextInteractionGuided(
+          // auto[interaction, tfar, track_weight] = TrackToNextInteractionGuided(
+          //   master->scene,
+          //   guiding::FittedRadiance(*ps.radiance_fit, after_scatter.ray.dir),
+          //   *guiding_records,
+          //   after_scatter.ray, 
+          //   context,
+          //   sampler, 
+          //   after_scatter.medium_tracker);
+
+          auto[interaction, tfar, track_weight] = TrackToNextInteraction(
             master->scene,
-            guiding::FittedRadiance(*ps.radiance_fit, after_scatter.ray.dir),
-            *guiding_records,
-            after_scatter.ray, 
+            after_scatter.ray,
             context,
+            Spectral3{Eigen::ones},
             sampler, 
-            after_scatter.medium_tracker);
+            after_scatter.medium_tracker,
+            nullptr);
+
           track_weight *= rr_dist_weight;
 
           PathNode successor = GeneratePathNode(ps, smpl, after_scatter, interaction, track_weight);
@@ -1784,8 +1798,8 @@ void CameraRenderWorker::AddToTrainingData(const PathNode &lit, const Spectral3 
 
   mpark::visit(Overload(
     [&](const SurfaceInteraction &ia) {
-      if (ia.normal.dot(dir) <= 0.)
-        return;
+      // if (ia.normal.dot(dir) <= 0.)
+      //   return;
       radiance_recorder_surface->AddSample(
           this->radrec_local_surface,
           ia.pos,

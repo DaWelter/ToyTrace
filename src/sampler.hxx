@@ -337,6 +337,31 @@ inline typename OnlineVariance::ArrayAccumulator<T>::ArrayXd OnlineVariance::Arr
 }
 
 
+namespace Accumulators
+{
+
+template<class T, class C>
+class OnlineAverage
+{
+  T mean{};
+  C counter{};
+public:
+  void operator+=(const T &x)
+  {
+    ++counter;
+    T delta = x - mean;
+    mean = mean + delta / counter;
+  }
+
+  const T& operator()() const noexcept {
+    return mean;
+  }
+};
+
+}
+
+
+
 namespace PdfConversion
 {
 
