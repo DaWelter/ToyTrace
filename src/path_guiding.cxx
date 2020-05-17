@@ -23,7 +23,7 @@ static const char* DEBUG_FILE_PREFIX = "/tmp/";
 #ifdef HAVE_JSON
 namespace rapidjson_util {
 
-rapidjson::Value ToJSON(const vmf_fitting::VonMisesFischerMixture &mixture, Alloc &a)
+rapidjson::Value ToJSON(const vmf_fitting::VonMisesFischerMixture<> &mixture, Alloc &a)
 {
   using namespace rapidjson_util;
   rj::Value jgmm(rj::kObjectType);

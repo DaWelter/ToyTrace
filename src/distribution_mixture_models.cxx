@@ -7,8 +7,8 @@
 namespace vmf_fitting
 {
 
-
-inline Eigen::Array<float, VonMisesFischerMixture::NUM_COMPONENTS, 1> ComponentPdfs(const VonMisesFischerMixture & mixture, const Eigen::Vector3f & pos) noexcept
+template<int N = 8>
+inline Eigen::Array<float, N, 1> ComponentPdfs(const VonMisesFischerMixture<N> & mixture, const Eigen::Vector3f & pos) noexcept
 {
   const auto& k = mixture.concentrations;
   assert((k >= K_THRESHOLD).all() && (k <= K_THRESHOLD_MAX).all());
@@ -18,7 +18,8 @@ inline Eigen::Array<float, VonMisesFischerMixture::NUM_COMPONENTS, 1> ComponentP
 }
 
 
-float Pdf(const VonMisesFischerMixture & mixture, const Eigen::Vector3f & pos) noexcept
+template<int N = 8>
+float Pdf(const VonMisesFischerMixture<N> & mixture, const Eigen::Vector3f & pos) noexcept
 {
   const auto component_pdfs = ComponentPdfs(mixture, pos);
   return (component_pdfs * mixture.weights).sum();
@@ -52,16 +53,18 @@ Eigen::Vector3f Sample(const Eigen::Vector3f& mu, float k, float r1, float r2) n
 }
 
 
-Eigen::Vector3f Sample(const VonMisesFischerMixture & mixture, std::array<double, 3> rs) noexcept
+template<int N = 8>
+Eigen::Vector3f Sample(const VonMisesFischerMixture<N> & mixture, std::array<double, 3> rs) noexcept
 {
-  const int idx = TowerSampling<VonMisesFischerMixture::NUM_COMPONENTS>(mixture.weights.data(), (float)rs[0]);
+  const int idx = TowerSampling<N>(mixture.weights.data(), (float)rs[0]);
   return Sample(mixture.means.row(idx).matrix(), mixture.concentrations[idx], (float)rs[1], (float)rs[2]);
 }
 
 
-void InitializeForUnitSphere(VonMisesFischerMixture & mixture)  noexcept
+template<int N = 8>
+void InitializeForUnitSphere(VonMisesFischerMixture<N> & mixture)  noexcept
 {
-  if constexpr(VonMisesFischerMixture::NUM_COMPONENTS == 16)
+  if constexpr(VonMisesFischerMixture<N>::NUM_COMPONENTS == 16)
   {
   mixture.means <<
     0.49468744,-0.1440351,-0.8570521,
@@ -80,9 +83,9 @@ void InitializeForUnitSphere(VonMisesFischerMixture & mixture)  noexcept
     0.47158864,0.8217275,0.31995004,
     0.12246728,-0.77039504,0.6256942,
     0.34670526,0.77106386,-0.5340936;
-    mixture.concentrations = VonMisesFischerMixture::ConcArray::Constant(5.f);
+    mixture.concentrations = VonMisesFischerMixture<N>::ConcArray::Constant(5.f);
   }
-  else if constexpr(VonMisesFischerMixture::NUM_COMPONENTS == 8)
+  else if constexpr(VonMisesFischerMixture<N>::NUM_COMPONENTS == 8)
   {
     mixture.means <<
       0.66778004,0.73539025,0.11519922,
@@ -93,89 +96,89 @@ void InitializeForUnitSphere(VonMisesFischerMixture & mixture)  noexcept
       -0.35999632,-0.6945797,-0.62286574,
       -0.43178025,0.7588791,-0.48751223,
       0.860208,-0.47938251,0.17388113;
-    mixture.concentrations = VonMisesFischerMixture::ConcArray::Constant(2.f);
+    mixture.concentrations = VonMisesFischerMixture<N>::ConcArray::Constant(2.f);
   }
   else 
     assert(!"VonMisesFischerMixture can only have 8 or 16 components");
-  mixture.weights = VonMisesFischerMixture::WeightArray(1.f / VonMisesFischerMixture::NUM_COMPONENTS);
+  mixture.weights = typename VonMisesFischerMixture<N>::WeightArray(1.f / VonMisesFischerMixture<N>::NUM_COMPONENTS);
 }
 
 
 namespace incremental
 {
 
-struct FitImpl : public Data
-{
-  void UpdateStatistics(VonMisesFischerMixture &mixture, const Params &params, const Eigen::Vector3f &x, float weight) noexcept;
-  void MaximizationStep(VonMisesFischerMixture &mixture, const Params &params) noexcept;
-  static float MeanCosineToConc(float r) noexcept;
-  static float ConcToMeanCos(float r) noexcept;
-};
+template<int N>
+void UpdateStatistics(VonMisesFischerMixture<N> &mixture, Data<N> &dta, const Params<N> &params, const Eigen::Vector3f &x, float weight) noexcept;
 
+template<int N>
+void MaximizationStep(VonMisesFischerMixture<N> &mixture, const Data<N> &dta, const Params<N> &params) noexcept;
 
-void Fit(VonMisesFischerMixture &mixture, Data &fitdata, const Params &params, Span<const Eigen::Vector3f> data, Span<const float> data_weights) noexcept
+template<int N>
+void Fit(VonMisesFischerMixture<N> &mixture, Data<N> &dta, const Params<N> &params, Span<const Eigen::Vector3f> data, Span<const float> data_weights) noexcept
 {
   assert(data.size() == data_weights.size());
   assert(params.prior_mode != nullptr);
   
   for (int i=0; i<data.size(); ++i)
   {
-    static_cast<FitImpl&>(fitdata).UpdateStatistics(mixture, params, data[i], data_weights[i]);
-    if (fitdata.data_count % params.maximization_step_every == 0)
+    UpdateStatistics(mixture, dta, params, data[i], data_weights[i]);
+    if (dta.data_count % params.maximization_step_every == 0)
     {
-      static_cast<FitImpl&>(fitdata).MaximizationStep(mixture, params);
+      MaximizationStep(mixture, dta, params);
+
+      dta.data_count = 0;
     }
   }
 }
 
 
-
-void FitImpl::UpdateStatistics(VonMisesFischerMixture & mixture, const Params &params, const Eigen::Vector3f & x, float weight) noexcept
+template<int N>
+void UpdateStatistics(VonMisesFischerMixture<N> & mixture, Data<N> &fitdata, const Params<N> &params, const Eigen::Vector3f & x, float weight) noexcept
 {
-  Eigen::Array<float, NC, 1> responsibilities = mixture.weights * ComponentPdfs(mixture, x) + eps;
+  Eigen::Array<float, N, 1> responsibilities = mixture.weights * ComponentPdfs(mixture, x) + eps;
   assert(responsibilities.isFinite().all() && (responsibilities > 0.f).all());
   responsibilities /= responsibilities.sum();
 
-
-  if (data_count_weights == 0)
-    avg_weights = weight;
+  if (fitdata.data_count_weights == 0)
+    fitdata.avg_weights = weight;
   else
-    avg_weights = Lerp(avg_weights, weight, (float)std::pow(double(data_count_weights), -0.75));
+    fitdata.avg_weights = Lerp(fitdata.avg_weights, weight, (float)std::pow(double(fitdata.data_count_weights), -0.75));
 
-  if (data_count == 0)
+  if (fitdata.data_count == 0)
   {
-    avg_responsibilities_unweighted = responsibilities;
-    avg_responsibilities = weight * responsibilities;
-    avg_positions = weight*(responsibilities.matrix()*x.transpose()).array();
+    fitdata.avg_responsibilities_unweighted = responsibilities;
+    fitdata.avg_responsibilities = weight * responsibilities;
+    fitdata.avg_positions = weight*(responsibilities.matrix()*x.transpose()).array();
   }
   else
   {
     // How much to "trust" new data.
-    const float mix_factor = (float)std::pow(double(data_count), -0.75f);
-    avg_responsibilities_unweighted += mix_factor*(responsibilities        - avg_responsibilities_unweighted);
-    avg_responsibilities            += mix_factor*(weight*responsibilities - avg_responsibilities);
-    avg_positions                   += mix_factor*(weight*(responsibilities.matrix()*x.transpose()).array() - avg_positions);
+    const float mix_factor = (float)std::pow(double(fitdata.data_count), -0.75f);
+    fitdata.avg_responsibilities_unweighted += mix_factor*(responsibilities        - fitdata.avg_responsibilities_unweighted);
+    fitdata.avg_responsibilities            += mix_factor*(weight*responsibilities - fitdata.avg_responsibilities);
+    fitdata.avg_positions                   += mix_factor*(weight*(responsibilities.matrix()*x.transpose()).array() - fitdata.avg_positions);
   }
-  ++data_count;
-  ++data_count_weights;
+  ++fitdata.data_count;
+  ++fitdata.data_count_weights;
 } 
 
 
-void FitImpl::MaximizationStep(VonMisesFischerMixture & mixture, const Params &params) noexcept
+template<int N>
+void MaximizationStep(VonMisesFischerMixture<N> & mixture, const Data<N> &dta, const Params<N> &params) noexcept
 {
 
-  std::uint64_t unique_data_count = data_count;
-  for (int k = 0; k < NC; ++k)
+  std::uint64_t unique_data_count = dta.data_count;
+  for (int k = 0; k < VonMisesFischerMixture<N>::NUM_COMPONENTS; ++k)
   {
-    const float scaled_responsibilities = avg_responsibilities[k] / (avg_weights + eps);
+    const float scaled_responsibilities = dta.avg_responsibilities[k] / (dta.avg_weights + eps);
 
     // The eps is there in case both of the former terms evaluate to zero!
     mixture.weights[k] = (params.prior_nu-1)/unique_data_count*params.prior_mode->weights[k] + scaled_responsibilities + eps;
 
     { // Posterior of mean.
-      const float diminished_prior_factor = avg_weights * params.prior_tau / unique_data_count;
-      mixture.means.row(k) = (diminished_prior_factor*params.prior_mode->means.row(k) + avg_positions.row(k)) /
-        (diminished_prior_factor + avg_responsibilities[k] + eps);
+      const float diminished_prior_factor = dta.avg_weights * params.prior_tau / unique_data_count;
+      mixture.means.row(k) = (diminished_prior_factor*params.prior_mode->means.row(k) + dta.avg_positions.row(k)) /
+        (diminished_prior_factor + dta.avg_responsibilities[k] + eps);
       float norm = mixture.means.row(k).matrix().norm();
       if (norm > eps)
         mixture.means.row(k) *= (1.f/norm);
@@ -187,7 +190,7 @@ void FitImpl::MaximizationStep(VonMisesFischerMixture & mixture, const Params &p
       #if 1
       // Note: Don't use avg_responsibilities_unweighted[k]*avg_weights here. It computes the average position wrong
       // in a way that mean_cosine is way overestimated.
-      const float mean_cosine = (1.f/(avg_responsibilities[k] + eps)) * avg_positions.row(k).matrix().norm();
+      const float mean_cosine = (1.f/(dta.avg_responsibilities[k] + eps)) * dta.avg_positions.row(k).matrix().norm();
       const float conc_estimate = MeanCosineToConc(mean_cosine);
       const float diminished_alpha = params.prior_alpha/unique_data_count;
       const float post_conc = 
@@ -209,29 +212,23 @@ void FitImpl::MaximizationStep(VonMisesFischerMixture & mixture, const Params &p
 
   mixture.concentrations = mixture.concentrations.max(K_THRESHOLD).min(K_THRESHOLD_MAX).eval();
 
-  this->data_count = 0;
-
   assert(mixture.weights.sum() > 0.f);
   mixture.weights /= mixture.weights.sum();
 }
 
-inline float FitImpl::MeanCosineToConc(float r) noexcept
-{
-  static constexpr float THRESHOLD = 1.f - 1.e-6f;
-  if (r >= THRESHOLD)
-    r = THRESHOLD;
-  // "Volume Path Guiding Based on Zero-Variance Random Walk Theory" Eq. 29 is wrong. There is r missing
-  // in the denominator. Correct version is in "Directional Statistics in Machine Learning: a Brief Review", for instance.
-  return r * (3.f - Sqr(r)) / (1.f - Sqr(r));
-}
-
-inline float FitImpl::ConcToMeanCos(float k) noexcept
-{
-  // "Volume Path Guiding Based on Zero-Variance Random Walk Theory" Sec A.2, pg 0:19.
-  return 1.0f / std::tanh(k) - 1.0f/k;
-}
 
 } // namespace incremental
+
+
+#define INSTANTIATE_VonMisesFischerMixture(n) \
+  template void incremental::Fit<n>(VonMisesFischerMixture<n> &mixture, Data<n> &fitdata, const Params<n> &params, Span<const Eigen::Vector3f> data, Span<const float> data_weights) noexcept; \
+  template float Pdf<n>(const VonMisesFischerMixture<n> &mixture, const Eigen::Vector3f &pos) noexcept; \
+  template Eigen::Vector3f Sample<n>(const VonMisesFischerMixture<n> &mixture, std::array<double, 3> rs) noexcept; \
+  template void InitializeForUnitSphere<n>(VonMisesFischerMixture<n> &mixture) noexcept;
+
+INSTANTIATE_VonMisesFischerMixture(1)
+INSTANTIATE_VonMisesFischerMixture(2)
+INSTANTIATE_VonMisesFischerMixture(8)
 
 
 } // namespace vmf_fitting

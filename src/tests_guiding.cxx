@@ -416,7 +416,7 @@ TEST(Guiding, CombinedIntervalsIterator)
 TEST(Guiding, MovmfSampling)
 {
   using namespace vmf_fitting;
-  VonMisesFischerMixture m;
+  VonMisesFischerMixture<> m;
   m.weights.setZero();
   m.weights <<
     4.92805e-08, 2.67356e-07, 2.18258e-05, 0.000542076, 7.16188e-08, 3.20299e-09, 0.997971, 5.77399e-06, 1.43747e-08, 2.79681e-07, 0.000585669, 0.000586032, 1.68318e-06, 6.35961e-08, 0.000193427, 9.20341e-05;

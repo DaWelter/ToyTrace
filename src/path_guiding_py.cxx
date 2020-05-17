@@ -42,75 +42,95 @@ namespace py_vmf_mixture
 
 using namespace vmf_fitting;
 
-
-auto pdf(const VonMisesFischerMixture &mixture, DataPointArray3d xs)
+template<int N>
+struct PyVonMisesFischerMixture : public VonMisesFischerMixture<N>
 {
-  DataWeightArray result; result.reserve(xs.size());
-  for (const auto &x : xs)
-  {
-    result.push_back(vmf_fitting::Pdf(mixture, x));
-  }
-  return CastToNumpyArray(result);
-}
+    auto pdf(DataPointArray3d xs)
+    {
+        DataWeightArray result; result.reserve(xs.size());
+        for (const auto &x : xs)
+        {
+            result.push_back(vmf_fitting::Pdf(*this, x));
+        }
+        return CastToNumpyArray(result);
+    }
 
-auto sample(const VonMisesFischerMixture &mixture, int n)
-{
-  DataPointArray3d result; result.reserve(n);
+    auto sample(int n)
+    {
+        DataPointArray3d result; result.reserve(n);
 
-  auto np = py::module::import("numpy");
-  auto np_random = np.attr("random").attr("random");
-  auto py_random_vals = np_random(py::make_tuple(n, 3));
-  auto rs = py_random_vals.cast<py::array_t<double>>().unchecked<2>();
+        auto np = py::module::import("numpy");
+        auto np_random = np.attr("random").attr("random");
+        auto py_random_vals = np_random(py::make_tuple(n, 3));
+        auto rs = py_random_vals.cast<py::array_t<double>>().unchecked<2>();
 
-  for (int i = 0; i < n; ++i)
-  {
-    const auto x = vmf_fitting::Sample(mixture, { rs(i,0), rs(i,1), rs(i,2) });
-    result.push_back(x);
-  }
+        for (int i = 0; i < n; ++i)
+        {
+            const auto x = vmf_fitting::Sample(*this, { rs(i,0), rs(i,1), rs(i,2) });
+            result.push_back(x);
+        }
 
-  return CastToNumpyArray(result);
-}
+        return CastToNumpyArray(result);
+    }
 
-void setWeights(VonMisesFischerMixture& mixture, const VonMisesFischerMixture::WeightArray &a)
-{
-  mixture.weights = a;
-}
+    void setWeights(const typename VonMisesFischerMixture<N>::WeightArray &a)
+    {
+        this->weights = a;
+    }
 
-auto getWeights(const VonMisesFischerMixture& mixture)
-{
-  return CastToNumpyArray(mixture.weights);
-}
+    auto getWeights()
+    {
+        return CastToNumpyArray(this->weights);
+    }
 
-void setMeans(VonMisesFischerMixture& mixture, const VonMisesFischerMixture::MeansArray &a)
-{
-  mixture.means = a;
-}
+    void setMeans(const typename VonMisesFischerMixture<N>::MeansArray &a)
+    {
+        this->means = a;
+    }
 
-auto getMeans(const VonMisesFischerMixture& mixture)
-{
-  return CastToNumpyArray(mixture.means);
-}
+    auto getMeans()
+    {
+        return CastToNumpyArray(this->means);
+    }
 
-void setConcentrations(VonMisesFischerMixture& mixture, const VonMisesFischerMixture::ConcArray &a)
-{
-  mixture.concentrations = a;
-}
+    void setConcentrations(const typename VonMisesFischerMixture<N>::ConcArray &a)
+    {
+        this->concentrations = a;
+    }
 
-auto getConcentrations(const VonMisesFischerMixture& mixture)
-{
-  return CastToNumpyArray(mixture.concentrations);
-}
+    auto getConcentrations()
+    {
+        return CastToNumpyArray(this->concentrations);
+    }
+
+    static void Register(py::module &m)
+    {
+        py::class_<PyVonMisesFischerMixture<N>>(m, strconcat("VMFMixture",N).c_str())
+            .def(py::init<>([]() -> PyVonMisesFischerMixture<N> { 
+                PyVonMisesFischerMixture<N> ret; 
+                InitializeForUnitSphere(ret); 
+                return std::move(ret);
+            }))
+            .def("pdf", &PyVonMisesFischerMixture<N>::pdf)
+            .def("sample", &PyVonMisesFischerMixture<N>::sample)
+            .def_property("weights", &PyVonMisesFischerMixture<N>::getWeights, &PyVonMisesFischerMixture<N>::setWeights)
+            .def_property("means", &PyVonMisesFischerMixture<N>::getMeans, &PyVonMisesFischerMixture<N>::setMeans)
+            .def_property("concentrations", &PyVonMisesFischerMixture<N>::getConcentrations, &PyVonMisesFischerMixture<N>::setConcentrations);
+    }
+};
 
 
+
+template<int N>
 class PyMoVmfFitIncremental
 {
-    incremental::Data data;
-    incremental::Params params;
-    VonMisesFischerMixture prior_mode;
+    incremental::Data<N> data;
+    incremental::Params<N> params;
+    PyVonMisesFischerMixture<N> prior_mode;
 
-    static vmf_fitting::incremental::Params makeParams(py::dict d)
+    static vmf_fitting::incremental::Params<N> makeParams(py::dict d)
     {
-        incremental::Params p;
+        incremental::Params<N> p;
         p.prior_nu = d["prior_nu"].cast<float>();
         p.prior_alpha = d["prior_alpha"].cast<float>();
         p.prior_tau = d["prior_tau"].cast<float>();
@@ -121,39 +141,26 @@ class PyMoVmfFitIncremental
 public:
     PyMoVmfFitIncremental(py::kwargs kwargs) :
         params{makeParams(kwargs)},
-        prior_mode{kwargs["prior_mode"].cast<VonMisesFischerMixture>()}
+        prior_mode{kwargs["prior_mode"].cast<PyVonMisesFischerMixture<N>>()}
     {
       params.prior_mode = &prior_mode;
     }
 
-    void Fit(VonMisesFischerMixture &mixture, 
+    void Fit(VonMisesFischerMixture<N> &mixture, 
         const DataPointArray3d xs, 
         const DataWeightArray ws)
     {            
         incremental::Fit(mixture, data, params, AsSpan(xs), AsSpan(ws));
     }
+
+    static void Register(py::module &m)
+    {
+        py::class_<PyMoVmfFitIncremental<N>>(m, strconcat("VMFFitIncremental", N).c_str())
+        .def(py::init<py::kwargs>())
+        .def("fit", &PyMoVmfFitIncremental::Fit);
+    }
 };
 
-
-void Register(py::module &m)
-{
-  py::class_<VonMisesFischerMixture>(m, "VMFMixture")
-    .def(py::init<>([]() ->VonMisesFischerMixture { 
-      VonMisesFischerMixture ret; 
-      InitializeForUnitSphere(ret); 
-      return ret; 
-    }))
-    .def("pdf", &pdf)
-    .def("sample", &sample)
-    .def_property("weights", &getWeights, &setWeights)
-    .def_property("means", &getMeans, &setMeans)
-    .def_property("concentrations", &getConcentrations, &setConcentrations)
-    ;
-
-    py::class_<PyMoVmfFitIncremental>(m, "VMFFitIncremental")
-    .def(py::init<py::kwargs>())
-    .def("fit", &PyMoVmfFitIncremental::Fit);
-}
 
 
 }
@@ -166,5 +173,10 @@ PYBIND11_MODULE(path_guiding, m)
 
     m.doc() = "bindings for debugging path guiding";
 
-    py_vmf_mixture::Register(m);
+    py_vmf_mixture::PyVonMisesFischerMixture<1>::Register(m);
+    py_vmf_mixture::PyVonMisesFischerMixture<2>::Register(m);
+    py_vmf_mixture::PyVonMisesFischerMixture<8>::Register(m);
+    py_vmf_mixture::PyMoVmfFitIncremental<1>::Register(m);
+    py_vmf_mixture::PyMoVmfFitIncremental<2>::Register(m);
+    py_vmf_mixture::PyMoVmfFitIncremental<8>::Register(m);
 }

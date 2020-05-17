@@ -97,14 +97,14 @@ struct CellData
 
     alignas (CACHE_LINE_SIZE) struct CurrentEstimate {
       // Normalized to the total incident flux. So radiance_distribution(w) * incident_flux_density is the actual radiance from direction w.
-      vmf_fitting::VonMisesFischerMixture radiance_distribution;
+      vmf_fitting::VonMisesFischerMixture<> radiance_distribution;
       Double3 cell_size = Double3::Constant(NaN);
       double incident_flux_density{0.};
     } current_estimate;
     
     alignas (CACHE_LINE_SIZE) struct Learned { 
-      vmf_fitting::VonMisesFischerMixture radiance_distribution;
-      vmf_fitting::incremental::Data fitdata;
+      vmf_fitting::VonMisesFischerMixture<> radiance_distribution;
+      vmf_fitting::incremental::Data<> fitdata;
       LeafStatistics leaf_stats;
       Accumulators::OnlineAverage<double, int64_t> incident_flux_density_accum;
     } learned;

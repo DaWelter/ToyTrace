@@ -380,9 +380,9 @@ void Check(const vmf_fitting::VonMisesFischerMixture &mixture, const Double3 x, 
 
 class GmmRefDistribution
 {
-  const vmf_fitting::VonMisesFischerMixture *mixture;
+  const vmf_fitting::VonMisesFischerMixture<> *mixture;
 public:
-  GmmRefDistribution(const vmf_fitting::VonMisesFischerMixture& mixture) :
+  GmmRefDistribution(const vmf_fitting::VonMisesFischerMixture<>& mixture) :
     mixture{ &mixture }
   {
   }
@@ -448,7 +448,7 @@ static constexpr double PROB_BSDF = 0.5;
 template<class ScatterFunction>
 ScatterSample SampleWithBinaryMixtureDensity(
   const ScatterFunction &scatter_function,
-  const vmf_fitting::VonMisesFischerMixture& mixture, 
+  const vmf_fitting::VonMisesFischerMixture<>& mixture, 
   const Double3 &reverse_incident_dir, 
   Sampler &sampler, const PathContext &context)
 {
@@ -503,7 +503,7 @@ ScatterSample SampleWithBinaryMixtureDensity(
 template<class ScatterFunction>
 Spectral3 EvaluateWithBinaryMixtureDensity(
   const ScatterFunction &scatter_function,
-  const vmf_fitting::VonMisesFischerMixture& mixture, 
+  const vmf_fitting::VonMisesFischerMixture<>& mixture, 
   const Double3 &dir,
   const PathContext &context,
   double *pdf
