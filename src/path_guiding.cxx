@@ -23,16 +23,6 @@ static const char* DEBUG_FILE_PREFIX = "/tmp/";
 #ifdef HAVE_JSON
 namespace rapidjson_util {
 
-rapidjson::Value ToJSON(const gmm_fitting::GaussianMixture2d &mixture, Alloc &a)
-{
-  using namespace rapidjson_util;
-  rj::Value jgmm(rj::kObjectType);
-  jgmm.AddMember("weights", ToJSON(mixture.weights, a), a);
-  jgmm.AddMember("means", ToJSON(mixture.means, a), a);
-  jgmm.AddMember("precisions", ToJSON(mixture.precisions, a), a);
-  return jgmm;
-}
-
 rapidjson::Value ToJSON(const vmf_fitting::VonMisesFischerMixture &mixture, Alloc &a)
 {
   using namespace rapidjson_util;
