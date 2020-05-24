@@ -3,10 +3,11 @@
 
 #include <memory>
 #include <type_traits>
+#include <boost/container/static_vector.hpp>
 
 #include "shader_util.hxx"
 #include "memory_arena.hxx"
-
+#include "distribution_mixture_models.hxx"
 
 struct TagScatterSample {};
 using ScatterSample = Sample<Double3, Spectral3, TagScatterSample>;
@@ -23,11 +24,17 @@ public:
   bool prefer_path_tracing_over_photonmap = false;
   bool is_pure_specular = false;
   bool is_pure_diffuse = false;
+  bool supports_lobes = false;
   Shader() {}
   virtual ~Shader() {}
   virtual ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const = 0;
   virtual Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
   virtual double Pdf(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3 &out_direction, const PathContext &context) const;
+  
+  virtual vmf_fitting::VonMisesFischerMixture<2> ComputeLobes(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const PathContext &context) const;
+  virtual void IntializeLobes();
+
+  //virtual materials::LobeOwner PickTheLobe(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler &sampler, const PathContext &context) const = 0;
 };
 
 
@@ -80,17 +87,7 @@ public:
 };
 
 
-class GlossyTransmissiveDielectricShader : public Shader
-{
-  double ior_ratio; // Inside ior / Outside ior
-  double alpha_max;
-  double alpha_min;
-  std::shared_ptr<Texture> glossy_exponent_texture;
-public:
-  GlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, double alpha_min_, std::shared_ptr<Texture> glossy_exponent_texture_);
-  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
-};
+std::unique_ptr<Shader> MakeGlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, double alpha_min_, std::shared_ptr<Texture> glossy_exponent_texture_);
 
 
 // Purely refracting shader. Unphysical but useful for testing.

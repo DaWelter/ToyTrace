@@ -12,6 +12,7 @@ class Span
 public:
   using size_t = std::ptrdiff_t;
   using index_t = std::ptrdiff_t;
+  using value_type = T;
 
 private:
   T* _begin;

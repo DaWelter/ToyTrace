@@ -11,7 +11,7 @@ namespace vmf_fitting
 
 static constexpr float K_THRESHOLD = 1.e-4f;
 // Picked such that exp(-2k)>0. Otherwise we get -inf when the log is applied!
-static constexpr float K_THRESHOLD_MAX = 4.e1f; 
+static constexpr float K_THRESHOLD_MAX = 40.f; 
 
 
 template<int N = 8>
@@ -34,6 +34,11 @@ template<int N>
 Eigen::Vector3f Sample(const VonMisesFischerMixture<N> &mixture, std::array<double, 3> rs) noexcept;
 template<int N>
 void InitializeForUnitSphere(VonMisesFischerMixture<N> &mixture) noexcept;
+// Note: the product is in general not normalized, i.e. not a probability density.
+template<int N, int M>
+VonMisesFischerMixture<N*M> Product(const VonMisesFischerMixture<N> &m1, const VonMisesFischerMixture<M> &m2) noexcept;
+template<int N>
+void Normalize(VonMisesFischerMixture<N> &mixture) noexcept;
 
 inline float MeanCosineToConc(float r) noexcept
 {
@@ -87,4 +92,4 @@ inline static constexpr float eps = 1.e-38f;
 
 } // namespace incremental
 
-};
+} // namespace vmf_fitting

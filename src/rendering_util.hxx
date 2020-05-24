@@ -365,31 +365,6 @@ inline double BsdfCorrectionFactor(const Double3 &reverse_incident_dir, const Su
 }
 
 
-inline double BsdfCorrectionFactorPBRT(const Double3 &reverse_incident_dir, const SurfaceInteraction &intersection, const Double3 &exitant_dir, double clamp)
-{
-  double nom = std::abs(Dot(intersection.shading_normal, reverse_incident_dir)) * std::abs(Dot(intersection.normal, exitant_dir));
-  //           '-------------------------^------------------------------------'   '------------------^--------------------------'
-  //                                From shading correction.                                  The D-factor, which uses geometry normal. Often part of geometry factor.
-  double denom = std::abs(Dot(intersection.normal, reverse_incident_dir)) * std::abs(Dot(intersection.shading_normal, exitant_dir));
-  //           '-------------------------^-------------------------------------'   '------------------^-------------------------'
-  //                                From shading correction                                   Cancel out "fake" D-factor, which uses the shading normal.
-  //                                                                                          Note the fake D-factor should be multiplied separately to cancel
-  //                                                                                          the corresponding 1/wr.ns term of specular BSDFs. (*)
-  //  (*)  This is the important difference to my non-PBRT style correction. Here we cancel wr.ns of the specular BSDF exactly, whereas the other correction
-  //  routine can let wr.ng / wr.ns grow a lot. Here we have  wr.ns / wr.ns * clamp(wr.ns * ....).
-  //
-  //  One more note: For photon mapping, Veach suggests to split particles. See pg. 160. 
-  return std::min(nom/(denom + Epsilon), clamp);
-}
-
-inline double DFactorPBRT(const SurfaceInteraction &intersection, const Double3 &exitant_dir)
-{
-  // By definition the factor is 1 for Volumes.
-  // This one uses the shading normal. Use with PBRT style shading normal correction!
-  return std::abs(Dot(intersection.shading_normal, exitant_dir));
-}
-
-
 namespace Lightpickers {
 class LightSelectionProbabilityMap;
 }

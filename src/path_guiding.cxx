@@ -9,7 +9,7 @@
 
 #include <tbb/parallel_for_each.h>
 
-#include <range/v3/view/enumerate.hpp>
+//#include <range/v3/view/enumerate.hpp>
 
 #ifdef _MSC_VER
 static const char* DEBUG_FILE_PREFIX = "D:\\tmp2\\";
@@ -52,9 +52,10 @@ boost::filesystem::path GetDebugFilePrefix()
 static constexpr size_t CELL_BUFFER_SIZE = 32;
 
 
-PathGuiding::PathGuiding(const Box &region, double cellwidth, const RenderingParameters &params, tbb::task_arena &the_task_arena) :
+PathGuiding::PathGuiding(const Box &region, double cellwidth, const RenderingParameters &params, tbb::task_arena &the_task_arena, const char* name) :
     region{ region },
     recording_tree{},
+    name{name},
     param_num_initial_samples{ params.guiding_tree_subdivision_factor },
     param_em_every{ params.guiding_em_every },
     param_prior_strength{ params.guiding_prior_strength },
@@ -64,7 +65,8 @@ PathGuiding::PathGuiding(const Box &region, double cellwidth, const RenderingPar
   vmf_fitting::InitializeForUnitSphere(cell.current_estimate.radiance_distribution);
   vmf_fitting::InitializeForUnitSphere(cell.learned.radiance_distribution);
   cell.index = 0;
-  cell.current_estimate.cell_size = region.max - region.min;
+  //cell.current_estimate.cell_size = region.max - region.min;
+  cell.current_estimate.cell_bbox = region;
   cell.current_estimate.incident_flux_density = 1.;
 }
 
@@ -148,7 +150,9 @@ PathGuiding::Record PathGuiding::ComputeStochasticFilterPosition(const Record & 
   Record new_rec{rec};
   for (int axis = 0; axis < 3; ++axis)
   {
-    new_rec.pos[axis] += 2.*Lerp(-cd.current_estimate.cell_size[axis], cd.current_estimate.cell_size[axis], sampler.Uniform01());
+    const auto& b = cd.current_estimate.cell_bbox;
+    const double sz = b.max[axis] - b.min[axis];
+    new_rec.pos[axis] += Lerp(-sz, sz, sampler.Uniform01());
   }
 
   {
@@ -192,8 +196,6 @@ void PathGuiding::ProcessSamples(int cell_idx)
     if (!has_buffer)
       break;
 
-    num_recorded_samples.fetch_and_add(buffer.size());
-
     LearnIncidentRadianceIn(cd, buffer);
 
     FreeSpan(buffer);
@@ -204,13 +206,22 @@ void PathGuiding::ProcessSamples(int cell_idx)
 void PathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRadiance> buffer)
 {
   using namespace vmf_fitting;
+  // TODO: should be the max over all previous samples counts to prevent
+  // overfitting in case the sample count decreases.
   double prior_strength = std::max(1., 0.01*cell.last_num_samples);
-  incremental::Params params;
+  incremental::Params<> params;
   params.prior_alpha = prior_strength;
   params.prior_nu = prior_strength;
   params.prior_tau = prior_strength;
   params.maximization_step_every = std::max(1, static_cast<int>(prior_strength)*10); //param_em_every;
-  params.prior_mode = &cell.current_estimate.radiance_distribution;
+  
+  //params.prior_mode = &cell.current_estimate.radiance_distribution;
+
+  // Below, I provide a fixed, more or less uniform prior. This seems to yield
+  // higher variance than taking the previouly learned distribution as prior.
+  vmf_fitting::VonMisesFischerMixture<> prior_mode;
+  vmf_fitting::InitializeForUnitSphere(prior_mode);
+  params.prior_mode = &prior_mode;
 
   for (const auto &in : buffer)
   {
@@ -228,10 +239,14 @@ void PathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRadiance>
       const auto xs = Span<const Eigen::Vector3f>(&in.reverse_incident_dir, 1);
       const auto ws = Span<const float>(&weight, 1);
       incremental::Fit(cell.learned.radiance_distribution, cell.learned.fitdata, params, xs, ws);
+#ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
+      cell_data_debug[cell.index].Write(in.pos, in.reverse_incident_dir, in.weight);
+#endif
     }
   }
+
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
-  cell_data_debug[cell.num].Write(buffer);
+  cell_data_debug[cell.index].params = params;
 #endif
 }
 
@@ -253,13 +268,12 @@ void PathGuiding::BeginRound(Span<ThreadLocal*> thread_locals)
   }
   cell_data_temp.reset(new CellDataTemporary[n]);
 
-
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
   cell_data_debug.reset(new CellDebug[n]);
   for (std::ptrdiff_t i = 0; i < n; ++i)
   {
     cell_data_debug[i].Open(
-      strconcat(DEBUG_FILE_PREFIX, "round_", std::to_string(round), "_cell_", std::to_string(i), ".json")
+      strconcat(DEBUG_FILE_PREFIX, name, "_samples_round_", std::to_string(round), "_cell_", std::to_string(i), ".csv")
     );
   }
 #endif
@@ -287,18 +301,15 @@ void PathGuiding::FinalizeRound(Span<ThreadLocal*> thread_locals)
   
   the_task_arena->execute([&]() { the_task_group.wait(); } );
 
+  WriteDebugData();
+
   cell_data_temp.reset();
 
   // Release memory
   for (auto* tl : thread_locals)
     tl->records_by_cells = decltype(tl->records_by_cells){};
-
-#ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
-  std::for_each(cell_data_debug.get(), cell_data_debug.get() + celldatas.size(), [](auto& dbg) {
-    dbg.Close();
-  });
-#endif
 }
+
 
 namespace 
 {
@@ -324,7 +335,8 @@ void ComputeLeafBoxes(const Tree &tree, Handle node, const Box &node_box, Span<C
   if (node.is_leaf)
   {
     // Assign lateral extents.
-    out[node.idx].current_estimate.cell_size = (node_box.max - node_box.min);
+    //out[node.idx].current_estimate.cell_size = (node_box.max - node_box.min);
+    out[node.idx].current_estimate.cell_bbox = node_box;
   }
   else
   {
@@ -340,13 +352,17 @@ void ComputeLeafBoxes(const Tree &tree, Handle node, const Box &node_box, Span<C
 
 void PathGuiding::PrepareAdaptedStructures()
 {
+  std::int64_t num_fit_samples = 0;
+  for (const auto &cell : cell_data)
+    num_fit_samples += cell.learned.leaf_stats.Count();
+
   std::cout << strconcat(
     "round ", round,
-    ": num_samples=", num_recorded_samples,
+    ": num_samples=", num_fit_samples,
     ", current num_cells=", recording_tree.NumLeafs()) << std::endl;
 
   { // Start tree adaptation
-    const std::uint64_t max_samples_per_cell = std::sqrt(num_recorded_samples.load()) * std::sqrt(param_num_initial_samples);
+    const std::uint64_t max_samples_per_cell = std::sqrt(num_fit_samples) * std::sqrt(param_num_initial_samples);
 
     auto DetermineSplit = [this, max_samples_per_cell](int cell_idx) -> std::pair<int, double>
     {
@@ -376,30 +392,38 @@ void PathGuiding::PrepareAdaptedStructures()
     int num_cell_over_1_5x_limit = 0;
     int num_cell_over1x_limit = 0;
     int num_cell_else = 0;
+    int num_cell_sample_count_regressed = 0;
+    double kl_divergence = 0.;
+    const double logq = std::log2(1./isize(cell_data));
 
     // This should initialize all sampling mixtures with
     // the previously learned ones. If node is split, assignment
     // is done to both children.
-    auto bla = adaptor.GetNodeMappings();
-    for (const auto [i, m] : ranges::views::enumerate(bla))
+    int i = 0;
+    for (const auto& m : adaptor.GetNodeMappings())
     {
+      auto CopyCell = [&src = cell_data[i], new_data = AsSpan(new_data)](int dst_idx) mutable
+      {
+        CellData &dst = new_data[dst_idx];
+        dst.current_estimate.radiance_distribution = src.learned.radiance_distribution;
+        dst.learned.radiance_distribution          = src.learned.radiance_distribution;
+        dst.learned.incident_flux_density_accum    = src.learned.incident_flux_density_accum;
+        dst.current_estimate.incident_flux_density = src.learned.incident_flux_density_accum.Mean();
+        dst.current_estimate.incident_flux_confidence_bounds = src.learned.incident_flux_density_accum.Count()>=10 ?
+          std::sqrt(src.learned.incident_flux_density_accum.Var() / static_cast<double>(src.learned.incident_flux_density_accum.Count())) : LargeNumber;
+        assert (std::isfinite(dst.current_estimate.incident_flux_confidence_bounds));
+        dst.index = dst_idx;
+        dst.last_num_samples                      = src.learned.leaf_stats.Count();
+        dst.max_num_samples                       = std::max(dst.last_num_samples, dst.max_num_samples);
+      };
+
       if (m.new_first >=0)
       {
-        new_data[m.new_first].current_estimate.radiance_distribution = cell_data[i].learned.radiance_distribution;
-        new_data[m.new_first].learned.radiance_distribution          = cell_data[i].learned.radiance_distribution;
-        new_data[m.new_first].current_estimate.incident_flux_density = cell_data[i].learned.incident_flux_density_accum();
-        new_data[m.new_first].index = m.new_first;
-        new_data[m.new_first].last_num_samples = cell_data[i].learned.leaf_stats.Count();
-        //new_data[m.new_first].learned.fitdata = cell_data[i].learned.fitdata;
+        CopyCell(m.new_first);
       }
       if (m.new_second >= 0)
       {
-        new_data[m.new_second].current_estimate.radiance_distribution = cell_data[i].learned.radiance_distribution;
-        new_data[m.new_second].learned.radiance_distribution = cell_data[i].learned.radiance_distribution;
-        new_data[m.new_second].current_estimate.incident_flux_density = cell_data[i].learned.incident_flux_density_accum();
-        new_data[m.new_second].index = m.new_second;
-        new_data[m.new_second].last_num_samples = cell_data[i].learned.leaf_stats.Count();
-        //new_data[m.new_second].learned.fitdata = cell_data[i].learned.fitdata;
+        CopyCell(m.new_second);
       }
 
       const int num_samples = cell_data[i].learned.leaf_stats.Count();
@@ -409,8 +433,13 @@ void PathGuiding::PrepareAdaptedStructures()
         ++num_cell_over_1_5x_limit;
       else if(num_samples > max_samples_per_cell)
         ++num_cell_over1x_limit;
+      else if (((m.new_first>=0) ^ (m.new_second >= 0)) && num_samples*3 < cell_data[i].last_num_samples*4)
+        ++num_cell_sample_count_regressed;
       else
         ++num_cell_else;
+      const double p = static_cast<double>(num_samples) / num_fit_samples;
+      kl_divergence += p>0. ? (p*std::log2(p) - p*logq) : 0.;
+      ++i;
     }
 
     cell_data = std::move(new_data);
@@ -419,13 +448,14 @@ void PathGuiding::PrepareAdaptedStructures()
       "num_cell_over_2x_limit = ", num_cell_over_2x_limit, "\n",
       "num_cell_over_1_5x_limit = ", num_cell_over_1_5x_limit, "\n",
       "num_cell_over1x_limit = ", num_cell_over1x_limit, "\n",
-      "num_cell_else = ", num_cell_else) << std::endl;
-
+      "num_cell_else = ", num_cell_else, "\n",
+      "num_cell_regressed = ", num_cell_sample_count_regressed, "\n",
+      "kl_divergence = ", kl_divergence) << std::endl;
+    ++i;
   } // End tree adaption
 
   ComputeLeafBoxes(recording_tree, recording_tree.GetRoot(), region, AsSpan(cell_data));
 
-  num_recorded_samples = 0;
   round++;
 }
 
@@ -438,64 +468,32 @@ CellDebug::~CellDebug()
 void CellDebug::Open(std::string filename_)
 {
   this->filename = filename_;
+  std::cout << "opening " << this->filename << std::endl;
   assert(!file.is_open());
   file.open(filename);
   assert(file.is_open());
-  file << "[";
 }
 
-void CellDebug::Write(Span<const IncidentRadiance> records)
+void CellDebug::Write(const Double3 &pos, const Float3 &dir, float weight)
 {
-  using namespace rapidjson_util;
   assert(file.is_open());
-
-  if (!records.size())
-    return;
-
-  rj::Document doc;
-  doc.SetArray();
-  auto &a = doc.GetAllocator();
-  for (const auto &ir : records)
-  {
-    rj::Value jrec(rj::kObjectType);
-    jrec.AddMember("dir", ToJSON(ir.reverse_incident_dir, a), a);
-    jrec.AddMember("val", ToJSON(ir.weight, a), a);
-    jrec.AddMember("proj", ToJSON(ir.xy, a), a);
-    doc.PushBack(jrec.Move(), a);
-  }
-  auto datastr = ToString(doc);
-  /*
-  [
-    {
-      bla bla
-    }
-  ]
-  */
-  datastr = datastr.substr(2, datastr.size() - 4);
-  if (!first)
-    file << ',';
-  else
-    first = false;
-  file << '\n' << datastr;
-  file.flush();
+  file << pos[0] << "," << pos[1] << "," << pos[2] << ","<< dir[0] << ","<< dir[1] << ","<< dir[2] << ","<< weight << "\n";
 }
 
 void CellDebug::Close()
 {
-  if (file.is_open())
-  {
-    file << '\n' << ']';
-    file.close();
-  }
+  std::cout << "closing " << this->filename << std::endl;
+  file.close();
 }
 
 #endif
 
 
-void PathGuiding::WriteDebugData(const std::string name_prefix)
+void PathGuiding::WriteDebugData()
 {
 #if (defined WRITE_DEBUG_OUT & defined HAVE_JSON & !defined NDEBUG)
-  const auto filename = strconcat(DEBUG_FILE_PREFIX, name_prefix, "radiance_records_", round, ".json");
+  const auto filename = strconcat(DEBUG_FILE_PREFIX, name, "_radiance_records_", round, ".json");
+  std::cout << "Writing " << filename << std::endl;
   std::ofstream file(filename);
 
   using namespace rapidjson_util;
@@ -513,9 +511,7 @@ void PathGuiding::WriteDebugData(const std::string name_prefix)
     //std::cout << "cell " << idx << " contains" << celldata.incident_radiance.size() << " records " << std::endl;
     rj::Value jcell(rj::kObjectType);
     jcell.AddMember("id", cd.index, a);
-#ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
-    jcell.AddMember("filename", ToJSON(cell_data_debug[cd->num].GetFilename(), a), a);
-#endif
+
     auto[mean, stddev] = [&]() {
       if (cd.learned.leaf_stats.Count())
       {
@@ -530,12 +526,23 @@ void PathGuiding::WriteDebugData(const std::string name_prefix)
     }();
     jcell.AddMember("point_distribution_statistics_mean", ToJSON(mean, a), a);
     jcell.AddMember("point_distribution_statistics_stddev", ToJSON(stddev, a), a);
-    jcell.AddMember("size", ToJSON(cd.current_estimate.cell_size, a), a);
+    //jcell.AddMember("size", ToJSON(cd.current_estimate.cell_size, a), a);
+    jcell.AddMember("bbox_min", ToJSON(cd.current_estimate.cell_bbox.min, a), a);
+    jcell.AddMember("bbox_max", ToJSON(cd.current_estimate.cell_bbox.max, a), a);
     jcell.AddMember("num_points", cd.learned.leaf_stats.Count(), a);
     jcell.AddMember("average_weight", cd.learned.fitdata.avg_weights, a);
-
+    jcell.AddMember("incident_flux_learned", ToJSON(cd.learned.incident_flux_density_accum.Mean(), a), a);
+    jcell.AddMember("incident_flux_sampled", ToJSON(cd.current_estimate.incident_flux_density, a), a);
     jcell.AddMember("mixture_learned", ToJSON(cd.learned.radiance_distribution, a), a);
     jcell.AddMember("mixture_sampled", ToJSON(cd.current_estimate.radiance_distribution, a), a);
+
+    // Fit parameters 
+#ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
+    jcell.AddMember("fitparam_prior_nu", cell_data_debug[cd.index].params.prior_nu, a);
+    jcell.AddMember("fitparam_prior_tau", cell_data_debug[cd.index].params.prior_tau, a);
+    jcell.AddMember("fitparam_prior_alpha", cell_data_debug[cd.index].params.prior_alpha, a);
+    jcell.AddMember("fitparam_maximization_step_every", cell_data_debug[cd.index].params.maximization_step_every, a);
+#endif
 
     records.PushBack(jcell.Move(), a);
   }

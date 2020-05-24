@@ -14,7 +14,9 @@ inline Eigen::Array<float, N, 1> ComponentPdfs(const VonMisesFischerMixture<N> &
   assert((k >= K_THRESHOLD).all() && (k <= K_THRESHOLD_MAX).all());
   const auto prefactors = float(Pi)*2.f*(1.f - (-2.f*k).exp());
   const auto tmp = (k*((mixture.means.matrix() * pos).array() - 1.f)).exp();
-  return (k / prefactors * tmp).eval();
+  const auto result = (k / prefactors * tmp).eval();
+  assert(result.isFinite().all() && (result >= 0.f).all());
+  return result;
 }
 
 
@@ -61,11 +63,46 @@ Eigen::Vector3f Sample(const VonMisesFischerMixture<N> & mixture, std::array<dou
 }
 
 
-template<int N = 8>
+template<int N>
 void InitializeForUnitSphere(VonMisesFischerMixture<N> & mixture)  noexcept
 {
-  if constexpr(VonMisesFischerMixture<N>::NUM_COMPONENTS == 16)
-  {
+  assert ("!Not implemented!");
+}
+
+
+template<>
+void InitializeForUnitSphere<2>(VonMisesFischerMixture<2> & mixture)  noexcept
+{
+  using MoVMF = VonMisesFischerMixture<2>;
+  mixture.means <<
+    -1., 0., 0.,
+     1., 0., 0.;
+  mixture.concentrations = MoVMF::ConcArray::Constant(0.1f);
+  mixture.weights = typename MoVMF::WeightArray(1.f / MoVMF::NUM_COMPONENTS);
+}
+
+
+template<>
+void InitializeForUnitSphere<8>(VonMisesFischerMixture<8> & mixture)  noexcept
+{
+  using MoVMF = VonMisesFischerMixture<8>;
+    mixture.means <<
+      0.66778004,0.73539025,0.11519922,
+      -0.9836298,-0.008926501,0.1799797,
+      -0.14629413,-0.7809748,0.60718733,
+      0.49043104,0.04368747,-0.87038434,
+      -0.10088497,0.42765132,0.8982965,
+      -0.35999632,-0.6945797,-0.62286574,
+      -0.43178025,0.7588791,-0.48751223,
+      0.860208,-0.47938251,0.17388113;
+  mixture.concentrations = MoVMF::ConcArray::Constant(2.f);
+  mixture.weights = typename MoVMF::WeightArray(1.f / MoVMF::NUM_COMPONENTS);
+}
+
+template<>
+void InitializeForUnitSphere<16>(VonMisesFischerMixture<16> & mixture)  noexcept
+{
+  using MoVMF = VonMisesFischerMixture<16>;
   mixture.means <<
     0.49468744,-0.1440351,-0.8570521,
     0.36735174,-0.8573688,-0.36051556,
@@ -83,24 +120,60 @@ void InitializeForUnitSphere(VonMisesFischerMixture<N> & mixture)  noexcept
     0.47158864,0.8217275,0.31995004,
     0.12246728,-0.77039504,0.6256942,
     0.34670526,0.77106386,-0.5340936;
-    mixture.concentrations = VonMisesFischerMixture<N>::ConcArray::Constant(5.f);
-  }
-  else if constexpr(VonMisesFischerMixture<N>::NUM_COMPONENTS == 8)
+    mixture.concentrations = MoVMF::ConcArray::Constant(5.f);  
+    mixture.weights = typename MoVMF::WeightArray(1.f / MoVMF::NUM_COMPONENTS);
+}
+
+
+template<int N, int M>
+VonMisesFischerMixture<N*M> Product(const VonMisesFischerMixture<N> &m1, const VonMisesFischerMixture<M> &m2) noexcept
+{
+  static constexpr int NM = N*M;
+  VonMisesFischerMixture<NM> result;
+  for (int i=0; i<N; ++i)
   {
-    mixture.means <<
-      0.66778004,0.73539025,0.11519922,
-      -0.9836298,-0.008926501,0.1799797,
-      -0.14629413,-0.7809748,0.60718733,
-      0.49043104,0.04368747,-0.87038434,
-      -0.10088497,0.42765132,0.8982965,
-      -0.35999632,-0.6945797,-0.62286574,
-      -0.43178025,0.7588791,-0.48751223,
-      0.860208,-0.47938251,0.17388113;
-    mixture.concentrations = VonMisesFischerMixture<N>::ConcArray::Constant(2.f);
+    result.means.block(i*M, 0, M, 3) = (m1.concentrations[i]*m1.means.row(i)).replicate(M,1) + (m2.means*m2.concentrations.replicate(1,3));
   }
-  else 
-    assert(!"VonMisesFischerMixture can only have 8 or 16 components");
-  mixture.weights = typename VonMisesFischerMixture<N>::WeightArray(1.f / VonMisesFischerMixture<N>::NUM_COMPONENTS);
+  result.concentrations = result.means.matrix().rowwise().norm();
+  result.means.colwise() /= result.concentrations;
+
+  // Weights ...
+  const typename VonMisesFischerMixture<N>::WeightArray  exponentials1 = 1.f+incremental::eps - (-2.f*m1.concentrations    ).exp();
+  const typename VonMisesFischerMixture<M>::WeightArray  exponentials2 = 1.f+incremental::eps - (-2.f*m2.concentrations    ).exp();
+  const typename VonMisesFischerMixture<NM>::WeightArray exponentialsk = 1.f+incremental::eps - (-2.f*result.concentrations).exp();
+
+  for (int i=0; i<N; ++i)
+  {
+    for (int j=0; j<M; ++j)
+    {
+      const int k = i*M + j;
+      result.weights[k] = m1.concentrations[i]*m2.concentrations[j]*exponentialsk[k] / 
+                          (2.f*PiFloat*result.concentrations[k]*exponentials1[i]*exponentials2[j] + incremental::eps);
+      result.weights[k] *= std::exp(m1.concentrations[i]*(m1.means.row(i).matrix().dot(result.means.row(k).matrix())-1.f) + 
+                                    m2.concentrations[j]*(m2.means.row(j).matrix().dot(result.means.row(k).matrix())-1.f));
+      result.weights[k] *= m1.weights[i] * m2.weights[j];
+    }
+  }
+
+  // Hack to avoid numerical problems ...
+  result.concentrations = result.concentrations.max(K_THRESHOLD).min(K_THRESHOLD_MAX).eval();
+  return result;
+}
+
+
+template<int N>
+void Normalize(VonMisesFischerMixture<N> &mixture) noexcept
+{
+  const float wsum = mixture.weights.sum();
+  if (unlikely(wsum <= 0.f))
+  {
+    // Case may happen due to underflow in calculations with exponentials
+    mixture.weights.setConstant(1.f/N);
+  }
+  else
+  {
+    mixture.weights /= wsum;
+  }
 }
 
 
@@ -126,7 +199,7 @@ void Fit(VonMisesFischerMixture<N> &mixture, Data<N> &dta, const Params<N> &para
     {
       MaximizationStep(mixture, dta, params);
 
-      dta.data_count = 0;
+      //dta.data_count = 0;
     }
   }
 }
@@ -136,7 +209,6 @@ template<int N>
 void UpdateStatistics(VonMisesFischerMixture<N> & mixture, Data<N> &fitdata, const Params<N> &params, const Eigen::Vector3f & x, float weight) noexcept
 {
   Eigen::Array<float, N, 1> responsibilities = mixture.weights * ComponentPdfs(mixture, x) + eps;
-  assert(responsibilities.isFinite().all() && (responsibilities > 0.f).all());
   responsibilities /= responsibilities.sum();
 
   if (fitdata.data_count_weights == 0)
@@ -181,7 +253,7 @@ void MaximizationStep(VonMisesFischerMixture<N> & mixture, const Data<N> &dta, c
         (diminished_prior_factor + dta.avg_responsibilities[k] + eps);
       float norm = mixture.means.row(k).matrix().norm();
       if (norm > eps)
-        mixture.means.row(k) *= (1.f/norm);
+        mixture.means.row(k) /= norm;
       else
         mixture.means.row(k).matrix() = Eigen::Vector3f{1.f, 0.f, 0.f};
     }
@@ -202,7 +274,7 @@ void MaximizationStep(VonMisesFischerMixture<N> & mixture, const Data<N> &dta, c
       // This does not do percievably better than the simpler code above!!
       // Here the prior is on the mean cosine, forcing me to go back and forth with the cosine-k-conversions.
       const float prior_cos = ConcToMeanCos(params.prior_mode->concentrations[k]);
-      const float mean_cosine = (1.f/(avg_responsibilities[k] + eps)) * avg_positions.row(k).matrix().norm();
+      const float mean_cosine = (1.f/(dta.avg_responsibilities[k] + eps)) * dta.avg_positions.row(k).matrix().norm();
       const float diminished_alpha = params.prior_alpha/unique_data_count;
       const float mean_cosine_post = (diminished_alpha*prior_cos + mean_cosine) / (diminished_alpha + 1.f);
       mixture.concentrations[k] = MeanCosineToConc(mean_cosine_post);
@@ -219,16 +291,18 @@ void MaximizationStep(VonMisesFischerMixture<N> & mixture, const Data<N> &dta, c
 
 } // namespace incremental
 
+} // namespace vmf_fitting
+
 
 #define INSTANTIATE_VonMisesFischerMixture(n) \
-  template void incremental::Fit<n>(VonMisesFischerMixture<n> &mixture, Data<n> &fitdata, const Params<n> &params, Span<const Eigen::Vector3f> data, Span<const float> data_weights) noexcept; \
-  template float Pdf<n>(const VonMisesFischerMixture<n> &mixture, const Eigen::Vector3f &pos) noexcept; \
-  template Eigen::Vector3f Sample<n>(const VonMisesFischerMixture<n> &mixture, std::array<double, 3> rs) noexcept; \
-  template void InitializeForUnitSphere<n>(VonMisesFischerMixture<n> &mixture) noexcept;
+  template void vmf_fitting::incremental::Fit<n>(VonMisesFischerMixture<n> &mixture, Data<n> &fitdata, const Params<n> &params, Span<const Eigen::Vector3f> data, Span<const float> data_weights) noexcept; \
+  template float  vmf_fitting::Pdf<n>(const VonMisesFischerMixture<n> &mixture, const Eigen::Vector3f &pos) noexcept; \
+  template Eigen::Vector3f  vmf_fitting::Sample<n>(const VonMisesFischerMixture<n> &mixture, std::array<double, 3> rs) noexcept; \
+  template void  vmf_fitting::InitializeForUnitSphere<n>(VonMisesFischerMixture<n> &mixture) noexcept; \
+  template void vmf_fitting::Normalize(VonMisesFischerMixture<n> &mixture) noexcept;
 
-INSTANTIATE_VonMisesFischerMixture(1)
 INSTANTIATE_VonMisesFischerMixture(2)
 INSTANTIATE_VonMisesFischerMixture(8)
+INSTANTIATE_VonMisesFischerMixture(16)
 
-
-} // namespace vmf_fitting
+template vmf_fitting::VonMisesFischerMixture<16> vmf_fitting::Product(const vmf_fitting::VonMisesFischerMixture<2> &m1, const vmf_fitting::VonMisesFischerMixture<8> &m2) noexcept;

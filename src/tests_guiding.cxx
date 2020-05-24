@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
 
-#include <range/v3/view/enumerate.hpp>
+//#include <range/v3/view/enumerate.hpp>
 
 #include "path_guiding.hxx"
 #include "path_guiding_tree.hxx"

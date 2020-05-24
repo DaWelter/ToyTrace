@@ -3,9 +3,11 @@ import path_guiding_kdtree_loader
 import vtk
 import sys
 import os
+import csv
 from pprint import pprint, pformat
 from matplotlib import pyplot
 import numpy as np
+import itertools
 from vtk.util import numpy_support
 
 def generate_lut():
@@ -32,36 +34,72 @@ def generate_lut():
 lut = generate_lut()
 
 
-def pdf_image(ax, gmm):
-    t = np.linspace(-1.,1., 100)
-    x,y = np.meshgrid(t,t)
-    coord_list = np.vstack((x.ravel(), y.ravel())).T
-    pdf_vals = gmm.pdf(coord_list)
-    pdf_vals = np.reshape(pdf_vals, (t.size,t.size))
-    return ax.imshow(pdf_vals[::-1,::], extent=(-1.,1,-1.,1.))
+# def pdf_image(ax, gmm):
+#     t = np.linspace(-1.,1., 100)
+#     x,y = np.meshgrid(t,t)
+#     coord_list = np.vstack((x.ravel(), y.ravel())).T
+#     pdf_vals = gmm.pdf(coord_list)
+#     pdf_vals = np.reshape(pdf_vals, (t.size,t.size))
+#     return ax.imshow(pdf_vals[::-1,::], extent=(-1.,1,-1.,1.))
 
 
 class CellDisplay(object):
-    def __init__(self):
-        self.fig, self.axes = pyplot.subplots(1, 2, figsize = (10, 5))
+    def __init__(self, samplefile_pattern, main_renderer):
+        #self.fig, self.axes = pyplot.subplots(1, 2, figsize = (10, 5))
+        self.samplefile_pattern = samplefile_pattern
+        self.main_renderer = main_renderer
 
     def display(self, cell1):
-        fig, axes = self.fig, self.axes
-        for ax in axes:
-            ax.clear()
-        fig.suptitle(f"#samples = {cell1.num_points}")
+        print ("--- Cell {} ---".format(cell1.id))
+        print (cell1)
+        print (" ++ Learned means ++")
+        print (cell1.mixture_learned.means)
+        print (" ++ Learned weights ++")
+        print (cell1.mixture_learned.weights)
+
+        if not self.samplefile_pattern:
+            return
+
+        pos, dir, weight = path_guiding_kdtree_loader.load_sample_file(self.samplefile_pattern.format(cell1.id))
+        weight /= weight.max()
+
+        # fig, axes = self.fig, self.axes
+        # for ax in axes:
+        #     ax.clear()
+        # fig.suptitle(f"#samples = {cell1.num_points}")
         # if cell1.val is not None:
         #     w = np.average(cell1.val, axis = 1) + 1.e-9
         #     norm = np.average(w)
         #     w /= norm
         #     axes[0].scatter(*cell1.proj.T, c = w, s = w, alpha = 0.2, edgecolor = 'none')
         #     axes[0].add_artist(pyplot.Circle((0, 0), 1, fill = False, color = 'k'))
-        pdf_image(axes[0], cell1.mixture_learned)
-        axes[0].set(title = 'learned')
-        pdf_image(axes[1], cell1.mixture_sampled)
-        axes[1].set(title = 'sampled')
-        pyplot.draw()
-        pyplot.show(block = False)
+        # pdf_image(axes[0], cell1.mixture_learned)
+        # axes[0].set(title = 'learned')
+        # pdf_image(axes[1], cell1.mixture_sampled)
+        # axes[1].set(title = 'sampled')
+        # pyplot.draw()
+        # pyplot.show(block = False)
+
+        pts = vtk.vtkPoints()
+        lines = vtk.vtkCellArray()
+        for i, p, d, w in zip(itertools.count(), pos, dir, weight):
+            p = cell1.center
+            rmin = np.average(cell1.stddev)*0.5
+            pts.InsertNextPoint(p+d*rmin)
+            pts.InsertNextPoint(p+d*(rmin+w*rmin))
+            line = vtk.vtkLine()
+            line.GetPointIds().SetId(0,i*2)
+            line.GetPointIds().SetId(1,i*2+1)
+            lines.InsertNextCell(line)
+        linesPolyData = vtk.vtkPolyData()
+        linesPolyData.SetPoints(pts)
+        linesPolyData.SetLines(lines)
+        
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputData(linesPolyData)
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+        self.main_renderer.AddActor(actor)
 
 
 def make_cube_from_cell_data(cd):
@@ -77,21 +115,28 @@ def make_cube_from_cell_data(cd):
 
 
 def generate_colors(polydata, cd):
-    pts = numpy_support.vtk_to_numpy(polydata.GetPoints().GetData())
+    # The default radius is 0.5!
+    pts = 2.*numpy_support.vtk_to_numpy(polydata.GetPoints().GetData())
+    # Color by pdf
     vals = cd.mixture_learned.pdf(pts)
     vals /= vals.max()
+    # Color by incident radiance
+    #vals = np.ones(pts.shape[0]) * cd.average_weight
+
+    # vals = np.log10(np.maximum(vals + 1. - 1.e-3, 1.))
+    # vals /= vals.max()
+
     return vals
 
 
 def make_sphere_poly_data(cd):
-    center = cd.center
-    size = np.average(cd.stddev)*0.5*5
+    size = np.average(cd.stddev)*0.5
     source = vtk.vtkSphereSource()
     source.SetThetaResolution(32)
     source.SetPhiResolution(16)
     source.Update()
     vals = generate_colors(source.GetOutput(), cd)
-    source.SetCenter(*center)
+    source.SetCenter(*cd.center)
     source.SetRadius(size)
     source.Update()
     polydata = source.GetOutput()
@@ -111,7 +156,7 @@ def make_the_all_spheres_poly_data(datas):
     mapper.SetInputData(appendFilter.GetOutput())
     mapper.SetLookupTable(lut)
     mapper.SetColorModeToMapScalars()
-    mapper.SetScalarRange(0., 1.)
+    mapper.SetScalarRange(0., maxval)
     # Actor.
     actor = vtk.vtkActor()
     actor.SetMapper(mapper)
@@ -120,7 +165,11 @@ def make_the_all_spheres_poly_data(datas):
 
 def make_cube_from_cell_box(cd):
     cube = vtk.vtkCubeSource()
-    cube.SetBounds(*cd.box.ravel())
+    #cube.SetBounds(*cd.box.ravel())
+    cube.SetCenter(*cd.center)
+    cube.SetXLength(cd.stddev[0]*2)
+    cube.SetYLength(cd.stddev[1]*2)
+    cube.SetZLength(cd.stddev[2]*2)
     cube.Update()
     return cube
 
@@ -152,39 +201,49 @@ class MouseInteractorHighLightActor(vtk.vtkInteractorStyleTrackballCamera):
         picker = vtk.vtkPropPicker()
         picker.Pick(clickPos[0], clickPos[1], 0, self.GetDefaultRenderer())
 
-        # get the new
-        self.NewPickedActor = picker.GetActor()
+        if picker.GetActor() in self.actormap:
+            # get the new
+            self.NewPickedActor = picker.GetActor()
+            # If something was selected
+            if self.NewPickedActor:
+                # If we picked something before, reset its property
+                if self.LastPickedActor:
+                    self.LastPickedActor.GetProperty().DeepCopy(self.LastPickedProperty)
 
-        # If something was selected
-        if self.NewPickedActor:
-            # If we picked something before, reset its property
-            if self.LastPickedActor:
-                self.LastPickedActor.GetProperty().DeepCopy(self.LastPickedProperty)
-
-            # Save the property of the picked actor so that we can
-            # restore it next time
-            self.LastPickedProperty.DeepCopy(self.NewPickedActor.GetProperty())
-            # Highlight the picked actor by changing its properties
-            self.NewPickedActor.GetProperty().SetColor(1.0, 0.0, 0.0)
-            self.NewPickedActor.GetProperty().SetDiffuse(1.0)
-            self.NewPickedActor.GetProperty().SetSpecular(0.0)
-            self.NewPickedActor.GetProperty().SetLineWidth(3.0)
-            # save the last picked actor
-            self.LastPickedActor = self.NewPickedActor
-            #assert self.NewPickedActor in self.actormap
-
-            if self.NewPickedActor in self.actormap:
-                s = pformat(self.actormap[self.NewPickedActor])
+                # Save the property of the picked actor so that we can
+                # restore it next time
+                self.LastPickedProperty.DeepCopy(self.NewPickedActor.GetProperty())
+                # Highlight the picked actor by changing its properties
+                self.NewPickedActor.GetProperty().SetColor(1.0, 0.0, 0.0)
+                self.NewPickedActor.GetProperty().SetDiffuse(1.0)
+                self.NewPickedActor.GetProperty().SetSpecular(0.0)
+                self.NewPickedActor.GetProperty().SetLineWidth(3.0)
+                # save the last picked actor
+                self.LastPickedActor = self.NewPickedActor
+                #assert self.NewPickedActor in self.actormap            
+                #s = pformat(self.actormap[self.NewPickedActor])
                 #self.textactor.SetInput(s)
-                print (s)
+                #print (s)
                 self.display.display(self.actormap[self.NewPickedActor])
 
         self.OnLeftButtonDown()
         return
 
+
+def filter_cell(cd):
+    # if cd.num_points <= 1000:
+    #     continue
+    #if cd.id != 515:
+    #    return False
+    if np.any(np.abs(cd.center - np.array([-0.01, 0.4, -0.55])) > 0.3):
+       return False
+    return True
+
     
 if __name__ == '__main__':
     filename = sys.argv[1]
+    samplefile_pattern = sys.argv[2] if len(sys.argv)>2 else None
+
     assert(os.path.isfile(filename))
 
     actormap = {}
@@ -192,14 +251,16 @@ if __name__ == '__main__':
         path_guiding_kdtree_loader.read_records(filename),
         load_samples = False,
         build_boxes = True)
-    for i, cd in enumerate(celldata):
-        cd['index'] = i
 
-    display = CellDisplay()
+    # for i, cd in enumerate(celldata):
+    #     cd['index'] = i
+
+    ren = vtk.vtkRenderer()
+
+    display = CellDisplay(samplefile_pattern, ren)
 
     colors = vtk.vtkNamedColors()
 
-    ren = vtk.vtkRenderer()
     renWin = vtk.vtkRenderWindow()
     renWin.SetWindowName("Cube")
     renWin.AddRenderer(ren)
@@ -219,18 +280,32 @@ if __name__ == '__main__':
     style.SetDefaultRenderer(ren)
     iren.SetInteractorStyle(style)
 
+    #print (np.average([cd.incident_flux_learned for cd in celldata if filter_cell(cd)], axis=0))
+
     spheredatas = []
     for cd in celldata:
-        # if cd.num_points <= 1000:
-        #     continue
+        if not filter_cell(cd):
+            continue
+
         spheredatas.append(make_sphere_poly_data(cd))
+        
+        # pd, maxval = make_sphere_poly_data(cd)
+        # mapper = vtk.vtkPolyDataMapper()
+        # mapper.SetInputData(pd)
+        # mapper.SetLookupTable(lut)
+        # mapper.SetColorModeToMapScalars()
+        # mapper.SetScalarRange(0., 2.)
+        # actor = vtk.vtkActor()
+        # actor.SetMapper(mapper)
+        # ren.AddActor(actor)
+
         # a = make_cube_actor(
         #     make_cube_from_cell_data(cd),
         #     colors.GetColor3d("Banana")
         # )
         #actormap[a] = cd
         #ren.AddActor(a)
-        if 0:
+        if 1:
             a = make_cube_actor(
                 make_cube_from_cell_box(cd),
                 colors.GetColor3d("Gray")
@@ -242,7 +317,7 @@ if __name__ == '__main__':
     a = make_the_all_spheres_poly_data(spheredatas)
     ren.AddActor(a)
     
-    if os.path.isfile("/tmp/scene.obj"):
+    if os.path.isfile("/tmp/scene.obj") and 0:
         # Because of the number format
         os.environ['LC_NUMERIC']='en_US.UTF-8'
         importer = vtk.vtkOBJReader()

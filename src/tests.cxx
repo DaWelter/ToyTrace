@@ -26,6 +26,7 @@
 #include "shader_physics.hxx"
 #include "lightpicker_ucb.hxx"
 #include "memory_arena.hxx"
+#include "ndarray.hxx"
 
 using namespace materials;
 
@@ -1294,7 +1295,7 @@ TEST(MemoryArena, DefaultBufferSize)
     auto last = arena.MakeUnique<PmrAlignTester>(0);
     for (size_t i = 1; i<n; ++i)
     { 
-      auto current = arena.MakeUnique<PmrAlignTester>(i);
+      auto current = arena.MakeUnique<PmrAlignTester>(static_cast<int>(i));
       ASSERT_EQ(current.get() - last.get(), 1); // If it's really just bumping the pointer ...
       last = std::move(current);
     }
@@ -1306,6 +1307,69 @@ TEST(MemoryArena, DefaultBufferSize)
 
   AllocationLoop();
 }
+
+
+//////////////////////////////////////////////
+// nd array and lookup table
+//////////////////////////////////////////////
+
+TEST(NdArray, Lattice)
+{
+  LatticeIndexing<4, long> lattice;
+  lattice = LatticeIndexing<4,long>({ 2l, 3l, 3l, 2l });
+  const auto s = lattice.Size();
+  ASSERT_EQ(s[0], 2l);
+  ASSERT_EQ(s[1], 3l);
+  ASSERT_EQ(s[2], 3l);
+  ASSERT_EQ(s[3], 2l);
+
+  ASSERT_EQ(lattice.LatticeToSite({1l, 0l, 0l, 0l}), 1l);
+  ASSERT_EQ(lattice.LatticeToSite({1l, 2l, 2l, 1l}), lattice.NumSites()-1);
+
+  const auto pt = lattice.SiteToLattice(lattice.LatticeToSite({0l,2l,1l,1l}));
+  ASSERT_TRUE(
+    (pt == Eigen::Array<long,4,1>({0l,2l,1l,1l})).all()
+  );
+}
+
+
+TEST(NdArray, RuleOfFive)
+{
+  using A = SimpleNdArray<int, 3>;
+  A a{{2,2,2}};
+  a[{0,0,0}] = 42;
+  a[{1,1,1}] = 666;
+  
+  Eigen::Array<int,3,1> i0{0,0,0}, i1{1,1,1};
+
+  // Copy C'tor
+  A b{a};
+  ASSERT_EQ(b[i0], 42);
+  ASSERT_EQ(b[i1], 666);
+  
+  // Move C'tor
+  A c{std::move(a)};
+  ASSERT_EQ(c.size(), 2*2*2);
+  ASSERT_EQ(c[i0], 42);
+  ASSERT_EQ(c[i1], 666);
+  ASSERT_EQ(a.size(), 0);
+
+  // Copy Assign
+  a = c;
+  ASSERT_EQ(a[i0], 42);
+  ASSERT_EQ(a[i1], 666);
+
+  // Move Assign
+  // First clear c
+  std::fill(c.begin(), c.end(), 0);
+  ASSERT_EQ(c[i0], 0);
+  ASSERT_EQ(c[i1], 0);
+  c = std::move(a);
+  ASSERT_EQ(c[i0], 42);
+  ASSERT_EQ(c[i1], 666);
+  ASSERT_EQ(a.size(), 2*2*2); // Still has the memory from c
+}
+
 
 //////////////////////////////////////////////
 int main(int argc, char **argv) {

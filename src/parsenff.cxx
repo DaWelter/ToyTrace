@@ -1069,7 +1069,7 @@ void NFFParser::ParseYamlNode(const std::string &key, const YAML::Node &node, Sc
         texture = std::make_shared<Texture>(path);
         alpha_min = node["alpha_min"].as<double>();
       }
-      auto shd = std::make_unique<GlossyTransmissiveDielectricShader>(ior_ratio, alpha, alpha_min, texture);
+      auto shd = MakeGlossyTransmissiveDielectricShader(ior_ratio, alpha, alpha_min, texture);
       InsertAndActivate(name.c_str(), scope, std::move(shd));
     }
     else if (class_ == "glossy")

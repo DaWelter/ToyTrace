@@ -1534,7 +1534,7 @@ namespace GlossyTransmissiveDielectric
 
 Params P(const Double3 &wi, const Double3 &n)
 {
-  auto f = []() { return new GlossyTransmissiveDielectricShader(1.3, 0.2, 0., nullptr); };
+  auto f = []() { return MakeGlossyTransmissiveDielectricShader(1.3, 0.2, 0., nullptr).release(); };
   return Params{f, wi, n, 1.3}.NumSamples(100).Albedo(Spectral3{1.}).TestSampleDistribution(false);
 }
 

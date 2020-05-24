@@ -3,6 +3,7 @@
 #include "span.hxx"
 #include "sampler.hxx"
 #include "distribution_mixture_models.hxx"
+#include "shader.hxx"
 
 #include <algorithm>
 #include <numeric>
@@ -43,81 +44,94 @@ namespace py_vmf_mixture
 using namespace vmf_fitting;
 
 template<int N>
-struct PyVonMisesFischerMixture : public VonMisesFischerMixture<N>
+auto pdf(VonMisesFischerMixture<N> &self, DataPointArray3d xs)
 {
-    auto pdf(DataPointArray3d xs)
+    DataWeightArray result; result.reserve(xs.size());
+    for (const auto &x : xs)
     {
-        DataWeightArray result; result.reserve(xs.size());
-        for (const auto &x : xs)
-        {
-            result.push_back(vmf_fitting::Pdf(*this, x));
-        }
-        return CastToNumpyArray(result);
+        result.push_back(vmf_fitting::Pdf(self, x));
+    }
+    return CastToNumpyArray(result);
+}
+
+template<int N>
+auto sample(VonMisesFischerMixture<N> &self, int n)
+{
+    DataPointArray3d result; result.reserve(n);
+
+    auto np = py::module::import("numpy");
+    auto np_random = np.attr("random").attr("random");
+    auto py_random_vals = np_random(py::make_tuple(n, 3));
+    auto rs = py_random_vals.cast<py::array_t<double>>().unchecked<2>();
+
+    for (int i = 0; i < n; ++i)
+    {
+        const auto x = vmf_fitting::Sample(self, { rs(i,0), rs(i,1), rs(i,2) });
+        result.push_back(x);
     }
 
-    auto sample(int n)
-    {
-        DataPointArray3d result; result.reserve(n);
+    return CastToNumpyArray(result);
+}
 
-        auto np = py::module::import("numpy");
-        auto np_random = np.attr("random").attr("random");
-        auto py_random_vals = np_random(py::make_tuple(n, 3));
-        auto rs = py_random_vals.cast<py::array_t<double>>().unchecked<2>();
+template<int N>
+void setWeights(VonMisesFischerMixture<N> &self, const typename VonMisesFischerMixture<N>::WeightArray &a)
+{
+    self.weights = a;
+}
 
-        for (int i = 0; i < n; ++i)
-        {
-            const auto x = vmf_fitting::Sample(*this, { rs(i,0), rs(i,1), rs(i,2) });
-            result.push_back(x);
-        }
+template<int N>
+auto getWeights(VonMisesFischerMixture<N> &self)
+{
+    return CastToNumpyArray(self.weights);
+}
 
-        return CastToNumpyArray(result);
-    }
+template<int N>
+void setMeans(VonMisesFischerMixture<N> &self, const typename VonMisesFischerMixture<N>::MeansArray &a)
+{
+    self.means = a;
+}
 
-    void setWeights(const typename VonMisesFischerMixture<N>::WeightArray &a)
-    {
-        this->weights = a;
-    }
+template<int N>
+auto getMeans(VonMisesFischerMixture<N> &self)
+{
+    return CastToNumpyArray(self.means);
+}
 
-    auto getWeights()
-    {
-        return CastToNumpyArray(this->weights);
-    }
+template<int N>
+void setConcentrations(VonMisesFischerMixture<N> &self, const typename VonMisesFischerMixture<N>::ConcArray &a)
+{
+    self.concentrations = a;
+}
 
-    void setMeans(const typename VonMisesFischerMixture<N>::MeansArray &a)
-    {
-        this->means = a;
-    }
+template<int N>
+auto getConcentrations(VonMisesFischerMixture<N> &self)
+{
+    return CastToNumpyArray(self.concentrations);
+}
 
-    auto getMeans()
-    {
-        return CastToNumpyArray(this->means);
-    }
+template<int N>
+void Register(py::module &m)
+{
+    py::class_<VonMisesFischerMixture<N>>(m, strconcat("VMFMixture",N).c_str())
+        .def(py::init<>([]() -> VonMisesFischerMixture<N> { 
+            VonMisesFischerMixture<N> ret; 
+            InitializeForUnitSphere(ret); 
+            return std::move(ret);
+        }))
+        .def("pdf", &pdf<N>)
+        .def("sample", &sample<N>)
+        .def_property("weights", &getWeights<N>, &setWeights<N>)
+        .def_property("means", &getMeans<N>, &setMeans<N>)
+        .def_property("concentrations", &getConcentrations<N>, &setConcentrations<N>);
+}
 
-    void setConcentrations(const typename VonMisesFischerMixture<N>::ConcArray &a)
-    {
-        this->concentrations = a;
-    }
 
-    auto getConcentrations()
-    {
-        return CastToNumpyArray(this->concentrations);
-    }
+template<int N, int M>
+void RegisterBinaryOps(py::module &m)
+{
+    m.def("product", &vmf_fitting::Product<N, M>);
+}
 
-    static void Register(py::module &m)
-    {
-        py::class_<PyVonMisesFischerMixture<N>>(m, strconcat("VMFMixture",N).c_str())
-            .def(py::init<>([]() -> PyVonMisesFischerMixture<N> { 
-                PyVonMisesFischerMixture<N> ret; 
-                InitializeForUnitSphere(ret); 
-                return std::move(ret);
-            }))
-            .def("pdf", &PyVonMisesFischerMixture<N>::pdf)
-            .def("sample", &PyVonMisesFischerMixture<N>::sample)
-            .def_property("weights", &PyVonMisesFischerMixture<N>::getWeights, &PyVonMisesFischerMixture<N>::setWeights)
-            .def_property("means", &PyVonMisesFischerMixture<N>::getMeans, &PyVonMisesFischerMixture<N>::setMeans)
-            .def_property("concentrations", &PyVonMisesFischerMixture<N>::getConcentrations, &PyVonMisesFischerMixture<N>::setConcentrations);
-    }
-};
 
 
 
@@ -126,7 +140,7 @@ class PyMoVmfFitIncremental
 {
     incremental::Data<N> data;
     incremental::Params<N> params;
-    PyVonMisesFischerMixture<N> prior_mode;
+    VonMisesFischerMixture<N> prior_mode;
 
     static vmf_fitting::incremental::Params<N> makeParams(py::dict d)
     {
@@ -141,7 +155,7 @@ class PyMoVmfFitIncremental
 public:
     PyMoVmfFitIncremental(py::kwargs kwargs) :
         params{makeParams(kwargs)},
-        prior_mode{kwargs["prior_mode"].cast<PyVonMisesFischerMixture<N>>()}
+        prior_mode{kwargs["prior_mode"].cast<VonMisesFischerMixture<N>>()}
     {
       params.prior_mode = &prior_mode;
     }
@@ -162,9 +176,90 @@ public:
 };
 
 
-
 }
 
+
+namespace py_shady
+{
+
+
+void RegisterSurfaceInteraction(py::module &m)
+{
+    py::class_<SurfaceInteraction>(m, "SurfaceInteraction")
+    .def(py::init<>([](
+        const Eigen::Vector3d &geometry_normal,
+        const Eigen::Vector3d &smooth_normal) -> SurfaceInteraction {
+        SurfaceInteraction si{};
+        si.geometry_normal = geometry_normal;
+        si.smooth_normal = smooth_normal,
+        // Set the incident-aligned normals, assuming the incident ray comes 
+        // from the hemisphere that the geo-normal points to.
+        si.SetOrientedNormals(-geometry_normal);
+        return si;
+    }));
+}
+
+
+struct PyShaderWrapper
+{
+    PyShaderWrapper(std::unique_ptr<Shader>&& shader)
+        : shader{std::move(shader)}, context{SelectRgbPrimaryWavelengths()}
+    {
+    }
+
+    template<class ShaderClass, class... Args>
+    static PyShaderWrapper* make(Args&&... args)
+    {
+        return new PyShaderWrapper(std::make_unique<ShaderClass>(std::forward<Args>(args)...));
+    }
+
+    std::unique_ptr<Shader> shader;
+    Sampler sampler; // Each to his own. So I don't have to wrap this, too.
+    PathContext context;
+};
+
+
+std::tuple<Double3, Spectral3, double, bool> Sample(PyShaderWrapper &pyshady, const Eigen::Vector3d &incident_dir, const SurfaceInteraction &surface_hit)
+{
+    auto smpl = pyshady.shader->SampleBSDF(incident_dir, surface_hit, pyshady.sampler, pyshady.context);
+    return std::make_tuple(smpl.coordinates, smpl.value, (double)smpl.pdf_or_pmf, smpl.pdf_or_pmf.IsFromDelta());
+}
+
+Spectral3 Evaluate(PyShaderWrapper &pyshady, const Eigen::Vector3d &incident_dir, const SurfaceInteraction &surface_hit, const Eigen::Vector3d &out_direction)
+{
+    return pyshady.shader->EvaluateBSDF(incident_dir, surface_hit, out_direction, pyshady.context, nullptr);
+}
+
+py_vmf_mixture::VonMisesFischerMixture<2> ComputeLobes(PyShaderWrapper &pyshady, const Eigen::Vector3d &incident_dir, const SurfaceInteraction &surface_hit)
+{
+    return pyshady.shader->ComputeLobes(incident_dir, surface_hit, pyshady.context);
+}
+
+// double EvaluatePdf(PyShaderWrapper &pyshady, const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3 &out_direction)
+// {
+
+// }
+
+
+void RegisterShaders(py::module &m)
+{
+    py::class_<PyShaderWrapper>(m, "PyShaderWrapper")
+        .def("Sample", Sample)
+        .def("Evaluate", Evaluate)
+        .def("InitializeLobes", [](PyShaderWrapper &pyshady) { pyshady.shader->IntializeLobes(); })
+        .def("ComputeLobes", ComputeLobes);
+
+    m.def("DiffuseShader", [](const SpectralN &reflectance) {
+        return PyShaderWrapper::make<DiffuseShader>(reflectance, nullptr);
+    });
+    m.def("GlossyTransmissiveDielectricShader", [](double ior_ratio,  double alpha) {
+        //return PyShaderWrapper::make<GlossyTransmissiveDielectricShader>(ior_ratio, alpha, 0., nullptr);
+        return PyShaderWrapper{MakeGlossyTransmissiveDielectricShader(ior_ratio, alpha, 0., nullptr)};
+    });
+}
+
+
+} // namespace py_shady
 
 
 PYBIND11_MODULE(path_guiding, m)
@@ -173,10 +268,13 @@ PYBIND11_MODULE(path_guiding, m)
 
     m.doc() = "bindings for debugging path guiding";
 
-    py_vmf_mixture::PyVonMisesFischerMixture<1>::Register(m);
-    py_vmf_mixture::PyVonMisesFischerMixture<2>::Register(m);
-    py_vmf_mixture::PyVonMisesFischerMixture<8>::Register(m);
-    py_vmf_mixture::PyMoVmfFitIncremental<1>::Register(m);
+    py_vmf_mixture::Register<2>(m);
+    py_vmf_mixture::Register<8>(m);
+    py_vmf_mixture::Register<16>(m);
     py_vmf_mixture::PyMoVmfFitIncremental<2>::Register(m);
     py_vmf_mixture::PyMoVmfFitIncremental<8>::Register(m);
+    py_vmf_mixture::RegisterBinaryOps<2,8>(m);
+
+    py_shady::RegisterShaders(m);
+    py_shady::RegisterSurfaceInteraction(m);
 }

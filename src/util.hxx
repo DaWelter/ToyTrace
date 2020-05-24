@@ -14,10 +14,13 @@
 #include <boost/functional/hash.hpp>
 #include <boost/align/aligned_allocator.hpp>
 
-
+#ifdef __GNUC__
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define likely(x) __builtin_expect(!!(x), 1)
-
+#else
+#define unlikely(x) x
+#define likely(x) x
+#endif
 
 template<class T>
 inline T Sqr(const T &x)
@@ -391,17 +394,43 @@ inline int isize(const Container &c, typename enable_if_has_size_member<Containe
 
 
 template<class T>
-struct enable_if_has_insert_member
+struct enable_if_has_insert_begin_and_end_members
 {
-  using type = decltype(std::declval<T&>().size());
+  using type = decltype(std::declval<T&>().insert(
+    std::declval<T&>().begin(),
+    std::declval<T&>().end(),
+    std::declval<T&>().begin() // here this makes actually sense.
+  ));
 };
 
 
-template<class Container>
-inline void Append(Container &a, const Container &b, typename enable_if_has_insert_member<Container>::type = 0)
+template<class Container, typename = typename enable_if_has_insert_begin_and_end_members<Container>::type>
+inline void Append(Container &a, const Container &b)
 {
   a.insert(a.end(), b.begin(), b.end());
 }
+
+
+template<class T>
+struct has_begin_end
+{
+  using type1 = decltype(std::declval<T&>().begin());
+  using type2 = decltype(std::declval<T&>().end());
+  static constexpr bool value = true;
+};
+
+
+template<class Container, class Func, typename = std::enable_if_t<has_begin_end<Container>::value>>
+inline auto TransformVector(Container &a, Func &&f)
+{
+  using TIn = typename Container::reference;
+  using TOut = std::invoke_result_t<Func, TIn>;
+  using OutContainer = ToyVector<TOut>;
+  OutContainer result;
+  std::transform(a.begin(), a.end(), std::back_inserter(result), f);
+  return result;
+}
+
 
 
 /*
@@ -413,8 +442,7 @@ inline void Append(Container &a, const Container &b, typename enable_if_has_inse
  */
 inline float AtomicAdd(std::atomic<float> &f, float d) {
   float old = f.load(std::memory_order_consume);
-  float desired = old + d;
-  while (!f.compare_exchange_weak(old, desired,
+  float desired = old + d;  while (!f.compare_exchange_weak(old, desired,
     std::memory_order_release, std::memory_order_consume))
   {
     desired = old + d;

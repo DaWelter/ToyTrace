@@ -4,6 +4,37 @@
 #include "shader_util.hxx"
 #include "normaldistributionfunction.hxx"
 #include "shader_physics.hxx"
+#include "ndarray.hxx"
+#include "distribution_mixture_models.hxx"
+
+
+namespace materials
+{
+
+//class BsdfLobe
+//{
+//public:
+//  virtual Double3 Sample(Sampler& sampler) const = 0;
+//  virtual Spectral3 Value(const Double3 &out_direction) const = 0;
+//  virtual double Pdf(const Double3 &out_direction) const = 0;
+//  virtual Spectral3 Estimator(const Double3 &out_direction) const;
+//  virtual std::tuple<Double3, double> GetLobeStatistics() const = 0; // Direction and mean cosine.
+//};
+//
+//using LobeOwner = MemoryArena::unique_ptr<BsdfLobe>;
+
+
+struct Lobe
+{
+  float x, z;
+  float concentration;
+  float weight;
+};
+
+using LobeContainer = boost::container::static_vector<materials::Lobe, 2>;
+
+}
+
 
 namespace ShadingInternal
 {
@@ -50,6 +81,19 @@ double Shader::Pdf(const Double3& incident_dir, const SurfaceInteraction& surfac
   this->EvaluateBSDF(incident_dir, intersect, out_direction, context, &pdf);
   return pdf;
 }
+
+
+vmf_fitting::VonMisesFischerMixture<2> Shader::ComputeLobes(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const PathContext &context) const
+{
+  return {};
+}
+
+
+void Shader::IntializeLobes()
+{
+}
+
+
 
 
 DiffuseShader::DiffuseShader(const SpectralN &_reflectance, std::shared_ptr<Texture> _diffuse_texture)
@@ -422,6 +466,7 @@ struct GlossyTransmissiveDielectricWrapper
   const Double3 wi;
   const PathContext &context;
   const BeckmanDistribution &ndf;
+  const BeckmanDistribution &boardened_ndf;
   const LocalFrame &frame; 
   const double eta_i_over_t; // eta_i refers to ior on the side of the incomming random walk!
   
@@ -434,7 +479,7 @@ struct GlossyTransmissiveDielectricWrapper
     
     if (pdf)
     {    
-      *pdf = TransmissiveMicrofacetDensity{wi, eta_i_over_t, ndf}.Pdf(wo);
+      *pdf = TransmissiveMicrofacetDensity{wi, eta_i_over_t, boardened_ndf}.Pdf(wo);
     }
     
     if (n_dot_out >= 0) // Evaluate BRDF
@@ -475,17 +520,54 @@ struct GlossyTransmissiveDielectricWrapper
   
   Double3 Sample(Sampler& sampler) const
   {
-    return TransmissiveMicrofacetDensity{wi, eta_i_over_t, ndf}.
+    return TransmissiveMicrofacetDensity{wi, eta_i_over_t, boardened_ndf}.
       Sample(sampler.UniformUnitSquare(), sampler.Uniform01());
   }
 };
 
+
+#define PRODUCT_DISTRIBUTION_SAMPLING
+
+class GlossyTransmissiveDielectricShader : public Shader
+{
+  double ior_ratio; // Inside ior / Outside ior
+  double alpha_max;
+  double alpha_min;
+  std::shared_ptr<Texture> glossy_exponent_texture;
+public:
+  GlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, double alpha_min_, std::shared_ptr<Texture> glossy_exponent_texture_);
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+
+#ifdef PRODUCT_DISTRIBUTION_SAMPLING
+private:
+  SimpleLookupTable<materials::LobeContainer,2> lobes_lookup_table;
+public:  
+  vmf_fitting::VonMisesFischerMixture<2> ComputeLobes(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const PathContext &context) const override;
+  void IntializeLobes() override;
+#endif
+};
+
+
+std::unique_ptr<Shader> MakeGlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, double alpha_min_, std::shared_ptr<Texture> glossy_exponent_texture_)
+{
+  return std::make_unique<GlossyTransmissiveDielectricShader>(_ior_ratio, alpha_, alpha_min_, glossy_exponent_texture_);
+}
 
 
 GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, double alpha_min_, std::shared_ptr<Texture> glossy_exponent_texture_)
   : ior_ratio{_ior_ratio}, alpha_max{alpha_}, alpha_min{alpha_min_}, glossy_exponent_texture{glossy_exponent_texture_}
 {
   is_pure_diffuse = true;
+#ifdef PRODUCT_DISTRIBUTION_SAMPLING
+  supports_lobes = true;
+#endif
+}
+
+
+inline double AlphaBroadeningFormula(double alpha, double abs_wi_dot_n)
+{
+  return alpha*(1.2 - 0.2*abs_wi_dot_n);
 }
 
 
@@ -499,8 +581,9 @@ Spectral3 GlossyTransmissiveDielectricShader::EvaluateBSDF(const Double3 &revers
   
   const double alpha = alpha_min + MaybeMultiplyTextureLookup(alpha_max-alpha_min, glossy_exponent_texture.get(), surface_hit);
   BeckmanDistribution ndf{alpha};
+  BeckmanDistribution broadened_ndf{AlphaBroadeningFormula(alpha,std::abs(wi[2]))};
   
-  GlossyTransmissiveDielectricWrapper shd{ wi, context, ndf, frame, eta_i_over_t };
+  GlossyTransmissiveDielectricWrapper shd{ wi, context, ndf, broadened_ndf, frame, eta_i_over_t };
   const double result = shd.Evaluate(wo, pdf);
   return Spectral3{result};
 }
@@ -514,8 +597,9 @@ ScatterSample GlossyTransmissiveDielectricShader::SampleBSDF(const Double3 &reve
   
   const double alpha = alpha_min + MaybeMultiplyTextureLookup(alpha_max-alpha_min, glossy_exponent_texture.get(), surface_hit);
   BeckmanDistribution ndf{alpha};
+  BeckmanDistribution broadened_ndf{AlphaBroadeningFormula(alpha,std::abs(wi[2]))};
   
-  GlossyTransmissiveDielectricWrapper bsdf{wi, context, ndf, frame, eta_i_over_t};
+  GlossyTransmissiveDielectricWrapper bsdf{wi, context, ndf, broadened_ndf, frame, eta_i_over_t};
   
   Double3 wo = bsdf.Sample(sampler);
   double pdf = NaN;
@@ -526,6 +610,156 @@ ScatterSample GlossyTransmissiveDielectricShader::SampleBSDF(const Double3 &reve
     pdf
   };
 }
+
+#ifdef PRODUCT_DISTRIBUTION_SAMPLING
+void GlossyTransmissiveDielectricShader::IntializeLobes()
+{
+  const float alpha_max = 3.;
+  const int n_alpha = 30;
+  const int n_elevation = 20;
+  const int n_samples = 1024;
+
+  Sampler sampler;
+
+  float bin_size_alpha = alpha_max / n_alpha;
+  float bin_size_elevation = 2.f / n_elevation;
+
+  lobes_lookup_table.data = SimpleNdArray<materials::LobeContainer, 2>{{n_alpha, n_elevation}};
+  lobes_lookup_table.inv_cell_size = {1.f/bin_size_alpha, 1.f/bin_size_elevation};
+  lobes_lookup_table.origin = {0.f, -1.f};
+
+  ToyVector<Eigen::Vector3f> samples;
+  samples.reserve(n_samples);
+  ToyVector<float> weights;
+  weights.reserve(n_samples);
+
+  for (int i_alpha = 0; i_alpha < n_alpha; ++i_alpha)
+  {
+    for (int i_elevation = 0; i_elevation < n_elevation; ++i_elevation)
+    {
+      std::cout << "fitting " << (i_alpha*bin_size_alpha) << ", " << (i_elevation*bin_size_elevation) << " ... " << std::flush;
+      Accumulators::OnlineAverage<double, int> mean;
+
+      for (int i_sample = 0; i_sample < n_samples; ++i_sample)
+      {
+        const float alpha = Lerp<float>(bin_size_alpha*(i_alpha + 0.1), bin_size_alpha*(i_alpha+0.9), sampler.Uniform01());
+        const float z = -1.f + Lerp<float>(bin_size_elevation*i_elevation, bin_size_elevation*(i_elevation+1), sampler.Uniform01());
+        const float x = std::sqrt(std::max(0.f, 1.f - z*z));
+
+        Double3 reverse_incident_dir = { x, z, 0. };
+        PathContext context{SelectRgbPrimaryWavelengths()};
+        SurfaceInteraction si{};
+        si.smooth_normal = si.geometry_normal = { 0., 1., 0. };
+        si.SetOrientedNormals(-reverse_incident_dir);
+        //auto smpl = this->SampleBSDF(reverse_incident_dir, si, sampler, context);
+        {
+          LocalFrame frame{si};
+          const Double3 wi = frame.m_local_inv * reverse_incident_dir;
+          const double eta_i_over_t = (Dot(si.geometry_normal, reverse_incident_dir)<0.) ? ior_ratio : 1.0/ior_ratio;
+
+          BeckmanDistribution ndf{alpha};
+          BeckmanDistribution broadened_ndf{AlphaBroadeningFormula(alpha,std::abs(wi[2]))};
+          
+          GlossyTransmissiveDielectricWrapper bsdf{wi, context, ndf, broadened_ndf, frame, eta_i_over_t};
+          
+          Double3 wo = bsdf.Sample(sampler);
+          double pdf = NaN;
+          double value = bsdf.Evaluate(wo, &pdf);
+          wo = frame.m_local*wo;
+          //std::cout << "wo = " << wo << " value = " << value << " pdf = " << pdf << std::endl;
+
+          assert(std::isfinite(pdf));
+          assert(std::isfinite(value));
+          assert(wo.allFinite());
+
+          value *= DFactorPBRT(si, wo);
+
+          mean += value / pdf;
+          samples.push_back(wo.cast<float>());
+          weights.push_back(value / static_cast<float>(pdf));
+        }
+      }
+
+      vmf_fitting::VonMisesFischerMixture<2> mixture;
+      mixture.concentrations.setConstant(1.f);
+      mixture.means.row(0) = Eigen::Vector3f({ -1.f, -0.1f, 0.f }).normalized();
+      mixture.means.row(1) = Eigen::Vector3f({ -1.f,  0.1f, 0.f }).normalized();
+      mixture.weights.setConstant(0.5f);
+      vmf_fitting::VonMisesFischerMixture<2> prior_mode = mixture;
+      vmf_fitting::incremental::Data<2> data;
+      vmf_fitting::incremental::Params<2> params {
+        1.f,
+        1.f,
+        1.f,
+        n_samples,
+        &prior_mode
+      };
+
+      for (int fit_iter=0; fit_iter<20; ++fit_iter)
+      {
+        vmf_fitting::incremental::Fit(mixture, data, params, AsSpan(samples), AsSpan(weights));
+        mixture.means(0,2) = 0.f;
+        mixture.means(1,2) = 0.f;
+        mixture.means.row(0) /= mixture.means.row(0).matrix().norm();
+        mixture.means.row(1) /= mixture.means.row(1).matrix().norm();
+      }
+      mixture.weights *= (float)mean();
+
+      samples.clear();
+      weights.clear();
+
+      auto& lobes = lobes_lookup_table.data[{i_alpha, i_elevation}];
+      for (int i=0; i<2; ++i)
+      {
+        lobes.push_back({
+          mixture.means(i, 0),
+          mixture.means(i, 1),
+          mixture.concentrations[i],
+          mixture.weights[i]
+        });
+        std::cout << " mix " << i << ": " << lobes.back().weight << ", " << lobes.back().z << ", " << lobes.back().concentration << ", " << mean();
+      }
+
+      std::cout << std::endl;
+    }
+  }
+}
+
+
+vmf_fitting::VonMisesFischerMixture<2> GlossyTransmissiveDielectricShader::ComputeLobes(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const PathContext &context) const
+{
+  const double alpha = alpha_min + MaybeMultiplyTextureLookup(alpha_max-alpha_min, glossy_exponent_texture.get(), surface_hit);  
+  const double z = incident_dir.dot(surface_hit.smooth_normal);
+  const auto& lobes = lobes_lookup_table({alpha, z});
+
+  const Double3 ez = surface_hit.smooth_normal;
+  Double3 ex = incident_dir - ez.dot(incident_dir)*ez; 
+  const double len_sqr = ex.squaredNorm();
+  if (len_sqr > 1.e-6)
+  {
+    ex /= std::sqrt(len_sqr);
+  }
+
+  vmf_fitting::VonMisesFischerMixture<2> result;
+  int i = 0;
+  for (const auto &l : lobes)
+  {
+    result.means.row(i) = (l.x * ex + l.z * ez).transpose().cast<float>();
+    result.concentrations[i] = l.concentration;
+    result.weights[i] = l.weight;
+    ++i;
+  }
+  for (; i<decltype(result)::NUM_COMPONENTS; ++i)
+  {
+    result.means.row(i).setConstant(0.f);
+    result.concentrations[i] = 1.f;
+    result.weights[i] = 0.f;
+  }
+  return result;
+}
+#endif
+
+
 
 
 
@@ -619,7 +853,7 @@ ScatterSample SpecularDenseDielectricShader::SampleBSDF(const Double3& reverse_i
     double cos_rn = Dot(surface_hit.normal, refl_dir);
     if (cos_rn >= 0.)
     {
-      smpl = ScatterSample{refl_dir, Spectral3{reflected_fraction/(cos_shn_incident+Epsilon)}, reflected_fraction};
+      smpl = ScatterSample{refl_dir, Spectral3{reflected_fraction/(cos_shn_incident+Epsilon)}, Pdf::MakeFromDelta(reflected_fraction)};
     }
     else
     {

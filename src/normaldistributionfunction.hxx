@@ -128,6 +128,24 @@ struct VisibleNdfVCavity
 
 
 
+// f(w) = f_t(w) + f_r(w)  = f_t(ht(w))  + f_r(hr(w))
+//
+// Change of integration variables ->
+// 
+// I[xi==t] f_t(h) Li(wt(h))   + I[xi==t] f_r(h) Li(wr(h))      xi ~ p(xi | h) = { p_t = 1.-fr,  p_r = fr }
+// -------------------------        ---------------------
+//      p_t   p(h)                     p_r   p(h)
+
+
+// p(w) for MIS ???
+//
+// p(w) = p(hr(w)) dhr/dw p(xi=r | hr(w))    +      p(ht(w)) dht/dw * p(xi=t | ht(w)))
+// 
+// Int p(w) dw = 1 ?? 
+// Change of variables
+// Int p(w) dw = Int dh p(h) p(xi=r | h) + p(h) p(xi=t | h) dh = 1!??
+
+
 struct TransmissiveMicrofacetDensity
 {
   const Double3 wi;

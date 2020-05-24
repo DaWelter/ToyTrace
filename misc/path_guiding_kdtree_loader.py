@@ -3,6 +3,7 @@ import sys
 import json
 import glob
 import numpy as np
+import csv
 from collections import defaultdict, namedtuple
 
 import munch
@@ -16,6 +17,15 @@ try:
 except ModuleNotFoundError:
     import imp
     path_guiding = imp.load_dynamic('path_guiding', r'..\buildwin\Debug\path_guiding.dll')
+
+def load_sample_file(filename):
+    with open(filename, 'r') as f:
+        data = np.array([[*map(float, row)] for row in csv.reader(f)])
+    pos = data[:,0:3]
+    dir = data[:,3:6]
+    weight = data[:,6]
+    return pos, dir, weight
+
 
 def read_records(filename):
     print (f"Opening {filename}")
@@ -38,7 +48,7 @@ def read_gmm(gmm_json):
     return gmm
 
 def read_movmf(data):
-    m = path_guiding.VMFMixture()
+    m = path_guiding.VMFMixture8()
     m.weights = data['weights']
     m.means   = data['means']
     m.concentrations = data['concentrations']
@@ -62,8 +72,15 @@ def convert_(rec, load_samples):
         num_points = rec['num_points'],
         mixture_learned = read_mixture(rec['mixture_learned']),
         mixture_sampled = read_mixture(rec['mixture_sampled']),
+        incident_flux_learned = np.array(rec['incident_flux_learned']),
+        incident_flux_sampled = np.array(rec['incident_flux_sampled']),
         box = None,
+        id = rec['id']
     )
+    if 'fitparam_prior_nu' in rec:
+        cd.update(
+            (k, rec[k]) for k in 'fitparam_prior_nu fitparam_prior_tau fitparam_prior_alpha fitparam_maximization_step_every'.split()
+        )
     if load_samples:
         cellrecords = read_records(rec['filename'])
         asarray = lambda k: np.array([v[k] for v in cellrecords], dtype=np.float32)

@@ -15,6 +15,7 @@
 constexpr auto Epsilon = std::numeric_limits<double>::epsilon();
 constexpr auto EpsilonFloat = std::numeric_limits<float>::epsilon();
 constexpr auto Pi      = double(3.14159265358979323846264338327950288419716939937510);
+constexpr auto PiFloat      = float(3.14159265358979323846264338327950288419716939937510);
 constexpr auto Infinity= std::numeric_limits<double>::infinity();
 constexpr auto InfinityFloat = std::numeric_limits<float>::infinity();
 constexpr auto LargeNumber = std::numeric_limits<double>::max()/16;
@@ -217,9 +218,12 @@ inline auto ClampDot(const Eigen::MatrixBase<Derived1> &u, const Eigen::MatrixBa
 
 
 #ifndef NDEBUG
+// Quite high tolerance because if the vector stems from 32 bit calculations it won't be much better.
 #define ASSERT_NORMALIZED(v) assert(std::abs(LengthSqr(v) - 1.) < 1.e-5)
+#define ASSERT_NORMALIZED_F32(v) assert(std::abs(LengthSqr(v) - 1.f) < 0.01f)
 #else
 #define ASSERT_NORMALIZED(v) ((void)0)
+#define ASSERT_NORMALIZED_F32(v) ((void)0)
 #endif
 
 
@@ -242,7 +246,7 @@ inline OrthogonalSystemZAligned(const Eigen::MatrixBase<Derived> &_Z)
   auto X = m.col(0);
   auto Y = m.col(1);
   Z = _Z;
-  ASSERT_NORMALIZED(Z);
+  ASSERT_NORMALIZED_F32(Z);
   // Listing 3 in Duff et al. (2017) "Building an Orthonormal Basis, Revisited".
   Scalar sign = std::copysign(Scalar(1.0f), Z[2]);
   const Scalar a = Scalar(-1.0) / (sign + Z[2]);

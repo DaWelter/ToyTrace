@@ -35,11 +35,6 @@ struct Node
     right_is_leaf : 1,
     left_idx : 30,
     right_idx : 30;
-
-  // struct {
-
-
-  // } flags;
 };
 
 static_assert(sizeof(Node) == 16);
@@ -111,8 +106,8 @@ public:
   {
     assert (!node.is_leaf);
     const auto& b = storage[node.idx];
-    return std::make_pair(Handle{b.left_idx, static_cast<bool>(b.left_is_leaf)},
-                          Handle{b.right_idx, static_cast<bool>(b.right_is_leaf)});
+    return std::make_pair(Handle{static_cast<int>(b.left_idx), static_cast<bool>(b.left_is_leaf)},
+                          Handle{static_cast<int>(b.right_idx), static_cast<bool>(b.right_is_leaf)});
   }
 
   auto Split(Handle node) const
@@ -205,17 +200,6 @@ private:
   {
     assert (p.is_leaf);
     return split_decision(p.idx);
-    // int axis = -1;
-    // double pos = NaN;
-    // const auto& stats = GetPayload(p).leaf_stats;
-    // if (stats.Count())
-    // {
-    //   const auto mean = stats.Mean();
-    //   const auto var = stats.Var();
-    //   var.maxCoeff(&axis);
-    //   pos = mean[axis];
-    // }
-    // return { axis, pos };
   }
 
   Handle AdaptLeafRecursive(Tree::Handle node, int depth)

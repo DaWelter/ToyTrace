@@ -159,6 +159,7 @@ int main(int argc, char *argv[])
 #endif
   
   auto algo = RenderAlgorithmFactory(scene, render_params);
+  algo->InitializeScene(scene);
   
   auto time_of_last_image_request = std::chrono::steady_clock::now();
   

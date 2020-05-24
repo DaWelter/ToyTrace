@@ -25,7 +25,7 @@
 struct SurfaceInteraction;
 struct RenderingParameters;
 
-//#define WRITE_DEBUG_OUT 
+#define WRITE_DEBUG_OUT 
 //#define PATH_GUIDING_WRITE_SAMPLES
 
 #if (defined PATH_GUIDING_WRITE_SAMPLES & !defined NDEBUG & defined HAVE_JSON)
@@ -98,25 +98,34 @@ struct CellData
     alignas (CACHE_LINE_SIZE) struct CurrentEstimate {
       // Normalized to the total incident flux. So radiance_distribution(w) * incident_flux_density is the actual radiance from direction w.
       vmf_fitting::VonMisesFischerMixture<> radiance_distribution;
-      Double3 cell_size = Double3::Constant(NaN);
+      //Double3 cell_size = Double3::Constant(NaN);
+      Box cell_bbox{};
       double incident_flux_density{0.};
+      double incident_flux_confidence_bounds{0.};
     } current_estimate;
     
     alignas (CACHE_LINE_SIZE) struct Learned { 
       vmf_fitting::VonMisesFischerMixture<> radiance_distribution;
       vmf_fitting::incremental::Data<> fitdata;
       LeafStatistics leaf_stats;
-      Accumulators::OnlineAverage<double, int64_t> incident_flux_density_accum;
+      OnlineVariance::Accumulator<double, int64_t> incident_flux_density_accum;
     } learned;
     
-    int index = -1;
     long last_num_samples = 0;
+    long max_num_samples = 0;
+    int index = -1;
 };
 
 
 inline double FittedRadiance(const CellData::CurrentEstimate &estimate, const Double3 &dir)
 {
   return vmf_fitting::Pdf(estimate.radiance_distribution, dir.cast<float>()) * estimate.incident_flux_density;
+}
+
+inline std::pair<double,double> FittedRadianceWithErr(const CellData::CurrentEstimate &estimate, const Double3 &dir)
+{
+  double pdf = vmf_fitting::Pdf(estimate.radiance_distribution, dir.cast<float>());
+  return {pdf*estimate.incident_flux_density, pdf*estimate.incident_flux_confidence_bounds };
 }
 
 
@@ -134,11 +143,12 @@ public:
   CellDebug& operator=(CellDebug &&) = delete;
 
   void Open(std::string filename_);
-  void Write(Span<const IncidentRadiance> records);
+  void Write(const Double3 &pos, const Float3 &dir, float weight);
   void Close();
   const std::string_view GetFilename() const { return filename; }
+
+  vmf_fitting::incremental::Params<> params{};
 private:
-  bool first = true;
   std::ofstream file;
   std::string filename;
 };
@@ -197,10 +207,9 @@ class PathGuiding
             ToyVector<RecordBuffer> records_by_cells;
         };
 
-        PathGuiding(const Box &region, double cellwidth, const RenderingParameters &params, tbb::task_arena &the_task_arena);
+        PathGuiding(const Box &region, double cellwidth, const RenderingParameters &params, tbb::task_arena &the_task_arena, const char* name);
 
         void BeginRound(Span<ThreadLocal*> thread_locals);
-        void WriteDebugData(const std::string name_prefix);
 
         void AddSample(
           ThreadLocal& tl, const Double3 &pos, 
@@ -220,6 +229,7 @@ class PathGuiding
         }
 
     private:
+        void WriteDebugData();
 
         static Record ComputeStochasticFilterPosition(const Record & rec, const CellData &cd, Sampler &sampler);
         
@@ -231,12 +241,11 @@ class PathGuiding
         Box region;
         kdtree::Tree recording_tree;
         ToyVector<CellData, AlignedAllocator<CellData, CACHE_LINE_SIZE>> cell_data;
+        std::string name;
         std::unique_ptr<CellDataTemporary[]> cell_data_temp;
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
         std::unique_ptr<CellDebug[]> cell_data_debug;
 #endif
-        tbb::atomic<int64_t> num_recorded_samples = 0;
-        
         int param_num_initial_samples;
         int param_em_every;
         double param_prior_strength;

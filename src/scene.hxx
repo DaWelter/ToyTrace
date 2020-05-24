@@ -84,7 +84,7 @@ struct SurfaceInteraction : public InteractionPoint
   Float2 tex_coord;
   Float3 pos_bounds{ 0. }; // Bounds within which the true hitpoint (computed without roundoff errors) lies. See PBRT chapt 3.
 
-  SurfaceInteraction(const HitId &hitid, const RaySegment &_incident_segment);
+  SurfaceInteraction(const HitId &hitid, const RaySegment &incident_segment);
   SurfaceInteraction(const HitId &hitid);
   SurfaceInteraction() = default;
   
@@ -250,6 +250,16 @@ public:
   inline const Material& GetMaterial(index_t i) const
   {
     return materials[i];
+  }
+
+  inline index_t GetNumShaders() const
+  {
+    return static_cast<index_t>(shaders.size());
+  }
+
+  inline Shader& GetShader(index_t i) 
+  {
+    return *shaders[i];
   }
 
   bool FirstIntersectionEmbree(const Ray &ray, double tnear, double &ray_length, SurfaceInteraction &intersection) const

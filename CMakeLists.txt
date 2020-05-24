@@ -132,7 +132,8 @@ add_library(commonstuff STATIC
   src/light.cxx src/texture.cxx src/embreeaccelerator.cxx src/scene.cxx src/lightpicker_trivial.cxx src/lightpicker_ucb.cxx src/renderingalgorithms_photonmap.cxx src/renderingalgorithms_pathtracing2.cxx 
   src/renderingalgorithms_normalvisualizer.cxx src/renderingalgorithms_pathtracing.cxx
   src/rendering_util.cxx src/pathlogger.cxx src/photonintersector.cxx  external/cubature/hcubature.c 
-  src/path_guiding.cxx src/renderingalgorithms_pathtracing_guided.cxx src/distribution_mixture_models.cxx src/path_guiding_tree.cxx)
+  src/path_guiding.cxx src/renderingalgorithms_pathtracing_guided.cxx src/distribution_mixture_models.cxx src/path_guiding_tree.cxx
+  src/ndarray.hxx)
 
   file(GLOB headers RELATIVE ${CMAKE_SOURCE_DIR} "src/*.hxx")
 target_sources(commonstuff PRIVATE ${headers})

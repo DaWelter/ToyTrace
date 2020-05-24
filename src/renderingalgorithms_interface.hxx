@@ -17,6 +17,7 @@ public:
   virtual ~RenderingAlgo() noexcept(false) {}
   // The callback will be invoked from the same thread where Run was invoked.
   void SetInterruptCallback(InterruptCallback cb) { irq_cb = cb; }
+  virtual void InitializeScene(Scene &scene) {}
   virtual void Run() = 0;
   // Will cause the interrupt callback to be invoked after an unspecified amount of time.
   // For intermediate status reports, images, etc. 

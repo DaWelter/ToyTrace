@@ -73,6 +73,7 @@ inline double HalfVectorPdfToReflectedPdf(double pdf_wh, double wh_dot_in)
     //assert(wh_dot_in >= 0); 
     // Because half-vector for reflection. Forming the half-vector from wi+wo, the condition wh_dot_in>=0 should always be true.
     double out_direction_pdf = pdf_wh*0.25/(std::abs(wh_dot_in)+Epsilon); // From density of h_r to density of out direction.
+    assert(std::isfinite(out_direction_pdf));
     return out_direction_pdf;
 }
 
@@ -136,9 +137,11 @@ inline double FresnelReflectivity(double cos_n_wi, double eta_i_over_t)
   // From Walter et al. (2007). Equivalent to the other formula but does not require the refracted direction.
   double c = std::abs(cos_n_wi);
   double tmp = Sqr(1.0/eta_i_over_t) - 1.0 + c*c;
-  if (tmp < 0)
+  if (tmp < 0.)
       return 1.; // Total reflection
   double g = std::sqrt(tmp);
+  if (unlikely((g == 0.) & (c == 0.)))
+      return 1.;
   double nom = c*(g+c)-1.;
   double denom = c*(g-c)+1.;
   return 0.5*Sqr((g-c)/(g+c))*(1. + Sqr(nom/denom));
