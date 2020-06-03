@@ -164,13 +164,16 @@ PathGuiding::Record PathGuiding::ComputeStochasticFilterPosition(const Record & 
     new_rec.reverse_incident_dir = OrthogonalSystemZAligned(rec.reverse_incident_dir) * scatter_offset.cast<float>();
   }
 
-  new_rec.is_original = false;
+  //new_rec.is_original = false;
   return new_rec;
 }
 
 
 void PathGuiding::ProcessSamples(int cell_idx)
 {
+  if (round <= 1)
+    return;
+
   CellDataTemporary& cdtmp = cell_data_temp[cell_idx];
   CellData& cd = cell_data[cell_idx];
 
@@ -197,7 +200,6 @@ void PathGuiding::ProcessSamples(int cell_idx)
       break;
 
     LearnIncidentRadianceIn(cd, buffer);
-
     FreeSpan(buffer);
   }
 }
@@ -251,9 +253,10 @@ void PathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRadiance>
 }
 
 
-
 void PathGuiding::BeginRound(Span<ThreadLocal*> thread_locals)
 {
+  round++;
+
   const auto n = recording_tree.NumLeafs();
   assert(n == cell_data.size());
 
@@ -301,13 +304,23 @@ void PathGuiding::FinalizeRound(Span<ThreadLocal*> thread_locals)
   
   the_task_arena->execute([&]() { the_task_group.wait(); } );
 
+  // Release memory
+  for (auto* tl : thread_locals)
+    decltype(tl->records_by_cells){}.swap(tl->records_by_cells);
+
+  if (round <= 1)
+  {
+    the_task_arena->execute([this]() {
+      the_task_group.run_and_wait([this]() {
+        AdaptInitial();
+      });
+    });
+  }
+
   WriteDebugData();
 
   cell_data_temp.reset();
 
-  // Release memory
-  for (auto* tl : thread_locals)
-    tl->records_by_cells = decltype(tl->records_by_cells){};
 }
 
 
@@ -352,6 +365,60 @@ void ComputeLeafBoxes(const Tree &tree, Handle node, const Box &node_box, Span<C
 
 void PathGuiding::PrepareAdaptedStructures()
 {
+  if (round > 1)
+    AdaptIncremental();
+}
+
+
+void PathGuiding::AdaptInitial()
+{
+  // There is only one cell, and all the samples are stored in its CellDataTemporary struct.
+  assert(cell_data_temp.get() && cell_data.size() == 1);
+
+  ToyVector<Span<IncidentRadiance>> sample_chunks = std::move(cell_data_temp[0].data_chunks);
+  
+  // For easier access. Also freeing the memory, which I have to eventually.
+  ToyVector<IncidentRadiance> samples; samples.reserve(sample_chunks.size() * CELL_BUFFER_SIZE);
+  for (auto &span : sample_chunks)
+  {
+    samples.insert(samples.end(), span.begin(), span.end());
+    FreeSpan(span);
+  }
+
+  ToyVector<Span<IncidentRadiance>>{}.swap(sample_chunks);
+
+  auto builder = kdtree::MakeBuilder<IncidentRadiance>(/*max_depth*/ MAX_DEPTH, /*min_num_points*/ 100, [](const IncidentRadiance &s) { return s.pos; });
+  recording_tree = builder.Build(AsSpan(samples));
+
+  cell_data.resize(recording_tree.NumLeafs());
+
+  tbb::parallel_for(0, isize(cell_data), [this, &builder](int i)
+  {
+    for (int i = 0; i < recording_tree.NumLeafs(); ++i)
+    {
+      CellData& cd = cell_data[i];
+      Span<IncidentRadiance> cell_samples = builder.DataRangeOfLeaf(i);
+
+      cd.index = i;
+      cd.last_num_samples = cell_samples.size();
+      cd.max_num_samples = cell_samples.size();
+
+      LearnIncidentRadianceIn(cd, cell_samples);
+
+      cd.current_estimate.radiance_distribution = cd.learned.radiance_distribution;
+      cd.current_estimate.incident_flux_density = cd.learned.incident_flux_density_accum.Mean();
+      cd.current_estimate.incident_flux_confidence_bounds = cd.learned.incident_flux_density_accum.Count() >= 10 ?
+        std::sqrt(cd.learned.incident_flux_density_accum.Var() / static_cast<double>(cd.learned.incident_flux_density_accum.Count())) : LargeNumber;
+      assert(std::isfinite(cd.current_estimate.incident_flux_confidence_bounds));
+    }
+  });
+
+  ComputeLeafBoxes(recording_tree, recording_tree.GetRoot(), region, AsSpan(cell_data));
+}
+
+
+void PathGuiding::AdaptIncremental()
+{
   std::int64_t num_fit_samples = 0;
   for (const auto &cell : cell_data)
     num_fit_samples += cell.learned.leaf_stats.Count();
@@ -385,7 +452,7 @@ void PathGuiding::PrepareAdaptedStructures()
 
     kdtree::TreeAdaptor adaptor(DetermineSplit);
     recording_tree = adaptor.Adapt(recording_tree);
-  
+
     decltype(cell_data) new_data(recording_tree.NumLeafs());
 
     int num_cell_over_2x_limit = 0;
@@ -394,7 +461,7 @@ void PathGuiding::PrepareAdaptedStructures()
     int num_cell_else = 0;
     int num_cell_sample_count_regressed = 0;
     double kl_divergence = 0.;
-    const double logq = std::log2(1./isize(cell_data));
+    const double logq = std::log2(1. / isize(cell_data));
 
     // This should initialize all sampling mixtures with
     // the previously learned ones. If node is split, assignment
@@ -406,18 +473,18 @@ void PathGuiding::PrepareAdaptedStructures()
       {
         CellData &dst = new_data[dst_idx];
         dst.current_estimate.radiance_distribution = src.learned.radiance_distribution;
-        dst.learned.radiance_distribution          = src.learned.radiance_distribution;
-        dst.learned.incident_flux_density_accum    = src.learned.incident_flux_density_accum;
+        dst.learned.radiance_distribution = src.learned.radiance_distribution;
+        dst.learned.incident_flux_density_accum = src.learned.incident_flux_density_accum;
         dst.current_estimate.incident_flux_density = src.learned.incident_flux_density_accum.Mean();
-        dst.current_estimate.incident_flux_confidence_bounds = src.learned.incident_flux_density_accum.Count()>=10 ?
+        dst.current_estimate.incident_flux_confidence_bounds = src.learned.incident_flux_density_accum.Count() >= 10 ?
           std::sqrt(src.learned.incident_flux_density_accum.Var() / static_cast<double>(src.learned.incident_flux_density_accum.Count())) : LargeNumber;
-        assert (std::isfinite(dst.current_estimate.incident_flux_confidence_bounds));
+        assert(std::isfinite(dst.current_estimate.incident_flux_confidence_bounds));
         dst.index = dst_idx;
-        dst.last_num_samples                      = src.learned.leaf_stats.Count();
-        dst.max_num_samples                       = std::max(dst.last_num_samples, dst.max_num_samples);
+        dst.last_num_samples = src.learned.leaf_stats.Count();
+        dst.max_num_samples = std::max(dst.last_num_samples, dst.max_num_samples);
       };
 
-      if (m.new_first >=0)
+      if (m.new_first >= 0)
       {
         CopyCell(m.new_first);
       }
@@ -427,18 +494,18 @@ void PathGuiding::PrepareAdaptedStructures()
       }
 
       const int num_samples = cell_data[i].learned.leaf_stats.Count();
-      if (num_samples > 2*max_samples_per_cell)
+      if (num_samples > 2 * max_samples_per_cell)
         ++num_cell_over_2x_limit;
-      else if (2*num_samples > 3*max_samples_per_cell)
+      else if (2 * num_samples > 3 * max_samples_per_cell)
         ++num_cell_over_1_5x_limit;
-      else if(num_samples > max_samples_per_cell)
+      else if (num_samples > max_samples_per_cell)
         ++num_cell_over1x_limit;
-      else if (((m.new_first>=0) ^ (m.new_second >= 0)) && num_samples*3 < cell_data[i].last_num_samples*4)
+      else if (((m.new_first >= 0) ^ (m.new_second >= 0)) && num_samples * 3 < cell_data[i].last_num_samples * 4)
         ++num_cell_sample_count_regressed;
       else
         ++num_cell_else;
       const double p = static_cast<double>(num_samples) / num_fit_samples;
-      kl_divergence += p>0. ? (p*std::log2(p) - p*logq) : 0.;
+      kl_divergence += p > 0. ? (p*std::log2(p) - p * logq) : 0.;
       ++i;
     }
 
@@ -455,9 +522,8 @@ void PathGuiding::PrepareAdaptedStructures()
   } // End tree adaption
 
   ComputeLeafBoxes(recording_tree, recording_tree.GetRoot(), region, AsSpan(cell_data));
-
-  round++;
 }
+
 
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
 CellDebug::~CellDebug()

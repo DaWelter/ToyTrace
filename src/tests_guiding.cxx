@@ -217,6 +217,106 @@ TEST(Guiding, KdTreeNoopAdaptation)
 }
 
 
+TEST(Guiding, KdTreeBuilder)
+{
+  using namespace kdtree;
+  using P = Eigen::Vector3d;
+
+  std::array<P, 8> points{{
+    { -1., -1., -1. },
+    { 1., -1., -1. },
+    { -1., 1., -1. },
+    { 1., 1., -1. },
+    { -1., -1., 1. },
+    { 1., -1., 1. },
+    { -1., 1., 1. },
+    { 1., 1., 1. },
+  }};
+
+  auto builder = kdtree::MakeBuilder<P>(20, 1, [&](const P& p) { return p; });
+  Tree tree = builder.Build(AsSpan(points));
+
+  ASSERT_EQ(tree.NumLeafs(), points.size());
+  // For now, I know that data ranges should be reordered to the depth first traversal order of the leafs
+  // which equals the order in which the leafs are iterated.
+  const P* expected_begin = points.data();
+  for (int i=0; i<tree.NumLeafs(); ++i)
+  {
+    auto span = builder.DataRangeOfLeaf(i);
+    EXPECT_EQ(span.begin(), expected_begin);
+    expected_begin = span.end();
+  }
+  // Check end of last cell.
+  EXPECT_EQ(
+    builder.DataRangeOfLeaf(tree.NumLeafs()-1).end(),
+    points.data() + points.size());
+}
+
+
+TEST(Guiding, KdTreeBuilderHandlesDegeneracy)
+{
+  using namespace kdtree;
+  using P = Eigen::Vector3d;
+
+  std::array<P, 4> points{{
+    {0., 0., 0.},
+    {0., 0., 0.},
+    {0., 0., 0.},
+    {0., 0., 0.},
+  }};
+
+  auto builder = kdtree::MakeBuilder<P>(2, 1, [&](const P& p) { return p; });
+  Tree tree = builder.Build(AsSpan(points));
+
+  ASSERT_EQ(tree.NumLeafs(), 2);
+}
+
+
+TEST(Guiding, KdTreeBuilderMaxDepth)
+{
+  using namespace kdtree;
+  using P = Eigen::Vector3d;
+
+  std::array<P, 8> points{{
+    { -1., -1., -1. },
+    { 1., -1., -1. },
+    { -1., 1., -1. },
+    { 1., 1., -1. },
+    { -1., -1., 1. },
+    { 1., -1., 1. },
+    { -1., 1., 1. },
+    { 1., 1., 1. },
+  }};
+
+  auto builder = kdtree::MakeBuilder<P>(2, 1, [&](const P& p) { return p; });
+  Tree tree = builder.Build(AsSpan(points));
+
+  ASSERT_EQ(tree.NumLeafs(), 2);
+}
+
+
+TEST(Guiding, KdTreeBuilderNumPoints)
+{
+  using namespace kdtree;
+  using P = Eigen::Vector3d;
+
+  std::array<P, 8> points{{
+    { -1., -1., -1. },
+    { 1., -1., -1. },
+    { -1., 1., -1. },
+    { 1., 1., -1. },
+    { -1., -1., 1. },
+    { 1., -1., 1. },
+    { -1., 1., 1. },
+    { 1., 1., 1. },
+  }};
+
+  auto builder = kdtree::MakeBuilder<P>(20, 4, [&](const P& p) { return p; });
+  Tree tree = builder.Build(AsSpan(points));
+
+  ASSERT_EQ(tree.NumLeafs(), 2);
+}
+
 
 TEST(Guiding, KdTreeIterator1)
 {
@@ -416,7 +516,7 @@ TEST(Guiding, CombinedIntervalsIterator)
 TEST(Guiding, MovmfSampling)
 {
   using namespace vmf_fitting;
-  VonMisesFischerMixture<> m;
+  VonMisesFischerMixture<16> m;
   m.weights.setZero();
   m.weights <<
     4.92805e-08, 2.67356e-07, 2.18258e-05, 0.000542076, 7.16188e-08, 3.20299e-09, 0.997971, 5.77399e-06, 1.43747e-08, 2.79681e-07, 0.000585669, 0.000586032, 1.68318e-06, 6.35961e-08, 0.000193427, 9.20341e-05;

@@ -75,7 +75,7 @@ struct IncidentRadiance
     Double3 pos;
     Float3 reverse_incident_dir;
     float weight;
-    bool is_original = true;
+    //bool is_original = true;
 };
 
 
@@ -230,11 +230,14 @@ class PathGuiding
 
     private:
         void WriteDebugData();
+        void AdaptIncremental();
+        void AdaptInitial();
 
         static Record ComputeStochasticFilterPosition(const Record & rec, const CellData &cd, Sampler &sampler);
         
         void ProcessSamples(int cell_idx);
         void LearnIncidentRadianceIn(CellData &cell, Span<IncidentRadiance> buffer);
+        
         void Enqueue(int cell_idx, ToyVector<Record> &sample_buffer);
         CellData& LookupCellData(const Double3 &p);
 
