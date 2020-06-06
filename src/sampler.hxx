@@ -358,6 +358,57 @@ public:
   }
 };
 
+template<class T, int rows, class C = long>
+class OnlineCovariance
+{
+  using V = Eigen::Matrix<T, rows, 1>;
+  using M = Eigen::Matrix<T, rows, rows>;
+  V means{ Eigen::zero }; // w.r.t the offset
+  V offset{ Eigen::zero }; // For more precision. Internal variables are expressed relative to this. Makes sense because points are expected to come as big clump far off the world origin.
+  M xy_matrix{ Eigen::zero }; // sum (x - <x>)(y - <y>), i.e. sum over squared deviations from means
+  C counter{};
+public:
+  void operator+=(const V &x)
+  {
+    if (unlikely(counter == 0))
+    {
+      offset = x;
+    }
+    // See, e.g. Schubert & Gertz (2018) "Numerically Stable Parallel Computation of (Co-)Variance"
+    ++counter;
+    V deltas_x = x - means - offset;
+    means += deltas_x / counter;
+    V deltas_y = x - means - offset; // Note: uses updated means.
+    xy_matrix += deltas_x * deltas_y.transpose();
+  }
+
+  const C Count() const
+  {
+    return counter;
+  }
+
+  const V Mean() const
+  {
+    return means + offset;
+  }
+
+  const T Cov(int row, int col) const
+  {
+    return xy_matrix(row, col) / counter;
+  }
+
+  const M Cov() const
+  {
+    return xy_matrix / counter;
+  }
+
+  const V Var() const
+  {
+    return xy_matrix.diagonal() / counter;
+  }
+};
+
+
 }
 
 

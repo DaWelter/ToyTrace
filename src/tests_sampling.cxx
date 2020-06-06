@@ -8,6 +8,9 @@
 
 #include <boost/container/small_vector.hpp>
 
+#include "eigen.hxx"
+#include <Eigen/Eigenvalues>
+
 #ifdef HAVE_JSON
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -86,7 +89,7 @@ void Write(rj::Document &doc, const std::string &filename)
 
 
 
-TEST(OnlineVariance, ArrayAccumulator)
+TEST(Accumulators, OnlineVarianceArrayAccumulator)
 {
   static constexpr int Narms = 3;
   static constexpr int Nsamples = 100;
@@ -132,6 +135,52 @@ TEST(OnlineVariance, ArrayAccumulator)
 
   Check(accum1);
   Check(accum2);
+}
+
+
+TEST(Accumulators, OnlineCovariance)
+{
+  constexpr int NUM_SAMPLES = 10000;
+  Accumulators::OnlineCovariance<double, 3> covestimator;
+
+  using namespace Eigen;
+  // Just some random rotation
+  const Vector3d stddevs{ 1., 2., 3. };
+  Matrix3d frame =
+    (AngleAxisd((Pi*20. / 180.), Vector3d::UnitX())
+      * AngleAxisd((Pi*120. / 180.), Vector3d::UnitY())).toRotationMatrix();
+  const Vector3d offset{ 10., 20., 30. };
+
+  std::mt19937 gen;
+  std::normal_distribution<double> normal_dist{ 0., 1. };
+
+  for (int i = 0; i < NUM_SAMPLES; ++i)
+  {
+    const Vector3d v{ normal_dist(gen),normal_dist(gen) ,normal_dist(gen) };
+    const Vector3d x = offset + frame * (stddevs.array() * v.array()).matrix();
+    covestimator += x;
+  }
+
+
+  Matrix3d covmatrix = covestimator.Cov();
+
+  ASSERT_TRUE(covmatrix.isApprox(covmatrix.transpose(), 1.e-6));
+
+  SelfAdjointEigenSolver<Matrix3d> eigensolver{ covmatrix };
+
+  Matrix3d expected_identity = (eigensolver.eigenvectors().transpose() * frame).cwiseAbs();
+  //std::cout << "estimated mean = " << covestimator.Means() << std::endl;
+  //std::cout << "eigenvals = \n" << eigensolver.eigenvalues() << std::endl;
+  //std::cout << "frame = \n" << frame << std::endl;
+  //std::cout << "eigenvect = \n" << eigensolver.eigenvectors() << std::endl;
+  //std::cout << "expected_identity = \n" << expected_identity << std::endl;
+  //std::cout << "stddev = " << eigensolver.eigenvalues().array().sqrt().eval() << std::endl;
+
+  EXPECT_TRUE(expected_identity.isIdentity(3.e-2));
+  EXPECT_TRUE(covestimator.Mean().isApprox(offset, 1.e-3));
+  EXPECT_TRUE(eigensolver.eigenvalues().cwiseSqrt().isApprox(stddevs, 1.e-2));
+  EXPECT_EQ(covestimator.Count(), NUM_SAMPLES);
+  EXPECT_TRUE(covestimator.Var()[1] == covestimator.Cov(1, 1));
 }
 
 
