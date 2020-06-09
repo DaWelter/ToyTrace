@@ -75,11 +75,11 @@ struct IncidentRadiance
     Double3 pos;
     Float3 reverse_incident_dir;
     float weight;
-    //bool is_original = true;
+    bool is_original = true;
 };
 
 
-using LeafStatistics = OnlineVariance::Accumulator<Eigen::Array3d, int64_t>;
+using LeafStatistics = Accumulators::OnlineCovariance<double, 3, int64_t>;
 
 // Should be quite lightweight.
 static_assert(sizeof(tbb::spin_mutex) <= 16);
@@ -98,8 +98,10 @@ struct CellData
     alignas (CACHE_LINE_SIZE) struct CurrentEstimate {
       // Normalized to the total incident flux. So radiance_distribution(w) * incident_flux_density is the actual radiance from direction w.
       vmf_fitting::VonMisesFischerMixture<> radiance_distribution;
-      //Double3 cell_size = Double3::Constant(NaN);
       Box cell_bbox{};
+      Eigen::Matrix3d points_cov_frame{Eigen::zero}; // U*sqrt(Lambda), where U is composed of Eigenvectors, and Lambda composed of Eigenvalues.
+      Eigen::Vector3d points_mean{Eigen::zero};
+      Eigen::Vector3d points_stddev{Eigen::zero};
       double incident_flux_density{0.};
       double incident_flux_confidence_bounds{0.};
     } current_estimate;
@@ -252,6 +254,8 @@ class PathGuiding
         int param_num_initial_samples;
         int param_em_every;
         double param_prior_strength;
+        int64_t previous_max_samples_per_cell = 0;
+        int64_t previous_total_samples = 0;
 
         tbb::task_arena *the_task_arena;
         tbb::task_group the_task_group;
