@@ -379,49 +379,10 @@ class Builder
       pts.end(),
       MakeCompareCoordinates(axis));
     
-    // Look where the coordinates actually change compared to the middle element.
-    // That is needed to prevent degenerate configurations. nth_element unfortunately
-    // cannot move the middle point.
-    int n_left = n_split_guess-1;
-    while (n_left >= 0 && get_coordinates(pts[n_left])[axis]==get_coordinates(pts[n_split_guess])[axis])
-    {
-      --n_left;
-    }
-
-    int n_right = n_split_guess+1;
-    while (n_right < pts.size() && get_coordinates(pts[n_right])[axis]==get_coordinates(pts[n_split_guess])[axis])
-    {
-      ++n_right;
-    }
-
-    // If there are no equalities, the first case should select the original n_split_guess
-    // as the size of the left interval.
-    if (n_split_guess-n_left <= n_right-n_split_guess)
-    {
-      // take the left item as split
-      double p = get_coordinates(pts[n_left+1])[axis];
-      if (n_left >= 0)
-      {
-        p = AverageIfNonDegenerate(get_coordinates(pts[n_left])[axis],get_coordinates(pts[n_left+1])[axis]);
-      }
-      return { 
-        p,
-        n_left+1
-      };
-    }
-    else
-    {
-      // take the right item as split
-      double p = get_coordinates(pts[n_right-1])[axis];
-      if (n_right < pts.size())
-      {
-        p = AverageIfNonDegenerate(get_coordinates(pts[n_right-1])[axis], get_coordinates(pts[n_right])[axis]);
-      }
-      return {
-        p,
-        n_right
-      };
-    }
+    return {
+      get_coordinates(pts[n_split_guess])[axis],
+      n_split_guess
+    };
   }
 
   Handle TryBuildBranchRecursive(Span<Point> branch_points, int depth)
@@ -444,7 +405,6 @@ class Builder
     {
       auto left_range = Subspan(branch_points, 0, count_left);
       auto right_range = Subspan(branch_points, count_left, count_right);
-
       Handle left = BuildRecursive(left_range, depth+1);
       Handle right = BuildRecursive(right_range, depth+1);
       auto branch = new_tree.AllocateBranch(left, right, axis, pos);

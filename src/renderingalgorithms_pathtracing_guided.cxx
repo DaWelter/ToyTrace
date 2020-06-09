@@ -782,7 +782,7 @@ public:
     boundary_intersection_buffer.reserve(1024);
   }
 
-  OnlineVariance::Accumulator<Eigen::Array3d,long> average_intensity{Eigen::Array3d{Eigen::zero}};
+  //OnlineVariance::Accumulator<Eigen::Array3d,long> average_intensity{Eigen::Array3d{Eigen::zero}};
 
   void Render(const ImageTileSet::Tile &tile)
   {
@@ -1017,7 +1017,7 @@ public:
     auto color_err = Color::SpectralSelectionToRGB(measurement.err, lambda_selection.indices);
     framebuffer[pixel_index].value += color;
     framebuffer[pixel_index].err += color_err;
-    average_intensity += Eigen::Array3d{value(color[0]),value(color[1]),value(color[2])};
+    //average_intensity += Eigen::Array3d{value(color[0]),value(color[1]),value(color[2])};
   }
 
 }; // class ApproximatePixelWorker
@@ -1077,35 +1077,6 @@ inline void PathTracingAlgo2::Run()
 
   auto radrec_local_surface = TransformVector(camerarender_workers, [](auto &w) { return w.GetGuidingLocalDataSurface();  });
   auto radrec_local_volume = TransformVector(camerarender_workers, [](auto &w) { return w.GetGuidingLocalDataVolume();  });
-
-  {
-    const long num_samples_stop = this->num_pixels;
-    long num_samples = 32 * 32;
-    while (!stop_flag.load() && (num_samples < num_samples_stop))
-    {
-      std::cout << strconcat("Prepass: ", num_samples, " / ", num_samples_stop, "\n");
-      
-      radiance_recorder_surface->BeginRound(AsSpan(radrec_local_surface));
-      radiance_recorder_volume->BeginRound(AsSpan(radrec_local_volume));
-
-      the_task_arena.execute([this, num_samples] {
-        tbb::parallel_for(tbb::blocked_range<long>(0l, num_samples, 32), [this](const tbb::blocked_range<long> &r)
-        {
-          const int worker_num = tbb::this_task_arena::current_thread_index();
-          camerarender_workers[worker_num].PrepassRender(r.end()-r.begin());
-        });
-      });
-
-      radiance_recorder_surface->FinalizeRound(AsSpan(radrec_local_surface));
-      radiance_recorder_surface->PrepareAdaptedStructures();
-      radiance_recorder_volume->FinalizeRound(AsSpan(radrec_local_volume));
-      radiance_recorder_volume->PrepareAdaptedStructures();
-
-      num_samples *= 2;
-    }
-  }
-
-  RenderRadianceEstimates(guiding::GetDebugFilePrefix() / fs::path{"prepass_approx.png"});
 
   {
     long num_samples = 1;
@@ -1466,8 +1437,8 @@ std::pair<int, double> ComputeNumberOfSplits2(double value, double value_err, do
   const double ww_s = 5.;
   const double ww_low_tmp = (2.*reference)/(1.+ww_s);
   const double ww_high_tmp = ww_s * ww_low_tmp;
-  const double ww_low = must_continue ? 0. :  std::max(0., ww_low_tmp - value_err - reference_err);
-  const double ww_high = ww_high_tmp + value_err + reference_err;
+  const double ww_low = must_continue ? 0. :  std::max(0., ww_low_tmp - 2.*value_err - 2.*reference_err);
+  const double ww_high = ww_high_tmp + 2.*value_err + 2.*reference_err;
 
   if (value < ww_low)
   {
