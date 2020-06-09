@@ -61,20 +61,23 @@ def read_mixture(data):
         return read_gmm(data)
 
 def convert_(rec, load_samples):
+    bbox_min = np.array(rec['bbox_min'])
+    bbox_max = np.array(rec['bbox_max'])
     cd = munch.Munch(
         dir = None,
         val = None,
         proj = None,
-        center = np.array(rec['point_distribution_statistics_mean']),
-        stddev = np.array(rec['point_distribution_statistics_stddev']),
-        size = np.array(rec['size']),
+        center = np.array(rec['point_distribution_mean']),
+        frame = np.array(rec['point_distribution_frame']),
+        stddev = np.array(rec['point_distribution_stddev']),
+        size = bbox_max-bbox_min,
+        box = np.vstack((bbox_min, bbox_max)).T,
         average_weight = rec['average_weight'],
         num_points = rec['num_points'],
         mixture_learned = read_mixture(rec['mixture_learned']),
         mixture_sampled = read_mixture(rec['mixture_sampled']),
         incident_flux_learned = np.array(rec['incident_flux_learned']),
         incident_flux_sampled = np.array(rec['incident_flux_sampled']),
-        box = None,
         id = rec['id']
     )
     if 'fitparam_prior_nu' in rec:

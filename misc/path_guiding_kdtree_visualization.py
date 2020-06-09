@@ -19,6 +19,9 @@ def generate_lut():
     p2 = [1.0] + list(colors.GetColor3d("DarkOrange"))
     ctf.AddRGBPoint(*p1)
     ctf.AddRGBPoint(*p2)
+    ctf.SetRange(0., 1.)
+    #ctf.Build()
+    #return ctf
     cc = list()
     for i in range(256):
         cc.append(ctf.GetColor(float(i) / 255.0))
@@ -30,6 +33,24 @@ def generate_lut():
     lut.SetRange(0, 1)
     lut.Build()
     return lut
+
+
+def generate_log_ctf(maxval):
+    f = vtk.vtkDiscretizableColorTransferFunction()
+    #f.DiscretizeOn()
+    #f.SetColorSpaceToDiverging()
+    f.SetNumberOfValues(256)
+    f.AddRGBPoint(maxval*1.e1 , 1.0, 1.0, 1.0)
+    f.AddRGBPoint(maxval*1.e0 , 0.9, 0.9, 0.9)
+    f.AddRGBPoint(maxval*1.e-1, 0.6, 0.6, 0.0)
+    f.AddRGBPoint(maxval*1.e-2, 0.9, 0.0, 0.0)
+    f.AddRGBPoint(maxval*1.e-3, 0.6, 0.0, 0.6)
+    f.AddRGBPoint(maxval*1.e-4, 0.0, 0.0, 0.9)
+    f.AddRGBPoint(maxval*1.e-5, 0.0, 0.3, 0.3)
+    f.AddRGBPoint(maxval*1.e-6, 0.1, 0.1, 0.1)
+    f.Build()
+    return f
+
 
 lut = generate_lut()
 
@@ -114,26 +135,58 @@ def make_cube_from_cell_data(cd):
     return cube
 
 
+def make_oriented_cube_actor_from_cell_data(cd, color):
+    trafo = vtk.vtkTransform()
+    m = np.zeros((4,4))
+    # The cube has unit length, i.e. "radius 0.5". Hence, in contrast to
+    # the rendering code, I don't need the factor 1/2 here.
+    m[:3,:3] = 3.*cd.frame
+    m[3,3] = 1
+    m[:3,3] = cd.center
+    trafo.SetMatrix(m.ravel())
+
+    cube = vtk.vtkCubeSource()
+    cube.Update()
+    a = make_cube_actor(cube, color)
+    a.SetUserTransform(trafo)
+
+    return a
+
+
+
+def make_cube_from_cell_box(cd):
+    cube = vtk.vtkCubeSource()
+    min_, max_ = cd.box.T
+    cube.SetBounds(min_[0], max_[0], min_[1], max_[1], min_[2], max_[2])
+    # cube.SetBounds(*cd.box.ravel())
+    # cube.SetCenter(*cd.center)
+    # cube.SetXLength(cd.stddev[0]*2)
+    # cube.SetYLength(cd.stddev[1]*2)
+    # cube.SetZLength(cd.stddev[2]*2)
+    cube.Update()
+    return cube
+
+
 def generate_colors(polydata, cd):
     # The default radius is 0.5!
     pts = 2.*numpy_support.vtk_to_numpy(polydata.GetPoints().GetData())
     # Color by pdf
-    vals = cd.mixture_learned.pdf(pts)
-    vals /= vals.max()
-    # Color by incident radiance
-    #vals = np.ones(pts.shape[0]) * cd.average_weight
-
-    # vals = np.log10(np.maximum(vals + 1. - 1.e-3, 1.))
+    
+    #vals = cd.mixture_learned.pdf(pts)
+    #vals *= cd.incident_flux_learned
     # vals /= vals.max()
+
+    # Color by incident radiance
+    vals = np.ones(pts.shape[0]) * cd.incident_flux_learned
 
     return vals
 
 
 def make_sphere_poly_data(cd):
-    size = np.average(cd.stddev)*0.5
+    size = np.average(cd.stddev*3./2.)
     source = vtk.vtkSphereSource()
-    source.SetThetaResolution(32)
-    source.SetPhiResolution(16)
+    source.SetThetaResolution(64)
+    source.SetPhiResolution(32)
     source.Update()
     vals = generate_colors(source.GetOutput(), cd)
     source.SetCenter(*cd.center)
@@ -154,24 +207,14 @@ def make_the_all_spheres_poly_data(datas):
     # mapper
     mapper = vtk.vtkPolyDataMapper()
     mapper.SetInputData(appendFilter.GetOutput())
-    mapper.SetLookupTable(lut)
+    mapper.SetLookupTable(generate_log_ctf(maxval))
     mapper.SetColorModeToMapScalars()
-    mapper.SetScalarRange(0., maxval)
+    #mapper.SetScalarRange(0., maxval)
+    #print ("maxval=",maxval)
     # Actor.
     actor = vtk.vtkActor()
     actor.SetMapper(mapper)
     return actor
-
-
-def make_cube_from_cell_box(cd):
-    cube = vtk.vtkCubeSource()
-    #cube.SetBounds(*cd.box.ravel())
-    cube.SetCenter(*cd.center)
-    cube.SetXLength(cd.stddev[0]*2)
-    cube.SetYLength(cd.stddev[1]*2)
-    cube.SetZLength(cd.stddev[2]*2)
-    cube.Update()
-    return cube
 
 
 def make_cube_actor(cube, color):
@@ -183,6 +226,7 @@ def make_cube_actor(cube, color):
     cubeActor.SetMapper(cubeMapper)
     cubeActor.GetProperty().SetColor(color)
     return cubeActor
+
 
 
 class MouseInteractorHighLightActor(vtk.vtkInteractorStyleTrackballCamera):
@@ -250,7 +294,7 @@ if __name__ == '__main__':
     tree, celldata = path_guiding_kdtree_loader.convert_data(
         path_guiding_kdtree_loader.read_records(filename),
         load_samples = False,
-        build_boxes = True)
+        build_boxes = False)
 
     # for i, cd in enumerate(celldata):
     #     cd['index'] = i
@@ -306,10 +350,11 @@ if __name__ == '__main__':
         #actormap[a] = cd
         #ren.AddActor(a)
         if 1:
-            a = make_cube_actor(
-                make_cube_from_cell_box(cd),
-                colors.GetColor3d("Gray")
-            )
+            # a = make_cube_actor(
+            #     make_cube_from_cell_data(cd),
+            #     colors.GetColor3d("Gray")
+            # )
+            a = make_oriented_cube_actor_from_cell_data(cd, colors.GetColor3d("Gray"))
             actormap[a] = cd
             a.GetProperty().SetRepresentationToWireframe()
             a.GetProperty().LightingOff()
@@ -350,6 +395,9 @@ if __name__ == '__main__':
         actor = vtk.vtkActor()
         actor.SetMapper(mapper)
         ren.AddActor(actor)
+
+    axes = vtk.vtkAxesActor()
+    ren.AddActor(axes)
 
     ren.ResetCamera()
     ren.GetActiveCamera().Azimuth(30)
