@@ -42,40 +42,12 @@ boost::filesystem::path GetDebugFilePrefix();
 
 using Color::Spectral3f;
 
-struct AllEqual
-{
-    template<class T, int rows>
-    bool operator()(const Eigen::Array<T, rows, 1> &a, const Eigen::Array<T, rows, 1> &b) const
-    {
-        return (a == b).all();
-    }
-};
-
-
-// TODO: This needs to go away ... 
-template<class T>
-Span<T> CopyToSpan(const ToyVector<T> &v)
-{
-    // May the gods have mercy ...
-    auto mem = std::make_unique<T[]>(v.size());
-    memcpy(mem.get(), v.data(), sizeof(T)*v.size());
-    return Span<T>(mem.release(), v.size());
-}
-
-template<class T>
-void FreeSpan(Span<T> &v)
-{
-    delete[] v.data();
-    v = Span<T>{};
-}
-
 
 struct IncidentRadiance
 {
     Double3 pos;
     Float3 reverse_incident_dir;
     float weight;
-    bool is_original = true;
 };
 
 
@@ -157,26 +129,6 @@ private:
 #endif
 
 
-struct CellDataTemporary
-{
-  CellDataTemporary() :
-    data_chunks{}, mutex{}, fit_task_submissions_count{ 0 }
-  {
-    data_chunks.reserve(8);
-  }
-
-  CellDataTemporary(const CellDataTemporary &) = delete;
-  CellDataTemporary& operator=(const CellDataTemporary &) = delete;
-
-  CellDataTemporary(CellDataTemporary &&) = delete;
-  CellDataTemporary& operator=(CellDataTemporary &&) = delete;
-
-  ToyVector<Span<IncidentRadiance>> data_chunks;
-  tbb::spin_mutex mutex; // To protected the incident radiance buffer
-  int fit_task_submissions_count;
-};
-
-
 class CellIterator : kdtree::LeafIterator
 {
     Span<const CellData> celldata;
@@ -200,13 +152,11 @@ class CellIterator : kdtree::LeafIterator
 class PathGuiding
 {
     public:
-        using Record = IncidentRadiance;
-        using RecordBuffer = ToyVector<Record>;
         using RadianceEstimate = CellData::CurrentEstimate;
 
         struct ThreadLocal 
         {
-            ToyVector<RecordBuffer> records_by_cells;
+            ToyVector<IncidentRadiance> samples;
         };
 
         PathGuiding(const Box &region, double cellwidth, const RenderingParameters &params, tbb::task_arena &the_task_arena, const char* name);
@@ -233,21 +183,23 @@ class PathGuiding
     private:
         void WriteDebugData();
         void AdaptIncremental();
-        void AdaptInitial();
+        void AdaptInitial(Span<ThreadLocal*> thread_locals);
+        void FitTheSamples(Span<ThreadLocal*> thread_locals);
+        ToyVector<int> ComputeCellIndices(Span<const IncidentRadiance> samples) const;
+        ToyVector<ToyVector<IncidentRadiance>> SortSamplesIntoCells(Span<const int> cell_indices, Span<const IncidentRadiance> samples) const;
+        void GenerateStochasticFilteredSamplesInplace(Span<int> cell_indices, Span<IncidentRadiance> samples) const;
 
-        static Record ComputeStochasticFilterPosition(const Record & rec, const CellData &cd, Sampler &sampler);
+        static IncidentRadiance ComputeStochasticFilterPosition(const IncidentRadiance & rec, const CellData &cd, Sampler &sampler);
         
-        void ProcessSamples(int cell_idx);
-        void LearnIncidentRadianceIn(CellData &cell, Span<IncidentRadiance> buffer);
+        void FitTheSamples(CellData &cell, Span<IncidentRadiance> buffer, bool is_original=true) const;
         
-        void Enqueue(int cell_idx, ToyVector<Record> &sample_buffer);
+        void Enqueue(int cell_idx, ToyVector<IncidentRadiance> &sample_buffer);
         CellData& LookupCellData(const Double3 &p);
 
         Box region;
         kdtree::Tree recording_tree;
         ToyVector<CellData, AlignedAllocator<CellData, CACHE_LINE_SIZE>> cell_data;
         std::string name;
-        std::unique_ptr<CellDataTemporary[]> cell_data_temp;
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
         std::unique_ptr<CellDebug[]> cell_data_debug;
 #endif

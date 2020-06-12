@@ -10,6 +10,8 @@
 #include <fstream>
 
 #include <tbb/parallel_for_each.h>
+#include <tbb/combinable.h>
+#include <tbb/enumerable_thread_specific.h>
 #include <Eigen/Eigenvalues>
 
 //#include <range/v3/view/enumerate.hpp>
@@ -49,11 +51,6 @@ boost::filesystem::path GetDebugFilePrefix()
   return DEBUG_FILE_PREFIX;
 }
 
-// The buffers use quite a lot of memory.
-// Because there are num_threads*num_cells*buffer_size*sizeof(record),
-// which adds up ...
-static constexpr size_t CELL_BUFFER_SIZE = 32;
-
 
 PathGuiding::PathGuiding(const Box &region, double cellwidth, const RenderingParameters &params, tbb::task_arena &the_task_arena, const char* name) :
     region{ region },
@@ -68,7 +65,6 @@ PathGuiding::PathGuiding(const Box &region, double cellwidth, const RenderingPar
   vmf_fitting::InitializeForUnitSphere(cell.current_estimate.radiance_distribution);
   vmf_fitting::InitializeForUnitSphere(cell.learned.radiance_distribution);
   cell.index = 0;
-  //cell.current_estimate.cell_size = region.max - region.min;
   cell.current_estimate.cell_bbox = region;
   cell.current_estimate.incident_flux_density = 1.;
 }
@@ -86,71 +82,23 @@ const PathGuiding::RadianceEstimate& PathGuiding::FindRadianceEstimate(const Dou
 }
 
 
-void  PathGuiding::Enqueue(int cell_num, ToyVector<Record> &sample_buffer)
-{  
-  auto buffer = CopyToSpan(sample_buffer);
-  sample_buffer.clear();
-
-  bool do_submit = false;
-  auto &tcd = cell_data_temp[cell_num];
-  {
-    decltype(tcd.mutex)::scoped_lock l(tcd.mutex);
-    if (tcd.fit_task_submissions_count <= 0)
-    {
-      tcd.fit_task_submissions_count++;
-      do_submit = true;
-    }
-    tcd.data_chunks.push_back(buffer);
-  }
-
-  if (!do_submit)
-    return;
-
-  the_task_arena->execute(
-    [this, cell_num]() {
-      the_task_group.run(
-        [this, cell_num]()
-        {
-          this->ProcessSamples(cell_num);
-      });
-  });
-}
-
-
 void PathGuiding::AddSample(
   ThreadLocal& tl, const Double3 &pos,
   Sampler &sampler, const Double3 &reverse_incident_dir, const Spectral3 &radiance)
 {
-    auto BufferMaybeSendOffSample = [&tl,this](const CellData &cell, const Record &rec)
-    {
-      auto& sample_buffer = tl.records_by_cells[cell.index];
-      sample_buffer.push_back(rec);
-
-      if (sample_buffer.size() >= CELL_BUFFER_SIZE)
-      {
-        Enqueue(cell.index, sample_buffer);
-      }
-    };
-
-    auto rec = Record{
+    auto rec = IncidentRadiance{
             pos,
             reverse_incident_dir.cast<float>(),
             radiance.cast<float>().mean(),
     };
 
-    auto& cell = LookupCellData(pos);
-    BufferMaybeSendOffSample(cell, rec);
-
-    const auto new_rec = ComputeStochasticFilterPosition(rec, cell, sampler);
-    auto& other_cell = LookupCellData(new_rec.pos);
-    if (&other_cell.index != &cell.index)
-      BufferMaybeSendOffSample(other_cell, new_rec);
+    tl.samples.push_back(rec);
 }
 
 
-PathGuiding::Record PathGuiding::ComputeStochasticFilterPosition(const Record & rec, const CellData &cd, Sampler &sampler)
+IncidentRadiance PathGuiding::ComputeStochasticFilterPosition(const IncidentRadiance & rec, const CellData &cd, Sampler &sampler)
 {
-  Record new_rec{rec};
+  IncidentRadiance new_rec{rec};
 
   const Double3 rv{ sampler.Uniform01() , sampler.Uniform01() , sampler.Uniform01() };
 
@@ -171,58 +119,106 @@ PathGuiding::Record PathGuiding::ComputeStochasticFilterPosition(const Record & 
     new_rec.reverse_incident_dir = OrthogonalSystemZAligned(rec.reverse_incident_dir) * scatter_offset.cast<float>();
   }
 
-  new_rec.is_original = false;
+  //new_rec.is_original = false;
   return new_rec;
 }
 
 
-void PathGuiding::ProcessSamples(int cell_idx)
+ToyVector<int> PathGuiding::ComputeCellIndices(Span<const IncidentRadiance> samples) const
 {
-  if (round <= 1)
-    return;
-
-  CellDataTemporary& cdtmp = cell_data_temp[cell_idx];
-  CellData& cd = cell_data[cell_idx];
-
-  while (true)
-  {    
-    bool has_buffer = false;
-    Span<IncidentRadiance> buffer;
+  ToyVector<int> cell_indices(samples.size(), -1);
+  tbb::parallel_for(tbb::blocked_range<long>(0, samples.size(), 1000), [&,this](tbb::blocked_range<long> r)
+  {
+    for (long i=r.begin(); i<r.end(); ++i)
     {
-      tbb::spin_mutex::scoped_lock l{ cdtmp.mutex };
-      if (!cdtmp.data_chunks.empty())
-      {
-        buffer = cdtmp.data_chunks.back();
-        cdtmp.data_chunks.pop_back();
-        has_buffer = true;
-      }
-      else
-      {
-        // Make known that this task will not process any more samples.
-        cdtmp.fit_task_submissions_count--;
-      }
+      const int cell = recording_tree.Lookup(samples[i].pos);
+      cell_indices[i] = cell;
     }
+  });
+  return cell_indices;
+}
 
-    if (!has_buffer)
-      break;
 
-    LearnIncidentRadianceIn(cd, buffer);
-    FreeSpan(buffer);
+ToyVector<ToyVector<IncidentRadiance>> PathGuiding::SortSamplesIntoCells(Span<const int> cell_indices, Span<const IncidentRadiance> samples) const
+{
+  ToyVector<long> cell_sample_count(cell_data.size(), 0);
+  for (int i : cell_indices)
+      ++cell_sample_count[i];
+  
+  ToyVector<ToyVector<IncidentRadiance>> sorted_samples(cell_data.size());
+  for (int i=0; i<cell_data.size(); ++i)
+    sorted_samples[i].reserve(cell_sample_count[i]);
+  
+  for (long i=0; i<samples.size(); ++i)
+  {
+    sorted_samples[cell_indices[i]].push_back(samples[i]);
+  }
+
+  return sorted_samples;
+}
+
+
+void PathGuiding::GenerateStochasticFilteredSamplesInplace(Span<int> cell_indices, Span<IncidentRadiance> samples) const
+{
+  tbb::enumerable_thread_specific<Sampler> tls_samplers;
+  tbb::parallel_for(tbb::blocked_range<long>(0, samples.size(), 1000), [&, this](tbb::blocked_range<long> r)
+  {
+    auto sampler = tls_samplers.local();
+    for (long i = r.begin(); i<r.end(); ++i)
+    {
+      const auto s = ComputeStochasticFilterPosition(samples[i], cell_data[cell_indices[i]], sampler);
+      int new_cell = recording_tree.Lookup(s.pos);
+      samples[i] = s;
+      cell_indices[i] = new_cell;
+    }
+  });
+}
+
+
+// Also frees the tls sample buffer
+// Updates the fit data in the CellData structs.
+void PathGuiding::FitTheSamples(Span<ThreadLocal*> thread_locals)
+{
+  ToyVector<IncidentRadiance> samples;
+  for (auto *tl : thread_locals)
+  {
+    samples.insert(samples.end(), tl->samples.begin(), tl->samples.end());
+    ToyVector<IncidentRadiance>{}.swap(tl->samples);
+  }
+
+  auto cell_indices = ComputeCellIndices(AsSpan(samples));
+
+  {
+    auto sorted_samples = SortSamplesIntoCells(AsSpan(cell_indices), AsSpan(samples));
+
+    tbb::parallel_for<int>(0, isize(cell_data), [&, this](int cell_idx) {
+      FitTheSamples(cell_data[cell_idx], AsSpan(sorted_samples[cell_idx]));
+    });
+  }
+
+  GenerateStochasticFilteredSamplesInplace(AsSpan(cell_indices), AsSpan(samples));
+
+  {
+    auto sorted_samples = SortSamplesIntoCells(AsSpan(cell_indices), AsSpan(samples));
+
+    tbb::parallel_for<int>(0, isize(cell_data), [&, this](int cell_idx) {
+      FitTheSamples(cell_data[cell_idx], AsSpan(sorted_samples[cell_idx]), /*is_original=*/false);
+    });
   }
 }
 
 
-void PathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRadiance> buffer)
+void PathGuiding::FitTheSamples(CellData &cell, Span<IncidentRadiance> buffer, bool is_original) const
 {
   using namespace vmf_fitting;
   // TODO: should be the max over all previous samples counts to prevent
   // overfitting in case the sample count decreases.
-  double prior_strength = std::max(1., 0.001*cell.max_num_samples);
+  double prior_strength = std::max(1., 0.01*cell.max_num_samples);
   incremental::Params<> params;
   params.prior_alpha = prior_strength;
   params.prior_nu = prior_strength;
   params.prior_tau = prior_strength;
-  params.maximization_step_every = std::max(1, static_cast<int>(prior_strength)*50); //param_em_every;
+  params.maximization_step_every = std::max(1, static_cast<int>(prior_strength)*10); //param_em_every;
   //params.prior_mode = &cell.current_estimate.radiance_distribution;
 
   // Below, I provide a fixed, more or less uniform prior. This seems to yield
@@ -238,10 +234,9 @@ void PathGuiding::LearnIncidentRadianceIn(CellData &cell, Span<IncidentRadiance>
     if (in.weight <= 0.)
       continue;
 
-    if (in.is_original)
+    if (is_original)
       cell.learned.leaf_stats += in.pos;
-    //else
-    //if (in.is_original)
+
     {
       float weight = in.weight;
       const auto xs = Span<const Eigen::Vector3f>(&in.reverse_incident_dir, 1);
@@ -268,14 +263,9 @@ void PathGuiding::BeginRound(Span<ThreadLocal*> thread_locals)
 
   for (auto* tl : thread_locals)
   {
-    tl->records_by_cells.resize(n);
-    for (auto &sample_buffer : tl->records_by_cells)
-    {
-      assert(sample_buffer.size() == 0);
-      sample_buffer.reserve(CELL_BUFFER_SIZE);
-    }
+    tl->samples.reserve(1024*1024);
   }
-  cell_data_temp.reset(new CellDataTemporary[n]);
+
 
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
   cell_data_debug.reset(new CellDebug[n]);
@@ -286,47 +276,38 @@ void PathGuiding::BeginRound(Span<ThreadLocal*> thread_locals)
     );
   }
 #endif
-
-  long mem_thread_local_buffers = thread_locals.size()*(sizeof(ThreadLocal)+n*(sizeof(RecordBuffer)+CELL_BUFFER_SIZE*sizeof(Record)));
-  long mem_cell_data_temp = n*sizeof(CellDataTemporary);
-  long mem_cell_data = n*sizeof(CellData);
-  std::cout << "--- expected mem use [MB] ----" << std::endl;
-  std::cout << "Thread local buffer " << mem_thread_local_buffers/(1024*1024) << std::endl;
-  std::cout << "Cell data temp " << mem_cell_data_temp/(1024*1024) << std::endl;
-  std::cout << "Cell data " << mem_cell_data/(1024*1024) << std::endl;
 }
 
 
 void PathGuiding::FinalizeRound(Span<ThreadLocal*> thread_locals)
 {
-  for (auto* tl : thread_locals)
-  {
-    int cell_idx = 0;
-    for (auto &sample_buffer : tl->records_by_cells)
-    {
-      Enqueue(cell_idx++, sample_buffer);
-    }
-  }
-  
   the_task_arena->execute([&]() { the_task_group.wait(); } );
 
-  // Release memory
+  long mem_cell_data = cell_data.size()*sizeof(CellData);
+  long mem_tls_buffers = 0;
   for (auto* tl : thread_locals)
-    decltype(tl->records_by_cells){}.swap(tl->records_by_cells);
+    mem_tls_buffers += tl->samples.size() + sizeof(decltype(*tl));
 
   if (round <= 1)
   {
-    the_task_arena->execute([this]() {
-      the_task_group.run_and_wait([this]() {
-        AdaptInitial();
+    the_task_arena->execute([&, this]() {
+      the_task_group.run_and_wait([&, this]() {
+        AdaptInitial(thread_locals);
+      });
+    });
+  }
+  else
+  {
+    the_task_arena->execute([&, this]() {
+      the_task_group.run_and_wait([&, this]() {
+        FitTheSamples(thread_locals);
       });
     });
   }
 
-  WriteDebugData();
-
-  cell_data_temp.reset();
-
+  // std::cout << "--- expected mem use [MB] ----" << std::endl;
+  // std::cout << "Thread local buffer " << mem_cell_data/(1024*1024) << std::endl;
+  // std::cout << "Cell data " << mem_cell_data/(1024*1024) << std::endl;
 }
 
 
@@ -377,7 +358,8 @@ void InitializePcaFrame(CellData::CurrentEstimate &ce, const CellData::Learned &
   // Note: Eigenvalues are the variances w.r.t. the eigenvector frame.
   //       Take sqrt to obtain stddev.
   //       Then  scale axes of the frame so that computation of points for the stochastic filtering only needs the matrix multiplication.
-  ce.points_cov_frame = eigensolver.eigenvectors() * eigensolver.eigenvalues().cwiseSqrt().asDiagonal();
+  const Eigen::Vector3d evs = eigensolver.eigenvalues().cwiseMax(Epsilon);
+  ce.points_cov_frame = eigensolver.eigenvectors() * evs.cwiseSqrt().asDiagonal();
   ce.points_mean = learned.leaf_stats.Mean();
   ce.points_stddev = learned.leaf_stats.Var().cwiseSqrt();
 
@@ -390,34 +372,32 @@ void InitializePcaFrame(CellData::CurrentEstimate &ce, const CellData::Learned &
 }
 
 
-
 void PathGuiding::PrepareAdaptedStructures()
 {
   if (round > 1)
+  {
+    WriteDebugData();
     AdaptIncremental();
+  }
 }
 
 
-void PathGuiding::AdaptInitial()
+void PathGuiding::AdaptInitial(Span<ThreadLocal*> thread_locals)
 {
   // There is only one cell, and all the samples are stored in its CellDataTemporary struct.
-  assert(cell_data_temp.get() && cell_data.size() == 1);
+  assert(cell_data.size() == 1);
 
-  ToyVector<Span<IncidentRadiance>> sample_chunks = std::move(cell_data_temp[0].data_chunks);
-  
   // For easier access. Also freeing the memory, which I have to eventually.
-  ToyVector<IncidentRadiance> samples; samples.reserve(sample_chunks.size() * CELL_BUFFER_SIZE);
-  for (auto &span : sample_chunks)
+  ToyVector<IncidentRadiance> samples; samples.reserve(1024*1024);
+  for (auto* tls : thread_locals)
   {
-    samples.insert(samples.end(), span.begin(), span.end());
-    FreeSpan(span);
+    samples.insert(samples.end(), tls->samples.begin(), tls->samples.end());
+    ToyVector<IncidentRadiance>{}.swap(tls->samples);
   }
 
   // Probably this is taking samples from media interaction, in a scene without media.
   if (samples.empty())
     return;
-
-  ToyVector<Span<IncidentRadiance>>{}.swap(sample_chunks);
 
   auto builder = kdtree::MakeBuilder<IncidentRadiance>(/*max_depth*/ MAX_DEPTH, /*min_num_points*/ param_num_initial_samples, [](const IncidentRadiance &s) { return s.pos; });
   recording_tree = builder.Build(AsSpan(samples));
@@ -438,7 +418,7 @@ void PathGuiding::AdaptInitial()
       vmf_fitting::InitializeForUnitSphere(cd.current_estimate.radiance_distribution);
       vmf_fitting::InitializeForUnitSphere(cd.learned.radiance_distribution);
 
-      LearnIncidentRadianceIn(cd, cell_samples);
+      FitTheSamples(cd, cell_samples);
 
       cd.current_estimate.radiance_distribution = cd.learned.radiance_distribution;
       cd.current_estimate.incident_flux_density = cd.learned.incident_flux_density_accum.Mean();

@@ -751,6 +751,7 @@ protected:
   inline int NumThreads() const {
     return the_task_arena.max_concurrency();
   }
+  void InnerRenderIteration();
 };
 
 
@@ -1067,19 +1068,50 @@ void PathTracingAlgo2::InitializeScene(Scene &scene)
 }
 
 
+void PathTracingAlgo2::InnerRenderIteration()
+{
+  auto radrec_local_surface = TransformVector(camerarender_workers, [](auto &w) { return w.GetGuidingLocalDataSurface();  });
+  auto radrec_local_volume = TransformVector(camerarender_workers, [](auto &w) { return w.GetGuidingLocalDataVolume();  });
+  radiance_recorder_surface->BeginRound(AsSpan(radrec_local_surface));
+  radiance_recorder_volume->BeginRound(AsSpan(radrec_local_volume));
+
+  the_task_arena.execute([this] {
+    parallel_for_interruptible(0, this->tileset.size(), 1, [this](int i)
+    {
+      const int worker_num = tbb::this_task_arena::current_thread_index();
+      camerarender_workers[worker_num].Render(this->tileset[i], 1);
+      ++this->samplesPerTile[i];
+    },
+      /*irq_handler=*/[this]() -> bool
+    {
+      if (this->stop_flag.load())
+        return false;
+      this->CallInterruptCb(false);
+      return true;
+    }, the_task_group);
+  });
+  
+  radiance_recorder_surface->FinalizeRound(AsSpan(radrec_local_surface));
+  radiance_recorder_volume->FinalizeRound(AsSpan(radrec_local_volume));
+}
+
+
 inline void PathTracingAlgo2::Run()
 {
   #ifdef WRITE_DEBUG_OUT
   scene.WriteObj(guiding::GetDebugFilePrefix() / boost::filesystem::path("scene.obj"));
   #endif
 
-  RenderRadianceEstimates(guiding::GetDebugFilePrefix() / fs::path{"initial_approx.png"});
-
-  auto radrec_local_surface = TransformVector(camerarender_workers, [](auto &w) { return w.GetGuidingLocalDataSurface();  });
-  auto radrec_local_volume = TransformVector(camerarender_workers, [](auto &w) { return w.GetGuidingLocalDataVolume();  });
+  if (!stop_flag.load())
+  {
+    pickers->ComputeDistribution();
+    InnerRenderIteration();
+    RenderRadianceEstimates(guiding::GetDebugFilePrefix() / fs::path{"initial_approx.png"});
+    CallInterruptCb(true);
+  }
 
   {
-    long num_samples = 1;
+    long num_samples = 2;
     while (!stop_flag.load() && num_samples <= render_params.guiding_max_spp)
     {
       std::cout << "Guiding sweep " << num_samples << " start" << std::endl;
@@ -1088,47 +1120,30 @@ inline void PathTracingAlgo2::Run()
       std::fill(framebuffer.begin(), framebuffer.end(), RGB::Zero());
       std::fill(debugbuffer.begin(), debugbuffer.end(), RGB::Zero());
       std::fill(samplesPerTile.begin(), samplesPerTile.end(), 0ul);
-
-      radiance_recorder_surface->BeginRound(AsSpan(radrec_local_surface));
-      radiance_recorder_volume->BeginRound(AsSpan(radrec_local_volume));
-
       pickers->ComputeDistribution();
 
-      the_task_arena.execute([this, num_samples] {
-        parallel_for_interruptible(0, this->tileset.size(), 1, [this, num_samples](int i)
-        {
-          const int worker_num = tbb::this_task_arena::current_thread_index();
-          camerarender_workers[worker_num].Render(this->tileset[i], num_samples);
-          this->samplesPerTile[i] = num_samples;
-        },
-          /*irq_handler=*/[this]() -> bool
-        {
-          if (this->stop_flag.load())
-            return false;
-          this->CallInterruptCb(false);
-          return true;
-        }, the_task_group);
-      });
-      
-      radiance_recorder_surface->FinalizeRound(AsSpan(radrec_local_surface));
-      radiance_recorder_surface->PrepareAdaptedStructures();
-      radiance_recorder_volume->FinalizeRound(AsSpan(radrec_local_volume));
-      radiance_recorder_volume->PrepareAdaptedStructures();
+      for (int inner_iter = 0; inner_iter < num_samples; ++inner_iter)
+      {
+        InnerRenderIteration();
+      }
 
       std::cout << "Guiding sweep " << num_samples << " finished" << std::endl;
       CallInterruptCb(true);
 
+      radiance_recorder_surface->PrepareAdaptedStructures();
+      radiance_recorder_volume->PrepareAdaptedStructures();
+
       RenderRadianceEstimates(guiding::GetDebugFilePrefix() / fs::path{strconcat("trainpass_approx",num_samples,".png")});
 
-      the_task_arena.execute([this,num_samples] 
-      {  
-        Image img;
-        ::GenerateImage(img, AsSpan(framebuffer), AsSpan(samplesPerTile), tileset, {render_params.width, render_params.height}, !render_params.linear_output);
-        img.write((guiding::GetDebugFilePrefix() / fs::path{strconcat("trainpass_backimg_",num_samples,".png")}).string());
+      //the_task_arena.execute([this,num_samples] 
+      // {  
+        // Image img;
+        // ::GenerateImage(img, AsSpan(framebuffer), AsSpan(samplesPerTile), tileset, {render_params.width, render_params.height}, !render_params.linear_output);
+        // img.write((guiding::GetDebugFilePrefix() / fs::path{strconcat("trainpass_backimg_",num_samples,".png")}).string());
         // img.clear();
         // ::GenerateImage(img, AsSpan(debugbuffer), AsSpan(samplesPerTile), tileset, {render_params.width, render_params.height}, !render_params.linear_output);
         // img.write((guiding::GetDebugFilePrefix() / fs::path{strconcat("trainpass_fwdimg_",num_samples,".png")}).string());
-      });
+      // });
 
       //num_samples = num_samples + std::max(1, int(num_samples*0.5));
       num_samples *= 2;
