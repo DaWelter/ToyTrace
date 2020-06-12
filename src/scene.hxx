@@ -36,7 +36,7 @@ struct RenderingParameters
   double initial_photon_radius = 0.01;
   double guiding_prior_strength = 50.;
   int guiding_em_every = 200;
-  int guiding_tree_subdivision_factor = 10;
+  int guiding_tree_subdivision_factor = 100;
   int guiding_max_spp = 512;
   bool linear_output = false;
 };
