@@ -340,12 +340,20 @@ inline typename OnlineVariance::ArrayAccumulator<T>::ArrayXd OnlineVariance::Arr
 namespace Accumulators
 {
 
-template<class T, class C>
+template<class T, class C = long>
 class OnlineAverage
 {
   T mean{};
   C counter{};
 public:
+  OnlineAverage(T initial_mean = T{}, C initial_count = C{})
+    : mean{initial_mean}, counter{initial_count}
+  {}
+
+  const C Count() const {
+    return counter;
+  }
+
   void operator+=(const T &x)
   {
     ++counter;

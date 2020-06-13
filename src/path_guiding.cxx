@@ -520,6 +520,7 @@ void PathGuiding::AdaptIncremental()
         // Copy over point & radiance statistics from old cell.
         dst.learned.radiance_distribution = src.learned.radiance_distribution;
         dst.learned.incident_flux_density_accum = src.learned.incident_flux_density_accum;
+        dst.learned.fitdata = src.learned.fitdata;
         
         if (src.learned.leaf_stats.Count() >= 10)
         {
@@ -650,7 +651,7 @@ void PathGuiding::WriteDebugData()
     jcell.AddMember("bbox_min", ToJSON(cd.current_estimate.cell_bbox.min, a), a);
     jcell.AddMember("bbox_max", ToJSON(cd.current_estimate.cell_bbox.max, a), a);
     jcell.AddMember("num_points", cd.learned.leaf_stats.Count(), a);
-    jcell.AddMember("average_weight", cd.learned.fitdata.avg_weights, a);
+    jcell.AddMember("average_weight", cd.learned.fitdata.avg_weights(), a);
     jcell.AddMember("incident_flux_learned", ToJSON(cd.learned.incident_flux_density_accum.Mean(), a), a);
     jcell.AddMember("incident_flux_sampled", ToJSON(cd.current_estimate.incident_flux_density, a), a);
     jcell.AddMember("mixture_learned", ToJSON(cd.learned.radiance_distribution, a), a);

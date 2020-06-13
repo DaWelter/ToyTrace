@@ -65,12 +65,18 @@ struct Data
   static constexpr int NC = VonMisesFischerMixture<N>::NUM_COMPONENTS;
   // Don't have to be initialize because if data_count==0 then 
   // those vars are assigned to anyway. (Otherwise they're added to.)
-  Eigen::Array<float, NC, 3> avg_positions;
-  Eigen::Array<float, NC, 1> avg_responsibilities;
-  Eigen::Array<float, NC, 1> avg_responsibilities_unweighted;
-  std::uint64_t data_count = 0;
-  std::uint64_t data_count_weights = 0;
-  float avg_weights = 0.f;
+  // Eigen::Array<float, NC, 3> avg_positions;
+  // Eigen::Array<float, NC, 1> avg_responsibilities;
+  // Eigen::Array<float, NC, 1> avg_responsibilities_unweighted;
+  // std::uint64_t data_count = 0;
+  // std::uint64_t data_count_weights = 0;
+  // float avg_weights = 0.f;
+  using ArrayNc3 = Eigen::Array<float, NC, 3>;
+  using ArrayNc1 = Eigen::Array<float, NC, 1>;
+  Accumulators::OnlineAverage<ArrayNc3> avg_positions{ArrayNc3{Eigen::zero}, 0l};
+  Accumulators::OnlineAverage<ArrayNc1> avg_responsibilities{ArrayNc1{Eigen::zero}, 0l};
+  Accumulators::OnlineAverage<ArrayNc1> avg_responsibilities_unweighted{ArrayNc1{Eigen::zero}, 0l};
+  Accumulators::OnlineAverage<float> avg_weights{};
 };
 
 template<int N = 8>

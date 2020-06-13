@@ -195,11 +195,14 @@ void Fit(VonMisesFischerMixture<N> &mixture, Data<N> &dta, const Params<N> &para
   for (int i=0; i<data.size(); ++i)
   {
     UpdateStatistics(mixture, dta, params, data[i], data_weights[i]);
-    if (dta.data_count % params.maximization_step_every == 0)
+    if (dta.avg_positions.Count() % params.maximization_step_every == 0)
     {
       MaximizationStep(mixture, dta, params);
 
-      //dta.data_count = 0;
+      // Clear the statistics. Only keep average weights since they don't depend on the mixture parameters.
+      auto backup = dta.avg_weights;
+      dta = Data<N>{};
+      dta.avg_weights = backup;
     }
   }
 }
@@ -211,6 +214,7 @@ void UpdateStatistics(VonMisesFischerMixture<N> & mixture, Data<N> &fitdata, con
   Eigen::Array<float, N, 1> responsibilities = mixture.weights * ComponentPdfs(mixture, x) + eps;
   responsibilities /= responsibilities.sum();
 
+#if 0
   if (fitdata.data_count_weights == 0)
     fitdata.avg_weights = weight;
   else
@@ -232,6 +236,12 @@ void UpdateStatistics(VonMisesFischerMixture<N> & mixture, Data<N> &fitdata, con
   }
   ++fitdata.data_count;
   ++fitdata.data_count_weights;
+#else
+  fitdata.avg_weights += weight;
+  fitdata.avg_responsibilities_unweighted += responsibilities;
+  fitdata.avg_responsibilities  += weight * responsibilities;
+  fitdata.avg_positions += weight*(responsibilities.matrix()*x.transpose()).array();
+#endif
 } 
 
 
@@ -239,18 +249,18 @@ template<int N>
 void MaximizationStep(VonMisesFischerMixture<N> & mixture, const Data<N> &dta, const Params<N> &params) noexcept
 {
 
-  std::uint64_t unique_data_count = dta.data_count;
+  const std::uint64_t unique_data_count = dta.avg_responsibilities.Count();
   for (int k = 0; k < VonMisesFischerMixture<N>::NUM_COMPONENTS; ++k)
   {
-    const float scaled_responsibilities = dta.avg_responsibilities[k] / (dta.avg_weights + eps);
+    const float scaled_responsibilities = dta.avg_responsibilities()[k] / (dta.avg_weights() + eps);
 
     // The eps is there in case both of the former terms evaluate to zero!
     mixture.weights[k] = (params.prior_nu-1)/unique_data_count*params.prior_mode->weights[k] + scaled_responsibilities + eps;
 
     { // Posterior of mean.
-      const float diminished_prior_factor = dta.avg_weights * params.prior_tau / unique_data_count;
-      mixture.means.row(k) = (diminished_prior_factor*params.prior_mode->means.row(k) + dta.avg_positions.row(k)) /
-        (diminished_prior_factor + dta.avg_responsibilities[k] + eps);
+      const float diminished_prior_factor = dta.avg_weights() * params.prior_tau / unique_data_count;
+      mixture.means.row(k) = (diminished_prior_factor*params.prior_mode->means.row(k) + dta.avg_positions().row(k)) /
+        (diminished_prior_factor + dta.avg_responsibilities()[k] + eps);
       float norm = mixture.means.row(k).matrix().norm();
       if (norm > eps)
         mixture.means.row(k) /= norm;
@@ -262,7 +272,7 @@ void MaximizationStep(VonMisesFischerMixture<N> & mixture, const Data<N> &dta, c
       #if 1
       // Note: Don't use avg_responsibilities_unweighted[k]*avg_weights here. It computes the average position wrong
       // in a way that mean_cosine is way overestimated.
-      const float mean_cosine = (1.f/(dta.avg_responsibilities[k] + eps)) * dta.avg_positions.row(k).matrix().norm();
+      const float mean_cosine = (1.f/(dta.avg_responsibilities()[k] + eps)) * dta.avg_positions().row(k).matrix().norm();
       const float conc_estimate = MeanCosineToConc(mean_cosine);
       const float diminished_alpha = params.prior_alpha/unique_data_count;
       const float post_conc = 
@@ -274,7 +284,7 @@ void MaximizationStep(VonMisesFischerMixture<N> & mixture, const Data<N> &dta, c
       // This does not do percievably better than the simpler code above!!
       // Here the prior is on the mean cosine, forcing me to go back and forth with the cosine-k-conversions.
       const float prior_cos = ConcToMeanCos(params.prior_mode->concentrations[k]);
-      const float mean_cosine = (1.f/(dta.avg_responsibilities[k] + eps)) * dta.avg_positions.row(k).matrix().norm();
+      const float mean_cosine = (1.f/(dta.avg_responsibilities()[k] + eps)) * dta.avg_positions().row(k).matrix().norm();
       const float diminished_alpha = params.prior_alpha/unique_data_count;
       const float mean_cosine_post = (diminished_alpha*prior_cos + mean_cosine) / (diminished_alpha + 1.f);
       mixture.concentrations[k] = MeanCosineToConc(mean_cosine_post);
