@@ -1940,19 +1940,40 @@ void CameraRenderWorker::RecordMeasurementToDebugBuffer(const Spectral3 measurem
 }
 
 
-void CameraRenderWorker::PropagateIlluminationToParents(PathNode &node)
+void CameraRenderWorker::PropagateIlluminationToParents(PathNode &emitting_node)
 {
-  assert (node.prev);
-  PathNode &prev = *node.prev;
+  static constexpr double THROUGHPUT_CLAMP = 10.;
 
-  const Spectral3 direct   = node.coeffs.segment_transmission_from_prev * node.coeffs.emission;
-  const Spectral3 indirect = node.coeffs.segment_transmission_from_prev * (node.coeffs.nee_radiance + node.coeffs.indirect_radiance_accumulator);
+  {
+    /* Notes:
+    - To deal with NEE, the illuminated surface is treated as if it was an emissive source.
+      Hence, the radiance reflected toward the previous node is stored in nee_radiance.
+    - Throughput is clamped as advised in the 2019 path guiding siggraph course. Well, part of it. But should be enough ...
+    - Illumination through multiple bounces is stored in indirect_radiance_accumulator. It is the radiance reflected
+      into the previous node (similar to nee_radiance).
+    */
+    const Spectral3 source = emitting_node.coeffs.emission_mis_factor*emitting_node.coeffs.emission + emitting_node.coeffs.nee_radiance;
+    Spectral3 throughput{ Eigen::ones };
+    auto* node = &emitting_node;
+    while (node->prev)
+    {
+      throughput *= node->coeffs.rr_weight * node->coeffs.scatter_from_prev * node->coeffs.segment_transmission_from_prev;
+      node->prev->coeffs.indirect_radiance_accumulator += throughput.cwiseMin(THROUGHPUT_CLAMP) * source;
+      node = node->prev;
+    }
+  }
 
-  assert (node.last_scatter_pdf_value);
+  assert (emitting_node.last_scatter_pdf_value && emitting_node.prev);
   if (master->record_samples_for_guiding)
-    AddToTrainingData(prev, direct+indirect, node.incident_ray.dir, *node.last_scatter_pdf_value);
+  {
+    const Spectral3 radiance = emitting_node.coeffs.segment_transmission_from_prev * (
+      emitting_node.coeffs.emission + 
+      emitting_node.coeffs.nee_radiance + 
+      emitting_node.coeffs.indirect_radiance_accumulator);
+    AddToTrainingData(*emitting_node.prev, radiance, emitting_node.incident_ray.dir, *emitting_node.last_scatter_pdf_value);
+  }
 
-  prev.coeffs.indirect_radiance_accumulator += node.coeffs.rr_weight * node.coeffs.scatter_from_prev * (node.coeffs.emission_mis_factor * direct + indirect);
+  
 }
 
 
