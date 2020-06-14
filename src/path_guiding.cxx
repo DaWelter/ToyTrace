@@ -239,11 +239,11 @@ void PathGuiding::FitTheSamples(CellData &cell, Span<IncidentRadiance> buffer, b
   {
     cell.learned.incident_flux_density_accum += in.weight;
 
-    if (in.weight <= 0.)
-      continue;
-
     if (is_original)
       cell.learned.leaf_stats += in.pos;
+
+    if (in.weight <= 0.)
+      continue;
 
     {
       float weight = in.weight;
