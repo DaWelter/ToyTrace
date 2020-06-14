@@ -187,24 +187,32 @@ void PathGuiding::FitTheSamples(Span<ThreadLocal*> thread_locals)
   }
 
   auto cell_indices = ComputeCellIndices(AsSpan(samples));
+  
+  const auto noriginal = samples.size();
+  samples.reserve(noriginal*2);
+  cell_indices.reserve(noriginal*2);
 
+  // This is only safe because the memory was reserved in advance!
+  std::copy(samples.begin(), samples.begin()+noriginal, std::back_inserter(samples));
+  std::copy(cell_indices.begin(), cell_indices.begin()+noriginal, std::back_inserter(cell_indices));
+  
+  GenerateStochasticFilteredSamplesInplace(
+    Subspan(AsSpan(cell_indices), noriginal, noriginal), 
+    Subspan(AsSpan(samples), noriginal, noriginal));
+
+  auto sorted_samples = SortSamplesIntoCells(AsSpan(cell_indices), AsSpan(samples));
+
+  tbb::enumerable_thread_specific<Sampler> samplers;
+
+  tbb::parallel_for<int>(0, isize(cell_data), [&, this](int cell_idx) 
   {
-    auto sorted_samples = SortSamplesIntoCells(AsSpan(cell_indices), AsSpan(samples));
-
-    tbb::parallel_for<int>(0, isize(cell_data), [&, this](int cell_idx) {
-      FitTheSamples(cell_data[cell_idx], AsSpan(sorted_samples[cell_idx]));
-    });
-  }
-
-  GenerateStochasticFilteredSamplesInplace(AsSpan(cell_indices), AsSpan(samples));
-
-  {
-    auto sorted_samples = SortSamplesIntoCells(AsSpan(cell_indices), AsSpan(samples));
-
-    tbb::parallel_for<int>(0, isize(cell_data), [&, this](int cell_idx) {
-      FitTheSamples(cell_data[cell_idx], AsSpan(sorted_samples[cell_idx]), /*is_original=*/false);
-    });
-  }
+    auto samples = AsSpan(sorted_samples[cell_idx]);
+    if (samples.size())
+    {    
+      RandomShuffle(samples.begin(), samples.end(), samplers.local());
+      FitTheSamples(cell_data[cell_idx], samples);
+    }
+  });
 }
 
 

@@ -62,6 +62,7 @@ public:
 template<class Iter>
 void RandomShuffle(Iter begin, Iter end, Sampler &sampler)
 {
+  assert(begin != end);
 	sampler.GetGenerator().shuffle(begin, end);
 }
 
