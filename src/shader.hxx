@@ -31,6 +31,7 @@ public:
   virtual Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
   virtual double Pdf(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3 &out_direction, const PathContext &context) const;
   
+  virtual double GuidingProbMixShaderAmount(const SurfaceInteraction &surface_hit) const;
   virtual vmf_fitting::VonMisesFischerMixture<2> ComputeLobes(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const PathContext &context) const;
   virtual void IntializeLobes();
 

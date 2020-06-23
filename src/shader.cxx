@@ -93,6 +93,10 @@ void Shader::IntializeLobes()
 {
 }
 
+double Shader::GuidingProbMixShaderAmount(const SurfaceInteraction &surface_hit) const
+{
+  return 0.5;
+}
 
 
 
@@ -526,7 +530,7 @@ struct GlossyTransmissiveDielectricWrapper
 };
 
 
-#define PRODUCT_DISTRIBUTION_SAMPLING
+//#define PRODUCT_DISTRIBUTION_SAMPLING
 
 class GlossyTransmissiveDielectricShader : public Shader
 {
@@ -539,6 +543,7 @@ public:
   ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
   Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
 
+  double GuidingProbMixShaderAmount(const SurfaceInteraction &surface_hit) const override;
 #ifdef PRODUCT_DISTRIBUTION_SAMPLING
 private:
   SimpleLookupTable<materials::LobeContainer,2> lobes_lookup_table;
@@ -759,6 +764,11 @@ vmf_fitting::VonMisesFischerMixture<2> GlossyTransmissiveDielectricShader::Compu
 }
 #endif
 
+double GlossyTransmissiveDielectricShader::GuidingProbMixShaderAmount(const SurfaceInteraction &surface_hit) const
+{
+  const double alpha = alpha_min + MaybeMultiplyTextureLookup(alpha_max-alpha_min, glossy_exponent_texture.get(), surface_hit);
+  return alpha > 0.05 ? 0.1 : 0.9;
+}
 
 
 

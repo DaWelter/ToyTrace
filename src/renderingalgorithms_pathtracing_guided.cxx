@@ -1519,7 +1519,7 @@ std::pair<int, double> CameraRenderWorker::ComputeNumberOfDirectionSamples(const
     return { 0, 1. };
   if (!CanUseIlluminationApproximationInRRAndSplit(ps))
     return { 1, 1. };
-#if 1
+#if 0
   // How this works:
   //  * Grab L distribution from cache
   //  * Convolve with phase function to get Li (assume uniform phase function for now. TODO: BSDF and proper PF support)
@@ -1721,7 +1721,7 @@ std::pair<Spectral3, double> CameraRenderWorker::EvaluateScatterKernel(const Dou
       outgoing_dir,
       context,
       &bsdf_pdf,
-      PROB_BSDF
+      shd.GuidingProbMixShaderAmount(interaction)
     );
     scatter_kernel *= DFactorPBRT(interaction, outgoing_dir);
     return std::make_pair(scatter_kernel, bsdf_pdf);
@@ -1775,7 +1775,7 @@ ScatterSample CameraRenderWorker::SampleScatterKernel(
       ScatterFunctionSurface{shd, interaction, reverse_incident_dir},
       MixtureDistributionWrapper<8>(mixture),
       reverse_incident_dir, sampler, context,
-      PROB_BSDF);
+      shd.GuidingProbMixShaderAmount(interaction));
     s.value *= DFactorPBRT(interaction, s.coordinates) / (double)s.pdf_or_pmf;
     return s;
   }
