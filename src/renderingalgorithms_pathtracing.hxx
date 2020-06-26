@@ -154,7 +154,7 @@ struct Connection
 };
 
 
-using DebugBuffers = std::unordered_map<std::pair<int,int>, Spectral3ImageBuffer, pair_hash<int,int>>;
+using DebugBuffers = std::unordered_map<std::pair<int,int>, Spectral3ImageBuffer, util::pair_hash<int,int>>;
 
 
 class BackupAndReplace

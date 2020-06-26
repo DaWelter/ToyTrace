@@ -3,6 +3,9 @@
 #include "util.hxx"
 #include "vec3f.hxx"
 
+namespace util
+{
+
 // Inspired by Microsofts GSL. I don't use that one because I read that
 // it has runtime checks that are hard to disable, if at all. My version
 // is as lightweight as possible and very very simple.
@@ -107,3 +110,9 @@ inline Span<T> AsSpan(std::array<T, N> &a)
 {
   return Span<T>(a.data(), a.size());
 }
+
+}
+
+using util::Span;
+using util::AsSpan;
+using util::Subspan;

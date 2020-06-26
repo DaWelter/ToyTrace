@@ -26,6 +26,9 @@
 #define likely(x) x
 #endif
 
+namespace util
+{
+
 template<class T>
 inline T Sqr(const T &x)
 {
@@ -254,7 +257,7 @@ ScopeExit<F> MakeScopeExit(F f) {
 };
 
 #define SCOPE_EXIT(code) \
-    auto scope_exit_ ## __LINE__ = MakeScopeExit([=](){ code })
+    auto scope_exit_ ## __LINE__ = util::MakeScopeExit([=](){ code })
 
     
 inline int RowMajorOffset(int x, int y, int size_x, int size_y)
@@ -322,6 +325,43 @@ inline auto TransformVector(Container &a, Func &&f)
   return result;
 }
 
+// Adapted from https://stackoverflow.com/questions/41660062/how-to-construct-an-stdarray-with-index-sequence
+// Use variadic templates and a pack of integers to build the output array without 
+// invoking default c'tors.
+namespace detail {
+  template<typename T, typename U, typename F, std::size_t... Is>
+  constexpr auto transform_array(F& f, const U* input, std::index_sequence<Is...>)
+     -> std::array<T, sizeof...(Is)> 
+  {
+    return {{f(input[std::integral_constant<std::size_t, Is>{}])...}};
+  }
+}
+
+
+template<class Func, class T, std::size_t n>
+inline constexpr auto TransformArray(std::array<T,n> &a, Func &&f)
+{
+  using TOut = std::invoke_result_t<Func, T>;
+  return detail::transform_array<TOut>(f, a.data(), std::make_index_sequence<n>{});
+}
+
+
+// From https://stackoverflow.com/questions/41660062/how-to-construct-an-stdarray-with-index-sequence
+// Use variadic templates and a pack of integers to build the output array without 
+// invoking default c'tors. 
+namespace detail {
+  template<typename T, typename F, std::size_t... Is>
+  constexpr auto generate_array(F& f, std::index_sequence<Is...>)
+   -> std::array<T, sizeof...(Is)> {
+    return {{f(std::integral_constant<std::size_t, Is>{})...}};
+  }
+}
+
+template<std::size_t N, typename F>
+inline constexpr auto GenerateArray(F &&f) {
+  using TOut = std::invoke_result_t<F, std::size_t>;
+  return detail::generate_array<TOut>(f, std::make_index_sequence<N>{});
+}
 
 
 /*
@@ -354,3 +394,17 @@ struct Overload : Fs... {
 
 template <class ...Ts>
 Overload(Ts&&...) -> Overload<std::remove_reference_t<Ts>...>;
+
+} // namespace util
+
+using util::Overload;
+using util::Sqr;
+using util::Cubed;
+using util::Heaviside;
+using util::Rcp;
+using util::Lerp;
+using util::Sign;
+using util::ToyVector;
+using util::isize;
+using util::AlignedAllocator;
+using util::ASSERT_NOT_NULL;

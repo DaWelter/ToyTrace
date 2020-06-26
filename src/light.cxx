@@ -100,7 +100,7 @@ EnvMapLight::EnvMapLight(const Texture* _texture, const Double3 &_up_dir)
       double weight = std::sin(angles[1]); // Because differential solid angle is dS = sin(theta)*dtheta*dphi
       // We neglect the integration over pixels because we have piecewise constant uniform grid, so 
       // the delta_theta*delta_phi factors are the same for every pixel.
-      cmf[RowMajorOffset(x, y, w, h)] = weight*(double)col.mean();
+      cmf[util::RowMajorOffset(x, y, w, h)] = weight*(double)col.mean();
     }
   }
   TowerSamplingComputeNormalizedCumSum(AsSpan(cmf));
@@ -122,7 +122,7 @@ DirectionalSample EnvMapLight::TakeDirectionSample(Sampler &sampler, const PathC
 #if ENV_MAP_IMPORTANCE_SAMPLING // No importance sampling
     auto pixel_index = TowerSamplingBisection(AsSpan(cmf), sampler.Uniform01());
     assert(pixel_index <= texture->Width()*texture->Height());
-    int x, y; std::tie(x,y) = RowMajorPixel((int)pixel_index, texture->Width(), texture->Height());
+    int x, y; std::tie(x,y) = util::RowMajorPixel((int)pixel_index, texture->Width(), texture->Height());
     auto uv_bounds = PixelToUvBounds(*texture,{x, y});
     Float2 angles_lower = Projections::UvToSpherical(uv_bounds.first);
     Float2 angles_upper = Projections::UvToSpherical(uv_bounds.second);
@@ -159,7 +159,7 @@ double EnvMapLight::EvaluatePdf(const Double3 &dir_out, const PathContext &conte
 {
 #if ENV_MAP_IMPORTANCE_SAMPLING
   auto pix = MapToImage(dir_out);
-  int pixel_index = RowMajorOffset(pix.first, pix.second, texture->Width(), texture->Height());
+  int pixel_index = util::RowMajorOffset(pix.first, pix.second, texture->Width(), texture->Height());
   double pdf = TowerSamplingProbabilityFromCmf(AsSpan(cmf), pixel_index);
   auto uv_bounds = PixelToUvBounds(*texture, pix);
   Float2 angles_lower = Projections::UvToSpherical(uv_bounds.first);

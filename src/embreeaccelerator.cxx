@@ -326,10 +326,10 @@ void EmbreeAccelerator::SphereIntersectFunc(const RTCIntersectFunctionNArguments
   const float A = 1.f; //Dot(ray_dir,ray_dir);
   const float B = 2.0f*Dot(v,ray_dir);
   const float C = Dot(v,v) - Sqr(sphere_r);
-  const float Berr = DotAbs(v, ray_dir)*Gamma<float>(3);
-  const float Cerr = (2.f*Dot(v,v) + Sqr(sphere_r))*Gamma<float>(3);
+  const float Berr = DotAbs(v, ray_dir)*util::Gamma<float>(3);
+  const float Cerr = (2.f*Dot(v,v) + Sqr(sphere_r))*util::Gamma<float>(3);
   float t0, t1, err0, err1;
-  const bool has_solution = Quadratic(A, B, C, 0.f, Berr, Cerr, t0, t1, err0, err1);
+  const bool has_solution = util::Quadratic(A, B, C, 0.f, Berr, Cerr, t0, t1, err0, err1);
 //   float t0, t1;
 //   float err0 = 0.f, err1 = 0.f;
 //   const bool has_solution = Quadratic(A, B, C, t0, t1);
@@ -446,10 +446,10 @@ void EmbreeAccelerator::SphereOccludedFunc(const RTCOccludedFunctionNArguments *
   const float A = 1.f; //Dot(ray_dir,ray_dir);
   const float B = 2.0f*Dot(v, ray_dir);
   const float C = Dot(v, v) - Sqr(sphere_r);
-  const float Berr = DotAbs(v, ray_dir)*Gamma<float>(3);
-  const float Cerr = (2.f*Dot(v, v) + Sqr(sphere_r))*Gamma<float>(3);
+  const float Berr = DotAbs(v, ray_dir)*util::Gamma<float>(3);
+  const float Cerr = (2.f*Dot(v, v) + Sqr(sphere_r))*util::Gamma<float>(3);
   float t0, t1, err0, err1;
-  const bool has_solution = Quadratic(A, B, C, 0.f, Berr, Cerr, t0, t1, err0, err1);
+  const bool has_solution = util::Quadratic(A, B, C, 0.f, Berr, Cerr, t0, t1, err0, err1);
   //   float t0, t1;
   //   float err0 = 0.f, err1 = 0.f;
   //   const bool has_solution = Quadratic(A, B, C, t0, t1);

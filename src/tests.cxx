@@ -93,6 +93,7 @@ TEST(TestMath, OrthogonalSystemZAligned)
 
 TEST(TestMath, Quadratic)
 {
+  using util::Quadratic;
   float a = 1;
   float b = 100;
   float c = 1;
@@ -966,8 +967,8 @@ TEST(Projections, KartesianToSpherical1)
 TEST(GridIndices, RowMajor2d)
 {
   int x = 3, y = 4, w = 5, h = 9;
-  int offset = RowMajorOffset(x, y, w, h);
-  std::tie(x, y) = RowMajorPixel(offset, w, h);
+  int offset = util::RowMajorOffset(x, y, w, h);
+  std::tie(x, y) = util::RowMajorPixel(offset, w, h);
   EXPECT_EQ(x, 3);
   EXPECT_EQ(y, 4);
 }
@@ -978,11 +979,29 @@ TEST(GridIndices, RowMajor2d)
 
 TEST(Utils,StartsEndsWith)
 {
-    EXPECT_TRUE(startswith("foobar","foo"));
-    EXPECT_FALSE(startswith("foobar","baz"));
-    EXPECT_TRUE(endswith("foobar","bar"));
-    EXPECT_FALSE(endswith("foobar","foo"));
+    EXPECT_TRUE(util::startswith("foobar","foo"));
+    EXPECT_FALSE(util::startswith("foobar","baz"));
+    EXPECT_TRUE(util::endswith("foobar","bar"));
+    EXPECT_FALSE(util::endswith("foobar","foo"));
 }
+
+TEST(Utils,TransformArray)
+{
+  std::array<int,2> xs = { 1, 5 };
+  std::array<std::tuple<int>,2> y = util::TransformArray(xs, [](int x) { return std::make_tuple(x*2); });
+  EXPECT_EQ(std::get<0>(y[0]), 2);
+  EXPECT_EQ(std::get<0>(y[1]), 2*5);
+}
+
+TEST(Utils,GenerateArray)
+{
+  std::array<std::tuple<int>,2> y = util::GenerateArray<2>([](int i) { return std::make_tuple(42+i*2); });
+  EXPECT_EQ(std::get<0>(y[0]), 42);
+  EXPECT_EQ(std::get<0>(y[1]), 44);
+}
+
+
+
 
 ///////////////////////////////////////////////
 /// HashGrid

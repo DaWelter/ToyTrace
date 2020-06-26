@@ -295,14 +295,14 @@ void FillPosBoundsTriangle(SurfaceInteraction &interaction, const Float3 &p0, co
   interaction.pos_bounds =
     ((p0*b[0]).cwiseAbs() +
      (p1*b[1]).cwiseAbs() +
-     (p2*b[2]).cwiseAbs())*Gamma<float>(7);
+     (p2*b[2]).cwiseAbs())*util::Gamma<float>(7);
 }
 
 
 void FillPosBoundsSphere(SurfaceInteraction &interaction)
 {
   // PBRT. pg.225 Chpt. 3
-  interaction.pos_bounds = interaction.pos.cast<float>().cwiseAbs()*Gamma<float>(5); 
+  interaction.pos_bounds = interaction.pos.cast<float>().cwiseAbs()*util::Gamma<float>(5); 
 }
 
 
@@ -317,7 +317,7 @@ std::tuple<bool, double, double> ClipRayToSphereInterior(const Double3 &ray_org,
   //const float Berr = DotAbs(v, ray_dir)*Gamma<float>(3);
   //const float Cerr = (2.f*Dot(v,v) + Sqr(sphere_r))*Gamma<float>(3);
   double t0, t1; //, err0, err1;
-  const bool has_solution = Quadratic(A, B, C, t0, t1);
+  const bool has_solution = util::Quadratic(A, B, C, t0, t1);
   if (!has_solution || tfar <= t0 || tnear >= t1)
   {
     return std::make_tuple(false, tnear, tfar);

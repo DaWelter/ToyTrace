@@ -1070,8 +1070,8 @@ void PathTracingAlgo2::InitializeScene(Scene &scene)
 
 void PathTracingAlgo2::InnerRenderIteration()
 {
-  auto radrec_local_surface = TransformVector(camerarender_workers, [](auto &w) { return w.GetGuidingLocalDataSurface();  });
-  auto radrec_local_volume = TransformVector(camerarender_workers, [](auto &w) { return w.GetGuidingLocalDataVolume();  });
+  auto radrec_local_surface = util::TransformVector(camerarender_workers, [](auto &w) { return w.GetGuidingLocalDataSurface();  });
+  auto radrec_local_volume = util::TransformVector(camerarender_workers, [](auto &w) { return w.GetGuidingLocalDataVolume();  });
   radiance_recorder_surface->BeginRound(AsSpan(radrec_local_surface));
   radiance_recorder_volume->BeginRound(AsSpan(radrec_local_volume));
 

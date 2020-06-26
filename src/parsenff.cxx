@@ -32,6 +32,8 @@
 
 using namespace RadianceOrImportance;
 namespace fs = boost::filesystem;
+using util::startswith;
+using util::endswith;
 
 
 inline Double3 TransformNormal(const Eigen::Transform<double,3,Eigen::Affine> &trafo, const Double3 &v)
