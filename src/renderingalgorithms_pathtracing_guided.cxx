@@ -1133,7 +1133,7 @@ inline void PathTracingAlgo2::Run()
       radiance_recorder_surface->PrepareAdaptedStructures();
       radiance_recorder_volume->PrepareAdaptedStructures();
 
-      RenderRadianceEstimates(guiding::GetDebugFilePrefix() / fs::path{strconcat("trainpass_approx",num_samples,".png")});
+      RenderRadianceEstimates(guiding::GetDebugFilePrefix() / fs::path{fmt::format("trainpass_approx_{}.png",num_samples)});
 
       //the_task_arena.execute([this,num_samples] 
       // {  
@@ -1190,7 +1190,7 @@ inline void PathTracingAlgo2::Run()
     {  
       Image img;
       ::GenerateImage(img, AsSpan(framebuffer), AsSpan(samplesPerTile), tileset, {render_params.width, render_params.height}, !render_params.linear_output);
-      img.write((guiding::GetDebugFilePrefix() / fs::path{strconcat("mainpass_backimg_",num_samples,".png")}).string());
+      img.write((guiding::GetDebugFilePrefix() / fs::path{fmt::format("mainpass_backimg_{}.png",num_samples)}).string());
       // img.clear();
       // ::GenerateImage(img, AsSpan(debugbuffer), AsSpan(samplesPerTile), tileset, {render_params.width, render_params.height}, !render_params.linear_output);
       // img.write((guiding::GetDebugFilePrefix() / fs::path{strconcat("mainpass_fwdimg_",num_samples,".png")}).string());

@@ -770,25 +770,6 @@ TEST(Boost, VariantPolymorphic)
   ASSERT_ANY_THROW(boost::polymorphic_get<JustDataDerived>(data_storage).b); // Boom. Query inactive type.
 }
 
-//////////////////////////////////////////////
-// Formating 
-//////////////////////////////////////////////
-
-
-TEST(StrFormat, Test)
-{
-  EXPECT_EQ(strformat("a%sb%sc", 1, 2), "a1b2c");
-  EXPECT_EQ(strformat("%%%s", 1), "%1");
-  EXPECT_EQ(strformat("%s%%", 1), "1%");
-  EXPECT_EQ(strformat("%%%%"), "%%");
-  EXPECT_EQ(strformat("nothing"), "nothing");
-  EXPECT_EQ(strformat("%sbar%s", "foo", "baz"), "foobarbaz");
-  EXPECT_ANY_THROW(strformat("wrong%"));
-  EXPECT_ANY_THROW(strformat("wrong%", 1));
-  EXPECT_ANY_THROW(strformat("wrong", 1));
-  EXPECT_ANY_THROW(strformat("wro%ng", 1));
-  EXPECT_ANY_THROW(strformat("wro%ng"));
-}
 
 //////////////////////////////////////////////
 // Span test
@@ -833,7 +814,7 @@ TEST(Atomic, Add)
     while (!trigger.load()) {} // busy wait
     for (int i = 0; i < N; ++i)
       //val += 1.0f;
-      AtomicAdd(val, 1.0f);
+      util::AtomicAdd(val, 1.0f);
   };
   std::thread th1{ fun };
   std::thread th2{ fun };

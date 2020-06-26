@@ -60,9 +60,9 @@ void Lightpickers::LightSelectionProbabilityMap::Print(std::ostream & os) const
 {
   os << "Light selection probabilities: \n";
   auto PrintType = [this, &os](int t, const char* name) {
-    os << strformat("-- %s: %s --\n", name, light_type_selection_probs[t]);
+    os << fmt::format("-- {}: {} --\n", name, light_type_selection_probs[t]);
     for (int i = 0; i<cummulative_probs[t].size(); ++i)
-      os << strformat("p[%s]=%s\n", i, TowerSamplingProbabilityFromCmf(AsSpan(cummulative_probs[t]), i));
+      os << fmt::format("p[{}]={}\n", i, TowerSamplingProbabilityFromCmf(AsSpan(cummulative_probs[t]), i));
   };
   PrintType(IDX_PROB_POINT, "IDX_PROB_POINT");
   PrintType(IDX_PROB_AREA, "IDX_PROB_AREA");

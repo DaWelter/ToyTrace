@@ -266,7 +266,7 @@ void NFFParser::Parse(Scope &scope)
       if (n == EOF) n = 0; // Number of arguments is actually zero.
       else if (n == 0) n = -1; // Failure.
       if (n !=0 && n != 3 && n != 6 && n != 9)
-        throw std::runtime_error(strconcat("error in ", filename, " : ", line));
+        throw std::runtime_error(fmt::format("error in {}:{}", filename.string(), line));
       decltype(scope.currentTransform) trafo;
       if (n == 0)
       {
@@ -451,7 +451,7 @@ void NFFParser::Parse(Scope &scope)
       if (startswith(peek_line, identifier))
       {
         NextLine();
-        std::string format = strconcat(identifier, " %s\n");
+        std::string format = fmt::format("{} %s\n", identifier);
         char buffer [LINESIZE];
         int num = std::sscanf(line.c_str(), format.c_str(), buffer);
         if (num == 1)
@@ -913,7 +913,7 @@ void NFFParser::Parse(Scope &scope)
       std::ifstream is(fullpath.string());
       if (!is.good())
       {
-        throw std::runtime_error(strconcat("Could not open input file", fullpath));
+        throw std::runtime_error(fmt::format("Could not open input file {}", fullpath.string()));
       }
       // Using this scope.
       NFFParser(scene, render_params, is, fullpath).Parse(scope);
@@ -1095,7 +1095,7 @@ void NFFParser::ParseYamlNode(const std::string &key, const YAML::Node &node, Sc
       InsertAndActivate(name.c_str(), scope, std::move(shd));
     }
     else
-      throw MakeException(strconcat("Unkown shader class in yaml: ", class_));
+      throw MakeException(fmt::format("Unkown shader class in yaml: {}", class_));
 
     if (scope.shaders() && node["prefer_path_tracing"])
       scope.shaders()->prefer_path_tracing_over_photonmap = node["prefer_path_tracing"].as<bool>();
@@ -1325,7 +1325,7 @@ void Scene::ParseNFF(const fs::path &filename, RenderingParameters *render_param
   std::ifstream is(filename.string());
   if (!is.good())
   {
-    throw std::runtime_error(strconcat("Could not open input file", filename));
+    throw std::runtime_error(fmt::format("Could not open input file {}", filename.string()));
   }
   NFFParser parser(this, render_params, is, filename);
   auto scope = parser.CreateScope();

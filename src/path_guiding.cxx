@@ -280,7 +280,7 @@ void PathGuiding::BeginRound(Span<ThreadLocal*> thread_locals)
   for (std::ptrdiff_t i = 0; i < n; ++i)
   {
     cell_data_debug[i].Open(
-      strconcat(DEBUG_FILE_PREFIX, name, "_samples_round_", std::to_string(round), "_cell_", std::to_string(i), ".csv")
+      fmt::format("{}{}_samples_round_{}_cell_{}.csv", DEBUG_FILE_PREFIX, name, std::to_string(round), std::to_string(i))
     );
   }
 #endif
@@ -467,11 +467,9 @@ void PathGuiding::AdaptIncremental()
     : previous_max_samples_per_cell;
 
 
-  std::cout << strconcat(
-    "round ", round,
-    ": num_samples=", num_fit_samples,
-    ", current num_cells=", recording_tree.NumLeafs(),
-    ", target samples per cell=", max_samples_per_cell) << std::endl;
+  fmt::print(
+    "round {}: num_samples={},\n current num_cells={},\n target samples per cell={}\n",
+     round, num_fit_samples, recording_tree.NumLeafs(), max_samples_per_cell);
 
   { // Start tree adaptation
     auto DetermineSplit = [this, max_samples_per_cell](int cell_idx) -> std::pair<int, double>
@@ -575,13 +573,19 @@ void PathGuiding::AdaptIncremental()
     previous_max_samples_per_cell = max_samples_per_cell;
     previous_total_samples = num_fit_samples;
 
-    std::cout << strconcat(
-      "num_cell_over_2x_limit = ", num_cell_over_2x_limit, "\n",
-      "num_cell_over_1_5x_limit = ", num_cell_over_1_5x_limit, "\n",
-      "num_cell_over1x_limit = ", num_cell_over1x_limit, "\n",
-      "num_cell_else = ", num_cell_else, "\n",
-      "num_cell_regressed = ", num_cell_sample_count_regressed, "\n",
-      "kl_divergence = ", kl_divergence) << std::endl;
+    fmt::print(
+      "num_cell_over_2x_limit = {}\n"
+      "num_cell_over_1_5x_limit = {}\n"
+      "num_cell_over1x_limit = {}\n"
+      "num_cell_else = {}\n"
+      "num_cell_regressed = {}\n"
+      "kl_divergence = ", 
+      num_cell_over_2x_limit, 
+      num_cell_over_1_5x_limit, 
+      num_cell_over1x_limit, 
+      num_cell_else, 
+      num_cell_sample_count_regressed, 
+      kl_divergence);
     ++i;
   } // End tree adaption
 
@@ -622,7 +626,7 @@ void CellDebug::Close()
 void PathGuiding::WriteDebugData()
 {
 #if (defined WRITE_DEBUG_OUT & defined HAVE_JSON & !defined NDEBUG)
-  const auto filename = strconcat(DEBUG_FILE_PREFIX, name, "_radiance_records_", round, ".json");
+  const auto filename = fmt::format("{}{}_radiance_records_{}.json",DEBUG_FILE_PREFIX, name, round);
   std::cout << "Writing " << filename << std::endl;
 
   using namespace rapidjson_util;

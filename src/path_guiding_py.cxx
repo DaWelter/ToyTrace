@@ -112,7 +112,7 @@ auto getConcentrations(VonMisesFischerMixture<N> &self)
 template<int N>
 void Register(py::module &m)
 {
-    py::class_<VonMisesFischerMixture<N>>(m, strconcat("VMFMixture",N).c_str())
+    py::class_<VonMisesFischerMixture<N>>(m, fmt::format("VMFMixture{}",N).c_str())
         .def(py::init<>([]() -> VonMisesFischerMixture<N> { 
             VonMisesFischerMixture<N> ret; 
             InitializeForUnitSphere(ret); 
@@ -169,7 +169,7 @@ public:
 
     static void Register(py::module &m)
     {
-        py::class_<PyMoVmfFitIncremental<N>>(m, strconcat("VMFFitIncremental", N).c_str())
+        py::class_<PyMoVmfFitIncremental<N>>(m, fmt::format("VMFFitIncremental{}", N).c_str())
         .def(py::init<py::kwargs>())
         .def("fit", &PyMoVmfFitIncremental::Fit);
     }

@@ -33,10 +33,7 @@ add_compile_options ("$<$<CONFIG:DEBUG>:-DEIGEN_INITIALIZE_MATRICES_BY_NAN>")
 # Eliminate link error caused by boost/pool/simple_segregated_storage.hpp
 # https://stackoverflow.com/questions/9723793/undefined-reference-to-boostsystemsystem-category-when-compiling
 add_definitions("-DBOOST_SYSTEM_NO_DEPRECATED")
-
-# Because bug. Need to fix ...
-# add_definitions("-DEIGEN_DONT_VECTORIZE")
-
+add_definitions("-DFMT_HEADER_ONLY") # Header only mode for fmt lib
 
 #################################################
 ### Dependencies
@@ -165,6 +162,7 @@ target_include_directories(commonstuff PUBLIC
     ${TBB_INCLUDE_DIRS} 
     "external/cubature"
     "external/variant/include"
+    "external/fmt/include"
     "external")
 
 

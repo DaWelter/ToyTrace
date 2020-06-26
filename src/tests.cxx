@@ -621,7 +621,7 @@ TEST(Embree, AllIntersections)
   auto intersections = world.IntersectionsInOrder(ray, 0, 3);
   for (auto is : intersections)
   {
-    std::cout << strformat("d=%s, geo=%s, prim=%s", is.t, is.geom, is.prim) << std::endl;
+    fmt::print("d={}, geo={}, prim={}", is.t, is.geom, is.prim);
   }
 }
 
@@ -752,7 +752,6 @@ protected:
     {
       RGB tex_col = tex.GetPixel(x, y);
       RGB expected_col = expected[y*tex.Width()+x];
-      std::cerr << strformat("<%s, %s, %s>", tex_col[0], tex_col[1], tex_col[2])  << ", ";
       EXPECT_TRUE(((tex_col-expected_col).abs() < 1.e-3_rgb).all());
     }
     std::cerr << "\n";

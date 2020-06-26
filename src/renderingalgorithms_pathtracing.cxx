@@ -25,7 +25,7 @@ void BdptAlgo::PassCompleted()
     buffer.AddSampleCount(GetSamplesPerPixel());
     Image bm(buffer.xres, buffer.yres);
     buffer.ToImage(bm, 0, buffer.yres, !render_params.linear_output);
-    std::string filename = strformat("bdpt-e%s-l%s", eye_idx + 1, light_idx + 1) + ".jpg";
+    std::string filename = fmt::format("bdpt-e{}-l{}.jpg", eye_idx + 1, light_idx + 1);
     auto filepath = fs::temp_directory_path() / fs::unique_path(filename);
     bm.write(filepath.string());
   }
@@ -38,7 +38,7 @@ void BdptAlgo::PassCompleted()
     buffer.AddSampleCount(GetSamplesPerPixel());
     Image bm(buffer.xres, buffer.yres);
     buffer.ToImage(bm, 0, buffer.yres, !render_params.linear_output);
-    std::string filename = strformat("bdpt-e%s-l%s_mis", eye_idx + 1, light_idx + 1) + ".jpg";
+    std::string filename = fmt::format("bdpt-e{}-l{}_mis.jpg", eye_idx + 1, light_idx + 1);
     auto filepath = fs::temp_directory_path() / fs::unique_path(filename);
     bm.write(filepath.string());
   }

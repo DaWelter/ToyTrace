@@ -497,7 +497,7 @@ inline std::unique_ptr<Image> PhotonmappingRenderingAlgo::GenerateImage()
     tbb::parallel_for(0, render_params.height, [&](int row) {
       b.ToImage(im, row, row + 1, /*convert_linear_to_srgb=*/ false);
     });
-    im.write(strconcat("/tmp/debug", (buf_num++), ".png"));
+    im.write(fmt::format("/tmp/debug{}.png", (buf_num++)));
   }
   {
     Image im(render_params.width, render_params.height);

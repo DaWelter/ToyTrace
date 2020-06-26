@@ -18,7 +18,7 @@ Texture::Texture(const fs::path &filename)
   }
   else
   {
-    throw std::invalid_argument(strconcat("Texture file does not exist: ",filename.string()));;
+    throw std::invalid_argument(fmt::format("Texture file does not exist: {}",filename.string()));;
   }
 }
 
@@ -33,11 +33,11 @@ void Texture::ReadFile(const std::string &filename)
 #if OIIO_PLUGIN_VERSION >= 22
   auto in = OIIO::ImageInput::open (filename);
   if (!in)
-    throw std::invalid_argument(strconcat("Failed to open image file: ", filename));
+    throw std::invalid_argument(fmt::format("Failed to open image file: {}", filename));
 #else
   auto *in = OIIO::ImageInput::open (filename);
   if (! in)
-    throw std::invalid_argument(strconcat("Failed to open image file: ", filename));
+    throw std::invalid_argument(fmt::format("Failed to open image file: {}", filename));
   SCOPE_EXIT(OIIO::ImageInput::destroy (in););
 #endif
   

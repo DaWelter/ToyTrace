@@ -581,7 +581,7 @@ public:
       int side, i, j;
       std::tie(side, i, j) = cubemap.IndexToCell(idx);
       CheckNumberOfSamplesInBin(
-        strconcat(side,"[",i,",",j,"]").c_str(), 
+        fmt::format("{}[{},{}]",side,i,j).c_str(), 
         bin_sample_count[idx], 
         num_samples, 
         bin_probabilities[idx],
@@ -591,7 +591,7 @@ public:
     for (auto &p : delta_peaks)
     {
       CheckNumberOfSamplesInBin(
-        strconcat("peak ", p.direction).c_str(),
+        fmt::format("peak {}", p.direction).c_str(),
         p.sample_count,
         num_samples,
         p.pr,
@@ -1702,7 +1702,7 @@ TEST(TestMath, TowerSampling)
   }
   for (int i=0; i<n; ++i)
   {
-    CheckNumberOfSamplesInBin(strconcat("Bin[",i,"]").c_str(), bins[i], Nsamples, probs[i]);
+    CheckNumberOfSamplesInBin(fmt::format("Bin[{}]",i).c_str(), bins[i], Nsamples, probs[i]);
   }
 }
 

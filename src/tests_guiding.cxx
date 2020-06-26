@@ -501,7 +501,7 @@ TEST(Guiding, CombinedIntervalsIterator)
     auto i = it.Interval();
     auto v1 = it.DereferenceFirst();
     auto v2 = it.DereferenceSecond();
-    std::string state = strconcat("@  state N=", n, " I0=", v1, " I1=", v2);
+    std::string state = fmt::format("@  state N={} I0={} I1={}", n, v1, v2);
     EXPECT_EQ(i.first , std::get<0>(*iter_expected)) << state;
     EXPECT_EQ(i.second, std::get<1>(*iter_expected)) << state;
     EXPECT_EQ(v1, std::get<2>(*iter_expected)) << state;

@@ -120,14 +120,14 @@ s 11 12 13 0.5
   }
   const char* scenestr_fmt = R"""(
 s 1 2 3 0.5
-include %s
-{
-include %s
-}
+include {}
+{{
+include {}
+}}
 s 14 15 16 0.5
 )""";
   auto path3 = fs::temp_directory_path() / fs::unique_path("scene3-%%%%-%%%%-%%%%-%%%%.nff");
-  std::string scenestr = strformat(scenestr_fmt, path1.string(), path2.string());
+  std::string scenestr = fmt::format(scenestr_fmt, path1.string(), path2.string());
   {
     std::ofstream os(path3.string());
     os.write(scenestr.c_str(), scenestr.size());

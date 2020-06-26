@@ -6,10 +6,14 @@
 #include <cmath>
 #include <limits>
 #include <type_traits>
+#include <utility>
 #include <vector>
 #include <unordered_map>
 #include <string_view>
 #include <atomic>
+
+#include <fmt/core.h>
+#include <fmt/ostream.h>
 
 #include <boost/functional/hash.hpp>
 #include <boost/align/aligned_allocator.hpp>
@@ -146,119 +150,6 @@ inline bool Quadratic(T a, T b, T c, T ea, T eb, T ec, T &t0, T &t1, T &err0, T 
     std::swap(err0, err1);
   }
   return true;
-}
-
-
-namespace strconcat_internal
-{
-
-/* Terminate the recursion. */
-inline void impl(std::stringstream &ss)
-{
-}
-/* Concatenate arbitrary objects recursively into a string using a stringstream.
-   Adapted from https://en.wikipedia.org/wiki/Variadic_template
-*/
-template<class T, class ... Args>
-inline void impl(std::stringstream &ss, const T& x, Args&& ... args)
-{
-  ss << x;
-  impl(ss, args...);
-}
-
-}
-
-/* A simple, safe replacement for sprintf with automatic memory management.
-*/
-template<class ... Args>
-inline std::string strconcat(Args&& ...args)
-{
-  std::stringstream ss;
-  strconcat_internal::impl(ss, args...);
-  return ss.str();
-}
-
-
-
-namespace strformat_internal
-{
-
-namespace
-{
-
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-// The compiler complains that this function is not used. But it really is or else my 
-// strformat would not compile at all because the compile time(!) recursion could not be terminated.
-#pragma GCC diagnostic ignored "-Wunused-function"  // GCC does not even care ...
-#endif
-
-// Forward declaration of 'main' routine.
-template<class ... Args>
-inline void impl(std::stringstream &ss, const std::string_view &format, Args&& ... args);
-  
-// Terminate recursion. All arguments were sunk.
-inline void impl_emit(std::stringstream &ss, const std::string_view &format)
-{
-  throw std::invalid_argument("Too few arguments for strformat");
-}
-
-template<class T, class ... Args>
-inline void impl_emit(std::stringstream &ss, const std::string_view &format, const T &x, Args&& ... args)
-{
-  ss << x;
-  impl(ss, format, args...);
-}
-
-
-#ifdef __GNUC__
-#pragma GCC diagnostic pop // Restore command line options.
-#endif
-
-// Printf style formatting. Supports only %s. But this means, in contrast to printf, that the input is converted to string using the << operator and c++ streams.
-template<class ... Args>
-inline void impl(std::stringstream &ss, const std::string_view &format, Args&& ... args)
-{
-  for (std::string_view::size_type i = 0; i<format.size(); ++i)
-  {
-    // Detect printf style format specifier.
-    if (format[i] == '%')
-    {
-      // %% means to just put % char.
-      if (i+1 < format.size() && format[i+1] == '%')
-      {
-        ss.put('%');
-        ++i;
-      }
-      // Recurse into subroutine to take care of the next argument in 'args'. 
-      // Is there a non-recursive way to extract the first parameter of a pack?
-      else if (i+1 < format.size() && format[i+1] == 's')
-      {
-        impl_emit(ss, format.substr(i+2), args...);
-        return;
-      }
-      // Anything else is an error.
-      else
-        throw std::invalid_argument("Invalid string format specifier encountered in "+std::string(format)+", position "+std::to_string(i));
-    }
-    else
-      ss.put(format[i]);
-  }
-  if (sizeof...(args) > 0)
-    throw std::invalid_argument("Too many arguments for strformat");
-}
-
-}
-  
-};
-
-
-template<class ... Args>
-inline std::string strformat(const std::string &format, Args&& ...args)
-{
-  std::stringstream ss;
-  strformat_internal::impl(ss, format, args...);
-  return ss.str();
 }
 
 
