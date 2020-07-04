@@ -97,7 +97,7 @@ public:
     return accum.Size();
   }
 private:
-  OnlineVariance::ArrayAccumulator<double> accum;
+  Accumulators::SoaOnlineVariance<double> accum;
   int step_count = 0;
 };
 

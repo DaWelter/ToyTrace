@@ -6,6 +6,7 @@
 #include "box.hxx"
 #include "span.hxx"
 #include "distribution_mixture_models.hxx"
+#include "path_guiding_quadtree.hxx"
 #include "path_guiding_tree.hxx"
 #include "json_fwd.hxx"
 
@@ -41,6 +42,7 @@ inline static constexpr int CACHE_LINE_SIZE = 64;
 boost::filesystem::path GetDebugFilePrefix();
 
 using Color::Spectral3f;
+struct CellData;
 
 
 struct IncidentRadiance
@@ -48,6 +50,7 @@ struct IncidentRadiance
     Double3 pos;
     Float3 reverse_incident_dir;
     float weight;
+    bool is_original = true;
 };
 
 
@@ -55,6 +58,276 @@ using LeafStatistics = Accumulators::OnlineCovariance<double, 3, int64_t>;
 
 // Should be quite lightweight.
 static_assert(sizeof(tbb::spin_mutex) <= 16);
+
+namespace MoVmfRadianceDistribution
+{
+
+class RadianceDistributionLearned;
+
+class RadianceDistributionSampled
+{
+  friend class RadianceDistributionLearned;
+  // Normalized to the total incident flux. So radiance_distribution(w) * incident_flux_density is the actual radiance from direction w.
+  vmf_fitting::VonMisesFischerMixture<> normalized_distribution;
+  double incident_flux_density{ 1. };
+  double incident_flux_confidence_bounds{ 0. };
+
+public:
+  RadianceDistributionSampled()
+  {
+    vmf_fitting::InitializeForUnitSphere(normalized_distribution);
+  }
+
+  double Pdf(const Eigen::Vector3d &dir) const
+  {
+    return vmf_fitting::Pdf(normalized_distribution, dir.cast<float>());
+  }
+
+  std::pair<Double3, double> Sample(Sampler &sampler) const
+  {
+    auto r1 = sampler.Uniform01();
+    auto r2 = sampler.Uniform01();
+    auto r3 = sampler.Uniform01();
+    Eigen::Vector3d w = vmf_fitting::Sample(normalized_distribution, { r1,r2,r3 }).template cast<double>();
+    // Float32 can be lower precision than I have otherwise. So renormalize the direction.
+    const double n2 = w.squaredNorm();
+    if (std::abs(n2 - 1.) >= 1.e-11)
+    {
+      w /= std::sqrt(n2);
+    }
+    const double pdf = Pdf(w);
+    return { w, pdf };
+  }
+
+  double Evaluate(const Eigen::Vector3d &dir) const
+  {
+    return Pdf(dir) * incident_flux_density;
+  }
+
+  std::pair<double, double> EvaluateErr(const Eigen::Vector3d &dir) const
+  {
+    const double pdf = Pdf(dir);
+    return { pdf*incident_flux_density, pdf*incident_flux_confidence_bounds };
+  }
+
+  std::pair<double, double> EvaluateFluxErr() const
+  {
+    return std::make_pair(incident_flux_density, incident_flux_confidence_bounds);
+  }
+
+  Float3 ComputeStochasticFilteredDirection(const IncidentRadiance & rec, Sampler &sampler) const;
+
+  rapidjson::Value ToJSON(rapidjson::MemoryPoolAllocator<rapidjson::CrtAllocator> &a) const;
+};
+
+
+class RadianceDistributionLearned
+{
+  vmf_fitting::VonMisesFischerMixture<> normalized_distribution;
+  vmf_fitting::incremental::Data<> fitdata;
+  Accumulators::OnlineVariance<double, int64_t> incident_flux_density_accum;
+
+public:
+  class Parameters
+  {
+    friend class RadianceDistributionLearned;
+    vmf_fitting::incremental::Params<> params;
+    vmf_fitting::VonMisesFischerMixture<> prior_mode;
+  public:
+    Parameters(const CellData &cd);
+  };
+
+  RadianceDistributionLearned()
+  {
+    vmf_fitting::InitializeForUnitSphere(normalized_distribution);
+  }
+
+  void InitialFit(Span<const IncidentRadiance> buffer, const Parameters &params)
+  {
+    IncrementalFit(buffer, params);
+  }
+
+  void IncrementalFit(Span<const IncidentRadiance> buffer, const Parameters &params)
+  {
+    for (const auto &in : buffer)
+    {
+      if (in.is_original)
+        incident_flux_density_accum += in.weight;
+
+      if (in.weight <= 0.)
+        continue;
+
+      float weight = in.weight;
+      const auto xs = Span<const Eigen::Vector3f>(&in.reverse_incident_dir, 1);
+      const auto ws = Span<const float>(&weight, 1);
+      vmf_fitting::incremental::Fit(normalized_distribution, fitdata, params.params, xs, ws);
+    }
+  }
+
+  RadianceDistributionSampled IterationUpdateAndBake(const RadianceDistributionSampled &previous_radiance_dist)
+  {
+    return Bake();
+  }
+
+  RadianceDistributionSampled Bake() const
+  {
+    RadianceDistributionSampled dst;
+    dst.normalized_distribution = this->normalized_distribution;
+    dst.incident_flux_density = this->incident_flux_density_accum.Mean();
+    dst.incident_flux_confidence_bounds = this->incident_flux_density_accum.Count() >= 10 ?
+      std::sqrt(this->incident_flux_density_accum.Var() / static_cast<double>(this->incident_flux_density_accum.Count())) : LargeNumber;
+    assert(std::isfinite(dst.incident_flux_confidence_bounds));
+    return dst;
+  }
+
+  rapidjson::Value ToJSON(rapidjson::MemoryPoolAllocator<rapidjson::CrtAllocator> &a) const;
+};
+
+} // namespace MoVmfRadianceDistribution
+
+
+namespace quadtree_radiance_distribution
+{
+
+class RadianceDistributionLearned;
+
+Eigen::Vector2f MapSphereToTree(const Eigen::Vector3f &dir);
+Eigen::Vector3f MapTreeToSphere(const Eigen::Vector2f &uv);
+
+inline constexpr double JacobianInv = 1./(4.*Pi);
+
+class RadianceDistributionSampled
+{
+  friend class RadianceDistributionLearned;
+  quadtree::Tree tree;
+  Eigen::ArrayXd node_means;
+  Eigen::ArrayXd node_stddev;
+  Eigen::ArrayXf node_sample_probs;
+  // double incident_flux_density{ 0. };
+  // double incident_flux_confidence_bounds{ 0. };
+
+  std::pair<int, float> FindNodeAndInvSolidAngle(const Eigen::Vector2f &uv) const
+  {
+    float area_inv = JacobianInv;
+    quadtree::detail::DecentHelper d{uv, tree};
+    for (;!d.IsLeaf();)
+    {
+      d.TraverseInplace();
+      area_inv *= 4.f;
+    }
+    const int idx = d.GetNode().idx;
+    return {idx, area_inv};
+  }
+
+public:
+  RadianceDistributionSampled() :
+    tree{}, node_means(tree.NumNodes()), node_stddev(tree.NumNodes()), node_sample_probs(tree.NumNodes())
+  {
+    node_means.setOnes();
+    node_stddev.setZero();
+    node_sample_probs.setOnes();
+  }
+
+  double Pdf(const Eigen::Vector3d &dir) const
+  {
+    const auto uv = MapSphereToTree(dir.cast<float>());
+    const double ret = quadtree::Pdf(tree, AsSpan(node_sample_probs), uv)*JacobianInv;
+    assert(std::isfinite(ret));
+    return ret;
+  }
+
+  std::pair<Double3, double> Sample(Sampler &sampler) const
+  {
+    auto [uv, pdf] = quadtree::Sample(tree, AsSpan(node_sample_probs), sampler);
+    pdf *= JacobianInv;
+
+    assert (uv.allFinite());
+    assert (std::isfinite(pdf) && pdf > 0.f);
+    auto w = MapTreeToSphere(uv).cast<double>().eval();
+    // Float32 can be lower precision than I have otherwise. So renormalize the direction.
+    const double n2 = w.squaredNorm();
+    if (std::abs(n2 - 1.) >= 1.e-11)
+    {
+      w /= std::sqrt(n2);
+    }
+    assert(w.allFinite());
+    return std::make_pair(w, pdf);
+  }
+
+  double Evaluate(const Eigen::Vector3d &dir) const
+  {
+    const auto uv = MapSphereToTree(dir.cast<float>());
+    auto [idx, area_inv] = FindNodeAndInvSolidAngle(uv);
+    return area_inv*node_means[idx];
+  }
+
+  std::pair<double, double> EvaluateErr(const Eigen::Vector3d &dir) const
+  {
+    const auto uv = MapSphereToTree(dir.cast<float>());
+    auto [idx, area_inv] = FindNodeAndInvSolidAngle(uv);
+    return { area_inv*node_means[idx], area_inv*node_stddev[idx] };
+  }
+
+  std::pair<double, double> EvaluateFluxErr() const
+  {
+    return { node_means[tree.GetRoot().idx], node_stddev[tree.GetRoot().idx] };
+  }
+
+  Float3 ComputeStochasticFilteredDirection(const IncidentRadiance & rec, Sampler &sampler) const;
+
+  rapidjson::Value ToJSON(rapidjson::MemoryPoolAllocator<rapidjson::CrtAllocator> &a) const;
+};
+
+
+class RadianceDistributionLearned
+{
+  quadtree::Tree tree;
+  Accumulators::SoaOnlineVariance<double, long> node_weights;
+  //Accumulators::OnlineVariance<double, int64_t> incident_flux_density_accum;
+
+  inline Eigen::ArrayXd CalcRelativeCounts() const
+  {
+    auto ret = node_weights.Counts().cast<double>().eval();
+    auto total_sample_count = ret[tree.GetRoot().idx];
+    assert(total_sample_count > 0);
+    ret *= 1./total_sample_count;
+    return ret;
+  }
+
+public:
+  class Parameters
+  {
+    friend class RadianceDistributionLearned;
+
+  public:
+    Parameters(const CellData &cd) {}
+  };
+
+  RadianceDistributionLearned()
+    : tree{}, node_weights(1)
+  {
+  }
+
+  void IncrementalFit(Span<const IncidentRadiance> buffer, const Parameters &params);
+
+  void InitialFit(Span<const IncidentRadiance> buffer, const Parameters &params);
+
+  RadianceDistributionSampled IterationUpdateAndBake(const RadianceDistributionSampled &previous_radiance_dist);
+  RadianceDistributionSampled Bake() const;
+
+  rapidjson::Value ToJSON(rapidjson::MemoryPoolAllocator<rapidjson::CrtAllocator> &a) const;
+};
+
+
+} // namespace quadtree_radiance_distribution
+
+
+using quadtree_radiance_distribution::RadianceDistributionLearned;
+using quadtree_radiance_distribution::RadianceDistributionSampled;
+
+// using MoVmfRadianceDistribution::RadianceDistributionLearned;
+// using MoVmfRadianceDistribution::RadianceDistributionSampled;
+
 
 // About 1100 Bytes.
 struct CellData
@@ -68,39 +341,22 @@ struct CellData
     CellData& operator=(CellData &&) = default;
 
     alignas (CACHE_LINE_SIZE) struct CurrentEstimate {
-      // Normalized to the total incident flux. So radiance_distribution(w) * incident_flux_density is the actual radiance from direction w.
-      vmf_fitting::VonMisesFischerMixture<> radiance_distribution;
+      RadianceDistributionSampled radiance_distribution;
       Box cell_bbox{};
       Eigen::Matrix3d points_cov_frame{Eigen::zero}; // U*sqrt(Lambda), where U is composed of Eigenvectors, and Lambda composed of Eigenvalues.
       Eigen::Vector3d points_mean{Eigen::zero};
       Eigen::Vector3d points_stddev{Eigen::zero};
-      double incident_flux_density{0.};
-      double incident_flux_confidence_bounds{0.};
     } current_estimate;
     
     alignas (CACHE_LINE_SIZE) struct Learned { 
-      vmf_fitting::VonMisesFischerMixture<> radiance_distribution;
-      vmf_fitting::incremental::Data<> fitdata;
+      RadianceDistributionLearned radiance_distribution;
       LeafStatistics leaf_stats;
-      OnlineVariance::Accumulator<double, int64_t> incident_flux_density_accum;
     } learned;
     
     long last_num_samples = 0;
     long max_num_samples = 0;
     int index = -1;
 };
-
-
-inline double FittedRadiance(const CellData::CurrentEstimate &estimate, const Double3 &dir)
-{
-  return vmf_fitting::Pdf(estimate.radiance_distribution, dir.cast<float>()) * estimate.incident_flux_density;
-}
-
-inline std::pair<double,double> FittedRadianceWithErr(const CellData::CurrentEstimate &estimate, const Double3 &dir)
-{
-  double pdf = vmf_fitting::Pdf(estimate.radiance_distribution, dir.cast<float>());
-  return {pdf*estimate.incident_flux_density, pdf*estimate.incident_flux_confidence_bounds };
-}
 
 
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
@@ -191,7 +447,7 @@ class PathGuiding
 
         static IncidentRadiance ComputeStochasticFilterPosition(const IncidentRadiance & rec, const CellData &cd, Sampler &sampler);
         
-        void FitTheSamples(CellData &cell, Span<IncidentRadiance> buffer, bool is_original=true) const;
+        void FitTheSamples(CellData &cell, Span<IncidentRadiance> buffer) const;
         
         void Enqueue(int cell_idx, ToyVector<IncidentRadiance> &sample_buffer);
         CellData& LookupCellData(const Double3 &p);

@@ -4,6 +4,7 @@
 
 #include "path_guiding.hxx"
 #include "path_guiding_tree.hxx"
+#include "path_guiding_quadtree.hxx"
 #include "distribution_mixture_models.hxx"
 #include "json.hxx"
 
@@ -511,6 +512,128 @@ TEST(Guiding, CombinedIntervalsIterator)
 
 
 
+TEST(Guiding, QuadTreeBuilderTrivial)
+{
+  using Vector = Eigen::Vector2f;
+  quadtree::Builder builder{ Span<Vector>{}, Span<float>{}, 1. };
+  auto tree = builder.ExtractTree();
+  EXPECT_EQ(tree.NumNodes(), 1);
+  EXPECT_TRUE(tree.GetRoot().is_leaf);
+}
+
+// TODO:
+// Test that nodes are ordered in DFS order.
+
+TEST(Guiding, QuadTreeDivideIntoChildRanges)
+{
+  using Vector = Eigen::Vector2f;
+  ToyVector<Vector> points;
+  ToyVector<float> weights;
+  Sampler sampler{};
+
+  points = { {0.25, 0.25}, { 0.75, 0.25 }, {0.25, 0.75 }, { 0.75, 0.75 } };
+  for (int i = 0; i < 4; ++i)
+  {
+    // Add more points, copied from the initial ones. Add different amounts.
+    for (int j = 0; j < i; ++j)
+      points.push_back(points[i]);
+  }
+
+  RandomShuffle(points.begin(), points.end(), sampler);
+  weights.resize(points.size(), 1.f);
+
+  {
+    quadtree::Region r;
+    auto childranges = r.DivideIntoChildRange(AsSpan(points), AsSpan(weights));
+    EXPECT_EQ(childranges[0].second, 1);
+    EXPECT_EQ(childranges[1].second, 2);
+    EXPECT_EQ(childranges[2].second, 3);
+    EXPECT_EQ(childranges[3].second, 4);
+
+    EXPECT_EQ(childranges[0].first, 0);
+    EXPECT_EQ(childranges[1].first, 4);
+    EXPECT_EQ(childranges[2].first, 1);
+    EXPECT_EQ(childranges[3].first, 6);
+  }
+}
+
+
+TEST(Guiding, QuadTreeBuilderConsistency)
+{
+  using Vector = Eigen::Vector2f;
+  ToyVector<Vector> points;
+  ToyVector<float> weights;
+  Sampler sampler{};
+
+  constexpr int N = 100;
+  for (int i = 0; i < N; ++i)
+  {
+    points.push_back(sampler.UniformUnitSquare().cast<float>());
+    weights.push_back(1.);
+  }
+
+  const float thres = 1.00001f / points.size();
+
+  quadtree::Builder builder{ AsSpan(points), AsSpan(weights), thres };
+  auto tree = builder.ExtractTree();
+  EXPECT_FALSE(tree.GetRoot().is_leaf);
+
+  // Generate this map ...
+  std::unordered_map<int, ToyVector<int>> node_to_points;
+  int point_idx = 0;
+  for (auto p : points)
+  {
+    quadtree::DecentHelper d{ p, tree };
+    for(;;)
+    {
+      node_to_points[d.GetNode().idx].push_back(point_idx);
+      if (d.IsLeaf())
+        break;
+      d.TraverseInplace();
+    }
+    ++point_idx;
+  }
+
+  //// Compare with point ranges from the builder
+  //for (int node_idx=0; node_idx<tree.NumNodes(); ++node_idx)
+  //{
+  //  auto[offset, size] = builder.DataRangeOfNode(node_idx);
+  //  ToyVector<int> expected(size); std::iota(expected.begin(), expected.end(), offset);
+  //  auto in_node = node_to_points[node_idx];
+  //  std::sort(in_node.begin(), in_node.end());
+  //  ASSERT_EQ(in_node.size(), expected.size());
+  //  ASSERT_TRUE(std::equal(in_node.begin(), in_node.end(), expected.begin()));
+  //}
+}
+
+
+TEST(Guiding, TreeAdaptor)
+{
+  quadtree::Tree tree;
+  ASSERT_EQ(tree.NumNodes(), 1);
+  ToyVector<float> node_weights(tree.NumNodes(), 16.f); 
+
+  {
+    quadtree::TreeAdaptor adaptor{ tree, AsSpan(node_weights), 5.f / 16.f };
+    tree = adaptor.ExtractTree();
+    node_weights = adaptor.ExtractWeights();
+    ASSERT_EQ(tree.NumNodes(), 1 + 4);
+    ASSERT_EQ(node_weights.size(), tree.NumNodes());
+  }
+
+  {
+    quadtree::TreeAdaptor adaptor{ tree, AsSpan(node_weights), 2.f / 16.f };
+    tree = adaptor.ExtractTree();
+    node_weights = adaptor.ExtractWeights();
+    ASSERT_EQ(tree.NumNodes(), 1 + 4 + 16 );
+    ASSERT_EQ(node_weights.size(), tree.NumNodes());
+  }
+
+  quadtree::PushWeight(tree, AsSpan(node_weights), { 0.75, 0.75 }, 10.f);
+
+  const float expected_total_weight = 16.f + 10.f;
+  EXPECT_NEAR(node_weights[tree.GetRoot().idx], expected_total_weight, 1.e-3f);
+}
 
 
 TEST(Guiding, MovmfSampling)
@@ -550,4 +673,19 @@ TEST(Guiding, MovmfSampling)
   const double vmag = v.norm();
   ASSERT_LE(0.99, vmag);
   ASSERT_LE(vmag, 1.01);
+}
+
+
+TEST(Guiding, PolarMap)
+{
+  using namespace guiding::quadtree_radiance_distribution;
+  static constexpr int N = 10;
+  Sampler sampler;
+  for (int i=0; i<N; ++i)
+  {
+    const Eigen::Vector2f x = sampler.UniformUnitSquare().cast<float>();
+    const Eigen::Vector2f y = MapSphereToTree(MapTreeToSphere(x));
+    EXPECT_NEAR(x[0], y[0], 1.e-3);
+    EXPECT_NEAR(x[1], y[1], 1.e-3);
+  }
 }

@@ -8,6 +8,7 @@
 #include "ray.hxx"
 
 #include <boost/container/static_vector.hpp>
+#include <numeric>
 
 namespace guiding 
 {

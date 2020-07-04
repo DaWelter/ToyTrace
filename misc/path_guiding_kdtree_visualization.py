@@ -5,10 +5,13 @@ import sys
 import os
 import csv
 from pprint import pprint, pformat
-from matplotlib import pyplot
 import numpy as np
 import itertools
 from vtk.util import numpy_support
+
+import matplotlib
+from matplotlib import pyplot
+
 
 def generate_lut():
     colors = vtk.vtkNamedColors()
@@ -52,6 +55,38 @@ def generate_log_ctf(maxval):
     return f
 
 
+def compute_leaf_mask(qt):
+    return np.asarray([ qt.IsLeaf(i) for i in range(qt.NumNodes()) ])
+
+def compute_areas(qt):
+    xmin, ymin, xmax, ymax = qt.GenerateQuads().T
+    return (xmax-xmin)*(ymax-ymin)
+
+def compute_area_centers(qt):
+    pts = qt.GenerateQuads()
+    return 0.5*(pts[:,[0,1]] + pts[:,[2,3]])
+
+def compute_pdfs_from_node_weights(qt, nws):
+    return nws/nws[0]/compute_areas(qt)
+
+def plot_quadtree(ax, radiance_distribution, draw_weight=True):
+    qt = radiance_distribution.qt
+    mask = compute_leaf_mask(qt)
+    quads = qt.GenerateQuads()
+    if not draw_weight:
+        for xmin, ymin, xmax, ymax in quads[mask]:
+            ax.add_artist(pyplot.Rectangle((xmin,ymin),xmax-xmin, ymax-ymin, fill=False))
+    else:
+        weights = compute_pdfs_from_node_weights(qt, radiance_distribution.weights)
+        
+        normalization = weights[mask].max()
+        weights = weights / normalization
+        for (xmin, ymin, xmax, ymax), w, i in zip(quads, weights, itertools.count()):
+            if mask[i]:
+                ax.add_artist(pyplot.Rectangle((xmin,ymin),xmax-xmin, ymax-ymin, facecolor = matplotlib.cm.coolwarm(w), edgecolor='k'))
+        return matplotlib.cm.ScalarMappable(norm=matplotlib.colors.Normalize(vmin=0., vmax=normalization), cmap = matplotlib.cm.coolwarm)
+
+
 lut = generate_lut()
 
 
@@ -64,19 +99,22 @@ lut = generate_lut()
 #     return ax.imshow(pdf_vals[::-1,::], extent=(-1.,1,-1.,1.))
 
 
+def compute_radius(cd):
+    return np.average(cd.stddev*3./2.)
+
+
 class CellDisplay(object):
     def __init__(self, samplefile_pattern, main_renderer):
-        #self.fig, self.axes = pyplot.subplots(1, 2, figsize = (10, 5))
         self.samplefile_pattern = samplefile_pattern
         self.main_renderer = main_renderer
 
     def display(self, cell1):
         print ("--- Cell {} ---".format(cell1.id))
         print (cell1)
-        print (" ++ Learned means ++")
-        print (cell1.mixture_learned.means)
-        print (" ++ Learned weights ++")
-        print (cell1.mixture_learned.weights)
+        # print (" ++ Learned means ++")
+        # print (cell1.mixture_learned.means)
+        # print (" ++ Learned weights ++")
+        # print (cell1.mixture_learned.weights)
 
         if not self.samplefile_pattern:
             return
@@ -84,28 +122,33 @@ class CellDisplay(object):
         pos, dir, weight = path_guiding_kdtree_loader.load_sample_file(self.samplefile_pattern.format(cell1.id))
         weight /= weight.max()
 
-        # fig, axes = self.fig, self.axes
-        # for ax in axes:
-        #     ax.clear()
-        # fig.suptitle(f"#samples = {cell1.num_points}")
-        # if cell1.val is not None:
-        #     w = np.average(cell1.val, axis = 1) + 1.e-9
-        #     norm = np.average(w)
-        #     w /= norm
-        #     axes[0].scatter(*cell1.proj.T, c = w, s = w, alpha = 0.2, edgecolor = 'none')
-        #     axes[0].add_artist(pyplot.Circle((0, 0), 1, fill = False, color = 'k'))
-        # pdf_image(axes[0], cell1.mixture_learned)
-        # axes[0].set(title = 'learned')
-        # pdf_image(axes[1], cell1.mixture_sampled)
-        # axes[1].set(title = 'sampled')
-        # pyplot.draw()
-        # pyplot.show(block = False)
+        if 1:
+            fig, axes = pyplot.subplots(1, 2, figsize = (10, 5))
+            fig.suptitle(f"#samples = {cell1.num_points}")
+            plot_quadtree(axes[0], cell1.mixture_learned)
+            plot_quadtree(axes[1], cell1.mixture_learned,False)
+            xs = cell1.mixture_learned.project(dir)
+            axes[1].scatter(*xs.T, marker = 'x', c='r', s = weight*100)
+
+            # if cell1.val is not None:
+            #     w = np.average(cell1.val, axis = 1) + 1.e-9
+            #     norm = np.average(w)
+            #     w /= norm
+            #     axes[0].scatter(*cell1.proj.T, c = w, s = w, alpha = 0.2, edgecolor = 'none')
+            #     axes[0].add_artist(pyplot.Circle((0, 0), 1, fill = False, color = 'k'))
+            # pdf_image(axes[0], cell1.mixture_learned)
+            # axes[0].set(title = 'learned')
+            # pdf_image(axes[1], cell1.mixture_sampled)
+            # axes[1].set(title = 'sampled')
+            #fig.canvas.draw()
+            #fig.canvas.draw_idle()
+            pyplot.show(block = True)
 
         pts = vtk.vtkPoints()
         lines = vtk.vtkCellArray()
         for i, p, d, w in zip(itertools.count(), pos, dir, weight):
             p = cell1.center
-            rmin = np.average(cell1.stddev)*0.5
+            rmin = compute_radius(cell1)
             pts.InsertNextPoint(p+d*rmin)
             pts.InsertNextPoint(p+d*(rmin+w*rmin))
             line = vtk.vtkLine()
@@ -172,21 +215,21 @@ def generate_colors(polydata, cd):
     pts = 2.*numpy_support.vtk_to_numpy(polydata.GetPoints().GetData())
     # Color by pdf
     
-    #vals = cd.mixture_learned.pdf(pts)
+    vals = cd.mixture_learned.pdf(pts)
     #vals *= cd.incident_flux_learned
-    # vals /= vals.max()
+    vals /= vals.max()
 
     # Color by incident radiance
-    vals = np.ones(pts.shape[0]) * cd.incident_flux_learned
+    #vals = np.ones(pts.shape[0]) * cd.incident_flux_learned
 
     return vals
 
 
 def make_sphere_poly_data(cd):
-    size = np.average(cd.stddev*3./2.)
+    size = compute_radius(cd)
     source = vtk.vtkSphereSource()
     source.SetThetaResolution(64)
-    source.SetPhiResolution(32)
+    source.SetPhiResolution(64)
     source.Update()
     vals = generate_colors(source.GetOutput(), cd)
     source.SetCenter(*cd.center)
@@ -207,7 +250,8 @@ def make_the_all_spheres_poly_data(datas):
     # mapper
     mapper = vtk.vtkPolyDataMapper()
     mapper.SetInputData(appendFilter.GetOutput())
-    mapper.SetLookupTable(generate_log_ctf(maxval))
+    #mapper.SetLookupTable(generate_log_ctf(maxval))
+    mapper.SetLookupTable(lut)
     mapper.SetColorModeToMapScalars()
     #mapper.SetScalarRange(0., maxval)
     #print ("maxval=",maxval)
@@ -279,8 +323,8 @@ def filter_cell(cd):
     #     continue
     #if cd.id != 515:
     #    return False
-    if np.any(np.abs(cd.center - np.array([-0.01, 0.4, -0.55])) > 0.3):
-       return False
+    # if np.any(np.abs(cd.center - np.array([-0.01, 0.4, -0.55])) > 0.3):
+    #    return False
     return True
 
     

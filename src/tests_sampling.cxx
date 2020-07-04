@@ -94,8 +94,8 @@ TEST(Accumulators, OnlineVarianceArrayAccumulator)
   static constexpr int Narms = 3;
   static constexpr int Nsamples = 100;
   std::mt19937 gen;
-  OnlineVariance::ArrayAccumulator<double> accum1(Narms);
-  OnlineVariance::ArrayAccumulator<double> accum2(Narms);
+  Accumulators::SoaOnlineVariance<double> accum1(Narms);
+  Accumulators::SoaOnlineVariance<double> accum2(Narms);
   
   const double means[Narms] = {
     10., 20., 30.
@@ -118,7 +118,7 @@ TEST(Accumulators, OnlineVarianceArrayAccumulator)
 
   accum2.Add(accum1);
 
-  auto Check = [means,stddev](OnlineVariance::ArrayAccumulator<double> &accum)
+  auto Check = [means,stddev](Accumulators::SoaOnlineVariance<double> &accum)
   {
     auto sample_means = accum.Mean();
     auto sample_var = accum.Var();
@@ -559,8 +559,8 @@ protected:
   double total_probability;
   double total_probability_error; // Numerical integration error.
   double probability_of_delta_peaks;
-  OnlineVariance::Accumulator<Spectral3> diffuse_scattered_estimate;
-  OnlineVariance::Accumulator<Spectral3> total_scattered_estimate;
+  Accumulators::OnlineVariance<Spectral3> diffuse_scattered_estimate;
+  Accumulators::OnlineVariance<Spectral3> total_scattered_estimate;
   Spectral3 integral_cubature;
   Spectral3 integral_cubature_error; // Numerical integration error.
   int num_samples{0};
@@ -643,8 +643,8 @@ public:
     this->num_samples = num_samples;
     this->bin_sample_count = std::vector<int>(cubemap.TotalNumBins(), 0);
     this->delta_peaks = decltype(delta_peaks){};
-    this->diffuse_scattered_estimate = OnlineVariance::Accumulator<Spectral3>{};  
-    this->total_scattered_estimate = OnlineVariance::Accumulator<Spectral3>{};
+    this->diffuse_scattered_estimate = Accumulators::OnlineVariance<Spectral3>{};  
+    this->total_scattered_estimate = Accumulators::OnlineVariance<Spectral3>{};
     this->probability_of_delta_peaks = 0.;
     auto RegisterDeltaSample = [this](const Double3 &v, double pr)
     {
@@ -859,8 +859,8 @@ class IntegralSymmetryTest
     
     void Run()
     {
-      OnlineVariance::Accumulator<Spectral3> total_albedo_adjoint;
-      OnlineVariance::Accumulator<Spectral3> total_albedo;
+      Accumulators::OnlineVariance<Spectral3> total_albedo_adjoint;
+      Accumulators::OnlineVariance<Spectral3> total_albedo;
       
       for (int snum = 0; snum<num_samples; ++snum)
       {

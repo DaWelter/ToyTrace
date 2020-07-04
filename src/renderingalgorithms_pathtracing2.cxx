@@ -4,7 +4,7 @@
 #include <tbb/mutex.h>
 #include <tbb/spin_mutex.h>
 #include <tbb/parallel_for.h>
-#include <tbb/cache_aligned_allocator.h>
+//#include <tbb/cache_aligned_allocator.h>
 #include <tbb/flow_graph.h>
 
 #include "scene.hxx"

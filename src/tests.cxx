@@ -988,14 +988,14 @@ TEST(Utils,StartsEndsWith)
 TEST(Utils,TransformArray)
 {
   std::array<int,2> xs = { 1, 5 };
-  std::array<std::tuple<int>,2> y = util::TransformArray(xs, [](int x) { return std::make_tuple(x*2); });
+  std::array<std::tuple<int>,2> y = util::TransformArray(xs, [](size_t x) { return std::make_tuple(int(x)*2); });
   EXPECT_EQ(std::get<0>(y[0]), 2);
   EXPECT_EQ(std::get<0>(y[1]), 2*5);
 }
 
 TEST(Utils,GenerateArray)
 {
-  std::array<std::tuple<int>,2> y = util::GenerateArray<2>([](int i) { return std::make_tuple(42+i*2); });
+  std::array<std::tuple<int>,2> y = util::GenerateArray<2>([](size_t i) { return std::make_tuple(42+int(i)*2); });
   EXPECT_EQ(std::get<0>(y[0]), 42);
   EXPECT_EQ(std::get<0>(y[1]), 44);
 }

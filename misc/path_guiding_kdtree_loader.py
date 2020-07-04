@@ -54,9 +54,32 @@ def read_movmf(data):
     m.concentrations = data['concentrations']
     return m
 
+
+class SphericalQuadtree(object):
+    def __init__(self, qt, weights):
+        self.qt = qt
+        self.weights = weights
+    
+    def pdf(self, points):
+        points = path_guiding.MapSphereToTree(points)
+        return self.qt.Pdf(points, self.weights)
+
+    def project(self, points):
+        return path_guiding.MapSphereToTree(points)
+
+
+def read_quadtree(data):
+    children = np.array(data['children']).T
+    qt = path_guiding.QuadTree(children, data['root'])
+    weights = np.array(data['node_weights'])
+    return SphericalQuadtree(qt, weights)
+
+
 def read_mixture(data):
     if 'concentrations' in data:
         return read_movmf(data)
+    elif 'children' in data:
+        return read_quadtree(data)
     else:
         return read_gmm(data)
 
@@ -72,12 +95,12 @@ def convert_(rec, load_samples):
         stddev = np.array(rec['point_distribution_stddev']),
         size = bbox_max-bbox_min,
         box = np.vstack((bbox_min, bbox_max)).T,
-        average_weight = rec['average_weight'],
         num_points = rec['num_points'],
-        mixture_learned = read_mixture(rec['mixture_learned']),
-        mixture_sampled = read_mixture(rec['mixture_sampled']),
-        incident_flux_learned = np.array(rec['incident_flux_learned']),
-        incident_flux_sampled = np.array(rec['incident_flux_sampled']),
+        mixture_learned = read_mixture(rec['radiance_learned']),
+        mixture_sampled = read_mixture(rec['radiance_sampled']),
+        #average_weight = rec['average_weight'],
+        #incident_flux_learned = np.array(rec['incident_flux_learned']),
+        #incident_flux_sampled = np.array(rec['incident_flux_sampled']),
         id = rec['id']
     )
     if 'fitparam_prior_nu' in rec:

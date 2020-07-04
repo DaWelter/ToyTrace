@@ -20,6 +20,7 @@ if(NOT WIN32)
     #set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address)
 else()
     add_compile_options(-std:c++17)
+    #add_compile_options(/EHsc)  # Enable exceptions? Strange, should be enable by default. But got link error without it.
     add_definitions(-DNOMINMAX -D_CRT_SECURE_NO_WARNINGS -D_NOEXCEPT=noexcept)
     add_definitions(-D_SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING) # Mostly for YAML-Cpp
     add_definitions(-D_SILENCE_CXX17_ADAPTOR_TYPEDEFS_DEPRECATION_WARNING) # For Eigen
@@ -129,7 +130,7 @@ add_library(commonstuff STATIC
   src/light.cxx src/texture.cxx src/embreeaccelerator.cxx src/scene.cxx src/lightpicker_trivial.cxx src/lightpicker_ucb.cxx src/renderingalgorithms_photonmap.cxx src/renderingalgorithms_pathtracing2.cxx 
   src/renderingalgorithms_normalvisualizer.cxx src/renderingalgorithms_pathtracing.cxx
   src/rendering_util.cxx src/pathlogger.cxx src/photonintersector.cxx  external/cubature/hcubature.c 
-  src/path_guiding.cxx src/renderingalgorithms_pathtracing_guided.cxx src/distribution_mixture_models.cxx src/path_guiding_tree.cxx
+  src/path_guiding.cxx src/renderingalgorithms_pathtracing_guided.cxx src/distribution_mixture_models.cxx src/path_guiding_tree.cxx src/path_guiding_quadtree.cxx
   src/ndarray.hxx)
 
   file(GLOB headers RELATIVE ${CMAKE_SOURCE_DIR} "src/*.hxx")

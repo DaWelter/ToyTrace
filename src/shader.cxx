@@ -767,7 +767,7 @@ vmf_fitting::VonMisesFischerMixture<2> GlossyTransmissiveDielectricShader::Compu
 double GlossyTransmissiveDielectricShader::GuidingProbMixShaderAmount(const SurfaceInteraction &surface_hit) const
 {
   const double alpha = alpha_min + MaybeMultiplyTextureLookup(alpha_max-alpha_min, glossy_exponent_texture.get(), surface_hit);
-  return alpha > 0.05 ? 0.1 : 0.9;
+  return alpha > 0.05 ? 0.1 : 0.5;
 }
 
 

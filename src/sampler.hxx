@@ -237,103 +237,6 @@ inline T FinalizeVariance(const T &sqr_deviation_sum, CounterType num_samples)
   return sqr_deviation_sum/(num_samples-1);
 }
 
-// Convenience class, wrapping the algorithm.
-template<class T, class CounterType_=int>
-class Accumulator
-{
-  public:
-    using CounterType = CounterType_;
-    using ValueType = T;
-  private:
-    T mean{0.};
-    T sqr_deviation_sum{0.};
-    CounterType n{0};
-  public:
-    Accumulator() = default;
-    template<class U>
-    explicit Accumulator(U zero) : mean{zero}, sqr_deviation_sum{zero} {}
-
-    void Update(const T &new_x)
-    {
-      OnlineVariance::Update(mean, sqr_deviation_sum, n, new_x);
-    }
-    
-    void operator+=(const T &new_x)
-    {
-      Update(new_x);
-    }
-    
-    CounterType Count() const
-    {
-      return n;
-    }
-    
-    T Mean() const 
-    {
-      return mean;
-    }
-    
-    T Var() const
-    {
-      return OnlineVariance::FinalizeVariance(sqr_deviation_sum, n);
-    }
-    
-    T Stddev() const
-    {
-      return sqrt(Var());
-    }
-};
-
-
-template<class T>
-class ArrayAccumulator
-{
-public:
-  using ArrayXd = Eigen::Array<T, Eigen::Dynamic, 1>;
-  ArrayAccumulator(int size);
-  void Add(int i, const T &new_x);
-  void Add(const ArrayAccumulator<T> &other);
-  const auto &Mean() const { return mean; }
-  const auto &Counts() const { return counts; }
-  ArrayXd Var(T fill_value = NaN) const;
-  int Size() const { return mean.rows(); }
-private:
-  ArrayXd mean, sqr_dev;
-  Eigen::ArrayXi counts;
-};
-
-
-template<class T>
-inline ArrayAccumulator<T>::ArrayAccumulator(int size)
-  : mean(size), sqr_dev(size), counts(size)
-{
-  mean.setZero();
-  sqr_dev.setZero();
-  counts.setZero();
-}
-
-template<class T>
-inline void OnlineVariance::ArrayAccumulator<T>::Add(int i, const T & new_x)
-{
-  OnlineVariance::Update(mean[i], sqr_dev[i], counts[i], new_x);
-}
-
-template<class T>
-inline void OnlineVariance::ArrayAccumulator<T>::Add(const ArrayAccumulator<T>& other)
-{
-  mean = (counts + other.counts > 0).select(
-    (mean * counts.cast<double>() + other.mean * other.counts.template cast<double>()) / (counts + other.counts).template cast<double>(),
-    0.
-  );
-  counts += other.counts;
-  sqr_dev += other.sqr_dev;
-}
-
-template<class T>
-inline typename OnlineVariance::ArrayAccumulator<T>::ArrayXd OnlineVariance::ArrayAccumulator<T>::Var(T fill_value) const
-{
-  return (counts >= 2).select(sqr_dev / (counts - 1).template cast<double>(), ArrayXd::Constant(Size(),fill_value));
-}
 
 }
 
@@ -366,6 +269,78 @@ public:
     return mean;
   }
 };
+
+
+template<class T, class C = long>
+class SoaOnlineVariance;
+
+
+// Convenience class, wrapping the algorithm.
+template<class T, class CounterType_=int>
+class OnlineVariance
+{
+  public:
+    using CounterType = CounterType_;
+    using ValueType = T;
+    friend class SoaOnlineVariance<ValueType, CounterType>;
+  private:
+    T mean{0.};
+    T sqr_deviation_sum{0.};
+    CounterType n{0};
+  public:
+    OnlineVariance() = default;
+    template<class U>
+    explicit OnlineVariance(U zero) : mean{zero}, sqr_deviation_sum{zero} {}
+
+    void Update(const T &new_x)
+    {
+      ::OnlineVariance::Update(mean, sqr_deviation_sum, n, new_x);
+    }
+    
+    void Update(const OnlineVariance<T, CounterType> &other)
+    {
+      mean = (n + other.n > 0) ? (mean * static_cast<T>(n) + other.mean*static_cast<T>(other.n)) / (n + other.n) : T(0);
+      n += other.n;
+      sqr_deviation_sum += other.sqr_deviation_sum;
+    }
+
+    void operator+=(const T &new_x)
+    {
+      Update(new_x);
+    }
+    
+    CounterType Count() const
+    {
+      return n;
+    }
+    
+    T Mean() const 
+    {
+      return mean;
+    }
+    
+    T Var() const
+    {
+      return ::OnlineVariance::FinalizeVariance(sqr_deviation_sum, n);
+    }
+    
+    T Stddev() const
+    {
+      return sqrt(Var());
+    }
+
+    // Replace counts, keeping mean. Variance changes for small counts.
+    // Not that the variance of the statistical mean value will change.
+    template<class F>
+    OnlineVariance<T,CounterType> CountsMultiplied(F c) const
+    {
+      OnlineVariance<T,CounterType> ret = *this;
+      ret.n *= c;
+      ret.sqr_deviation_sum *= c;
+      return ret;
+    }
+};
+
 
 template<class T, int rows, class C = long>
 class OnlineCovariance
@@ -416,6 +391,88 @@ public:
     return xy_matrix.diagonal() / counter;
   }
 };
+
+
+template<class T, class C>
+class SoaOnlineVariance
+{
+public:
+  using ArrayXd = Eigen::Array<T, Eigen::Dynamic, 1>;
+  using ArrayXi = Eigen::Array<C, Eigen::Dynamic, 1>;
+  SoaOnlineVariance(int size);
+  void Add(int i, const T &new_x);
+  void Add(const SoaOnlineVariance<T> &other);
+  const auto &Mean() const { return mean; }
+  const auto &Counts() const { return counts; }
+  ArrayXd Var(T fill_value = NaN) const;
+  ArrayXd MeanErr(T fill_value = NaN, C min_count = 2) const;
+  int Size() const { return mean.rows(); }
+  
+  OnlineVariance<T,C> GetStats(int i) const
+  {
+    assert (i >= 0 && i<mean.rows());
+    OnlineVariance<T,C> ret;
+    ret.mean = mean[i];
+    ret.sqr_deviation_sum = sqr_dev[i];
+    ret.n = counts[i];
+    return ret;
+  }
+  
+  void SetStats(int i, const OnlineVariance<T, C> &ov)
+  {
+    assert (i >= 0 && i<mean.rows());
+    mean[i] = ov.mean;
+    sqr_dev[i] = ov.sqr_deviation_sum;
+    counts[i] = ov.n;
+  }
+
+private:
+  ArrayXd mean, sqr_dev;
+  ArrayXi counts;
+};
+
+
+template<class T, class C>
+inline SoaOnlineVariance<T,C>::SoaOnlineVariance(int size)
+  : mean(size), sqr_dev(size), counts(size)
+{
+  mean.setZero();
+  sqr_dev.setZero();
+  counts.setZero();
+}
+
+
+template<class T, class C>
+inline void SoaOnlineVariance<T,C>::Add(int i, const T & new_x)
+{
+  assert (i >= 0 && i<mean.rows());
+  ::OnlineVariance::Update(mean[i], sqr_dev[i], counts[i], new_x);
+}
+
+
+template<class T, class C>
+inline void SoaOnlineVariance<T,C>::Add(const SoaOnlineVariance<T>& other)
+{
+  mean = (counts + other.counts > 0).select(
+    (mean * counts.template cast<T>() + other.mean * other.counts.template cast<T>()) / (counts + other.counts).template cast<T>(),
+    0.
+  );
+  counts += other.counts;
+  sqr_dev += other.sqr_dev;
+}
+
+
+template<class T, class C>
+inline typename SoaOnlineVariance<T,C>::ArrayXd SoaOnlineVariance<T,C>::Var(T fill_value) const
+{
+  return (counts >= 2).select(sqr_dev / (counts - 1).template cast<T>(), ArrayXd::Constant(Size(),fill_value));
+}
+
+template<class T, class C>
+inline typename SoaOnlineVariance<T,C>::ArrayXd SoaOnlineVariance<T,C>::MeanErr(T fill_value, C min_count) const
+{
+  return (counts >= min_count).select((sqr_dev.sqrt() / (counts - 1).template cast<T>()), ArrayXd::Constant(Size(),fill_value));
+}
 
 
 }

@@ -95,13 +95,13 @@ inline Eigen::Array<float, N, 1> ComponentPdfs(const VonMisesFischerMixture<N> &
   const auto& k = mixture.concentrations;
   assert((k >= K_THRESHOLD).all() && (k <= K_THRESHOLD_MAX).all());
   auto t1 = (-2.f*k).eval();
-  ExpApproximation(t1);
+  ExpApproximation<N>(t1);
   //assert(t1.isFinite().all());
   const auto prefactors = (float(Pi)*2.f*(1.f - t1)).eval();
   //assert((prefactors > -0.1f).all());
   //assert((prefactors > 0.f).all());
   auto t2 = (k*((mixture.means.matrix() * pos).array() - 1.f)).eval();
-  ExpApproximation(t2);
+  ExpApproximation<N>(t2);
   //assert(t2.isFinite().all());
   const auto result = (k / prefactors * t2).eval();
   assert(result.isFinite().all() && (result >= 0.f).all());

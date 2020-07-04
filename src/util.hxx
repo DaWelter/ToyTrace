@@ -286,6 +286,12 @@ inline int isize(const Container &c, typename enable_if_has_size_member<Containe
     return static_cast<int>(c.size());
 }
 
+template<class Container>
+inline long lsize(const Container &c, typename enable_if_has_size_member<Container>::type = 0)
+{
+  return static_cast<long>(c.size());
+}
+
 
 template<class T>
 struct enable_if_has_insert_begin_and_end_members
@@ -302,6 +308,13 @@ template<class Container, typename = typename enable_if_has_insert_begin_and_end
 inline void Append(Container &a, const Container &b)
 {
   a.insert(a.end(), b.begin(), b.end());
+}
+
+template<class T, class Alloc>
+inline void PushBackToEnsureSize(std::vector<T, Alloc> &v, std::size_t required_size, const T &filler)
+{
+  assert(required_size >= v.size());
+  std::fill_n(std::back_inserter(v), required_size - v.size(), filler);
 }
 
 
@@ -406,5 +419,6 @@ using util::Lerp;
 using util::Sign;
 using util::ToyVector;
 using util::isize;
+using util::lsize;
 using util::AlignedAllocator;
 using util::ASSERT_NOT_NULL;

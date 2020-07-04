@@ -4,6 +4,7 @@
 #include "sampler.hxx"
 #include "distribution_mixture_models.hxx"
 #include "shader.hxx"
+#include "path_guiding_quadtree.hxx"
 
 #include <algorithm>
 #include <numeric>
@@ -18,6 +19,15 @@
 
 namespace py = pybind11;
 
+namespace guiding::quadtree_radiance_distribution
+{
+
+Eigen::Vector2f MapSphereToTree(const Eigen::Vector3f &dir);
+Eigen::Vector3f MapTreeToSphere(const Eigen::Vector2f &uv);
+
+}
+
+
 namespace 
 {
 
@@ -30,6 +40,13 @@ py::object CastToNumpyArray(const T &a)
     // apropriate structure.
     return py::module::import("numpy").attr("asarray")(py::cast(a));
 }
+
+template<class T>
+auto CopyToStdVector(const ToyVector<T> &x)
+{
+    return std::vector<T>{ x.begin(), x.end() };
+}
+
 
 }
 
@@ -262,6 +279,94 @@ void RegisterShaders(py::module &m)
 } // namespace py_shady
 
 
+
+namespace py_quadtree
+{
+
+using namespace guiding::quadtree;
+
+
+void Register(py::module &m)
+{
+  py::class_<Tree>(m, "QuadTree")
+  .def(py::init<>())
+  .def(py::init<>([](const Eigen::ArrayX4i &a, int b) {
+      return Tree(a, b);
+  }))
+  .def("Adapted", [](const Tree &tree, std::vector<float> weights, float weight_fraction_threshold) -> py::tuple {
+    TreeAdaptor adaptor{ tree, AsSpan(weights), weight_fraction_threshold };
+    auto new_weights = CopyToStdVector(adaptor.ExtractWeights());
+    return py::make_tuple(adaptor.ExtractTree(), CastToNumpyArray(new_weights));
+  })
+  .def_static("Build", [](std::vector<Eigen::Vector2f> points, std::vector<float> weights, float weight_fraction_threshold) -> py::tuple {
+    Builder builder{ AsSpan(points), AsSpan(weights), weight_fraction_threshold };
+    auto new_weights = CopyToStdVector(builder.ExtractWeights());
+    return py::make_tuple(builder.ExtractTree(), CastToNumpyArray(new_weights));
+  })
+  .def("PushWeights", [](const Tree &tree, py::array_t<float> py_node_weights, std::vector<Eigen::Vector2f> points, std::vector<float> weights) {
+   auto a = py_node_weights.mutable_unchecked<1>();
+   Span<float> node_weights{ a.mutable_data(0), a.size() };
+   for (long i = 0; i < lsize(points); ++i)
+   {
+     PushWeight(tree, node_weights, points[i], weights[i]);
+   }
+  })
+  .def("GenerateQuads", [](const Tree &tree) {
+   return CastToNumpyArray(CopyToStdVector(GenerateQuads(tree)));
+  })
+  .def("GenerateLevels", [](const Tree &tree) {
+   return CastToNumpyArray(CopyToStdVector(GenerateLevels(tree)));
+  })
+  .def("NumNodes", &Tree::NumNodes)
+  .def("IsLeaf", [](const Tree &tree, int node) { 
+      return tree.IsLeaf(node);
+  })
+  .def("Sample", [](const Tree &tree, std::vector<float> weights, int n) {
+    Eigen::Array<float, Eigen::Dynamic, 2> points;
+    Eigen::Array<float, Eigen::Dynamic, 1> pdfs;
+    points.resize(n, 2);
+    pdfs.resize(n, 1);
+    Sampler sampler;
+    for (int i=0; i<n; ++i)
+    {
+        auto [p, pdf] = guiding::quadtree::detail::Sample(tree, AsSpan(weights), sampler);
+        points.row(i) = p.transpose();
+        pdfs.row(i) = pdf;
+    }
+    return py::make_tuple(points, pdfs);
+  })
+//   .def("Sample", [](const Tree &tree, std::vector<float> weights, Eigen::ArrayX2f rnds) {
+//     Eigen::Array<float, Eigen::Dynamic, 2> points;
+//     Eigen::Array<float, Eigen::Dynamic, 1> pdfs;
+//     points.resize(rnds.rows(), 2);
+//     pdfs.resize(rnds.rows(), 1);
+//     for (int i=0; i<rnds.rows(); ++i)
+//     {
+//         auto [p, pdf] = guiding::quadtree::detail::Sample(tree, AsSpan(weights), rnds.row(i));
+//         points.row(i) = p.transpose();
+//         pdfs.row(i) = pdf;
+//     }
+//     return py::make_tuple(points, pdfs);
+//   })
+  .def("Pdf", [](const Tree &tree, std::vector<Eigen::Vector2f> points, std::vector<float> weights) {
+      std::vector<float> pdfs; pdfs.reserve(points.size());
+      for (const auto &pt : points)
+        pdfs.push_back(guiding::quadtree::detail::Pdf(tree, AsSpan(weights), pt));
+    return CastToNumpyArray(pdfs);
+  });
+
+  m.def("MapSphereToTree", [](const Eigen::ArrayX3f &xs) {
+    Eigen::ArrayX2f result(xs.rows(), 2);
+    for (int i=0; i<xs.rows(); ++i)
+        result.row(i) = guiding::quadtree_radiance_distribution::MapSphereToTree(xs.row(i).matrix()).array();
+    return result;
+  });
+  //m.def("MapTreeToSphere", &guiding::quadtree_radiance_distribution::MapTreeToSphere);
+}
+
+} // py_quadtree
+
+
 PYBIND11_MODULE(path_guiding, m)
 {
     py::module::import("numpy");
@@ -281,8 +386,10 @@ PYBIND11_MODULE(path_guiding, m)
     m.def("ExpApproximation", [](const Eigen::Array<float, 8, 1> &vals) -> Eigen::Array<float, 8, 1>
     {
         Eigen::Array<float, 8, 1> result = vals;
-        vmf_fitting::ExpApproximation(result);
+        vmf_fitting::ExpApproximation<8>(result);
         return result;
     });
     m.def("ExpApproximation", [](float x) { return vmf_fitting::ExpApproximation(x);  });
+
+    py_quadtree::Register(m);
 }

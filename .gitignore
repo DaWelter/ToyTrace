@@ -2,6 +2,7 @@ private/
 
 
 .vscode
+.clangd
 
 # Other stuff
 .svn

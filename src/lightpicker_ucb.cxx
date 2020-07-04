@@ -107,7 +107,7 @@ void Stats::ComputeDistributionAndUpdate(Eigen::ArrayXd &cummulative_probs, doub
       if (count[i] >= 1)
       {
         auto confidence_bound = std::sqrt(2.* logt / count[i]);
-        cummulative_probs[i] = mean[i] + var[i] + confidence_bound;
+        cummulative_probs[i] = mean[i] + var[i] + confidence_bound; // TODO: sqrt(variance / n) ????
       }
       else
         cummulative_probs[i] = large_weight;

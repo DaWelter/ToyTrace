@@ -2,6 +2,7 @@
 
 #include "util.hxx"
 #include "vec3f.hxx"
+#include <type_traits>
 
 namespace util
 {
@@ -16,6 +17,7 @@ public:
   using size_t = std::ptrdiff_t;
   using index_t = std::ptrdiff_t;
   using value_type = T;
+  using reference = typename std::add_lvalue_reference<T>::type;
 
 private:
   T* _begin;
@@ -78,6 +80,12 @@ inline Span<T> Subspan(Span<T> s, typename Span<T>::index_t offset, typename Spa
 }
 
 template<class T>
+inline Span<T> Subspan(Span<T> s, std::pair<typename Span<T>::index_t, typename Span<T>::size_t> range)
+{
+  return Subspan(s, range.first, range.second);
+}
+
+template<class T>
 inline bool IsInRange(Span<T> s, T* p)
 {
   auto offset = p - s.begin();
@@ -110,6 +118,29 @@ inline Span<T> AsSpan(std::array<T, N> &a)
 {
   return Span<T>(a.data(), a.size());
 }
+
+
+template<class T>
+auto AsEigenArray(Span<T> s)
+{
+  // TODO: might want to check for correct alignment
+  return Eigen::Map<Eigen::Array<T, Eigen::Dynamic, 1>>{s.data(), Eigen::Index{ s.size() }};
+}
+
+
+// Rearranges the elements in s such that s[i] is replaced by s[indices[i]]
+// Must allocate for temporary storage
+template<class T>
+inline void ReorderInplace(Span<T> &s, Span<const ptrdiff_t> indices)
+{
+  ToyVector<T> tmp;
+  tmp.reserve(s.size());
+  for (auto i : indices)
+    tmp.push_back(std::move(s[i]));
+  for (ptrdiff_t i = 0; i < s.size(); ++i)
+    s[i] = std::move(tmp[i]);
+}
+
 
 }
 
