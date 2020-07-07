@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <cassert>
@@ -16,7 +17,8 @@
 #include <fmt/ostream.h>
 
 #include <boost/functional/hash.hpp>
-#include <boost/align/aligned_allocator.hpp>
+//#include <boost/align/aligned_allocator.hpp>
+
 
 #ifdef __GNUC__
 #define unlikely(x) __builtin_expect(!!(x), 0)
@@ -194,13 +196,74 @@ struct iter_pair : std::pair<I, I>
     I end() { return this->second; }
 };
 
+#if 1
+template<class T, size_t alignment>
+class AlignedAllocator
+{
+  public:
+    using value_type = T;
+    using propagate_on_container_move_assignment = std::true_type;
+    using is_always_equal = std::true_type;
 
-template<class T,int alignment>
-using AlignedAllocator = boost::alignment::aligned_allocator<T, alignment>;
+    // By default we may have some random align a. But if type specify 
+    // alignas(b) with b>a, I'd get crashes without this little correction.
+    static constexpr size_t true_alignment = std::max(alignment, alignof(T));
+    // Check requirements for posix_memalign.
+    static_assert(true_alignment % sizeof(void*) == 0);
+
+    template<class U>
+    struct rebind {
+      typedef AlignedAllocator<U, alignment> other;
+    };
+
+    constexpr AlignedAllocator() noexcept = default;
+
+    template <class U>
+    constexpr AlignedAllocator(const AlignedAllocator<U, alignment>&) noexcept
+    {
+    }
+
+    [[nodiscard]] T* allocate(std::size_t n)
+    {
+      #ifdef _MSC_VER
+            return (T*)_aligned_malloc(n*sizeof(T), true_alignment);
+      #else
+            void* result = nullptr;
+            posix_memalign(&result, true_alignment, n*sizeof(T)); // returns 0 on success. Not using it obviously.
+            return (T*)result;
+      #endif
+    }
+
+    void deallocate(T* p, std::size_t n)
+    {
+      #ifdef _MSC_VER
+        _aligned_free(p);
+      #else
+        free(p);
+      #endif
+    }
+};
+
+template <class T, class U, size_t a>
+bool operator==(const AlignedAllocator<T,a>&, const AlignedAllocator<U,a>&) noexcept
+{
+  return true;
+}
+
+template <class T, class U, size_t a>
+bool operator!=(const AlignedAllocator<T, a>&, const AlignedAllocator<U, a>&) noexcept
+{
+  return false;
+}
+#else
+template<class T, size_t a>
+using AlignedAllocator = boost::alignment::aligned_allocator<T,a>;
+#endif
+
 
 // std::vector with 16 byte aligment as required by Eigen's fixed size types.
 // This class also comes with range checking in debug mode.
-template<class T, class Alloc = AlignedAllocator<T, 16>>
+template<class T, class Alloc = AlignedAllocator<T,16>>
 class ToyVector : public std::vector<T, Alloc>
 {
   using B = std::vector<T, Alloc>;

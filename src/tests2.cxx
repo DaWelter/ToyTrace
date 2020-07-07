@@ -10,7 +10,6 @@
 #include <boost/pool/simple_segregated_storage.hpp>
 #include <boost/variant.hpp>
 #include <boost/variant/polymorphic_get.hpp>
-#include <boost/align/aligned_allocator.hpp>
 #include <boost/any.hpp>
 #include <boost/intrusive/circular_slist_algorithms.hpp>
 
@@ -370,7 +369,7 @@ TEST(BasicAssumptions, OutputOperator)
 
 TEST(BasicAssumptions, AlignmentAllocator)
 {
-  std::vector<double, boost::alignment::aligned_allocator<double, 128>> v{1., 2., 3.};
+  std::vector<double, AlignedAllocator<double, 128>> v{1., 2., 3.};
   EXPECT_EQ(((std::size_t)&v[0]) % 128, 0);
 }
 
