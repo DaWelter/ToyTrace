@@ -11,6 +11,7 @@
 #include "json_fwd.hxx"
 
 //#include <random>
+#include <cmath>
 #include <fstream>
 #include <tuple>
 
@@ -195,6 +196,7 @@ Eigen::Vector2f MapSphereToTree(const Eigen::Vector3f &dir);
 Eigen::Vector3f MapTreeToSphere(const Eigen::Vector2f &uv);
 
 inline constexpr double JacobianInv = 1./(4.*Pi);
+inline constexpr double safe_error_number = 0.01*static_cast<double>(LargeFloat)*util::Pow(0.25, quadtree::detail::MAX_DEPTH);
 
 class RadianceDistributionSampled
 {
@@ -203,6 +205,7 @@ class RadianceDistributionSampled
   Eigen::ArrayXd node_means;
   Eigen::ArrayXd node_stddev;
   Eigen::ArrayXf node_sample_probs;
+  Eigen::ArrayXf node_sample_prior;
   // double incident_flux_density{ 0. };
   // double incident_flux_confidence_bounds{ 0. };
 
@@ -219,6 +222,19 @@ class RadianceDistributionSampled
     return {idx, area_inv};
   }
 
+  static auto AssertFinite(const std::pair<double, double> &x)
+  {
+    assert(std::isfinite(x.first));
+    assert(std::isfinite(x.second));
+    return x;
+  }
+
+  static auto AssertFinite(double x)
+  {
+    assert(std::isfinite(x));
+    return x;
+  }
+
 public:
   RadianceDistributionSampled() :
     tree{}, node_means(tree.NumNodes()), node_stddev(tree.NumNodes()), node_sample_probs(tree.NumNodes())
@@ -226,6 +242,7 @@ public:
     node_means.setOnes();
     node_stddev.setZero();
     node_sample_probs.setOnes();
+    node_sample_prior.setOnes();
   }
 
   double Pdf(const Eigen::Vector3d &dir) const
@@ -258,19 +275,19 @@ public:
   {
     const auto uv = MapSphereToTree(dir.cast<float>());
     auto [idx, area_inv] = FindNodeAndInvSolidAngle(uv);
-    return area_inv*node_means[idx];
+    return AssertFinite(area_inv*node_means[idx]);
   }
 
   std::pair<double, double> EvaluateErr(const Eigen::Vector3d &dir) const
   {
     const auto uv = MapSphereToTree(dir.cast<float>());
     auto [idx, area_inv] = FindNodeAndInvSolidAngle(uv);
-    return { area_inv*node_means[idx], area_inv*node_stddev[idx] };
+    return AssertFinite({ area_inv*node_means[idx], area_inv*node_stddev[idx] });
   }
 
   std::pair<double, double> EvaluateFluxErr() const
   {
-    return { node_means[tree.GetRoot().idx], node_stddev[tree.GetRoot().idx] };
+    return AssertFinite({ node_means[tree.GetRoot().idx], node_stddev[tree.GetRoot().idx] });
   }
 
   Float3 ComputeStochasticFilteredDirection(const IncidentRadiance & rec, Sampler &sampler) const;
@@ -283,7 +300,6 @@ class RadianceDistributionLearned
 {
   quadtree::Tree tree;
   Accumulators::SoaOnlineVariance<double, long> node_weights;
-  //Accumulators::OnlineVariance<double, int64_t> incident_flux_density_accum;
 
   inline Eigen::ArrayXd CalcRelativeCounts() const
   {
@@ -294,13 +310,16 @@ class RadianceDistributionLearned
     return ret;
   }
 
+  static constexpr double min_sample_count = 2;
+  static constexpr double good_sample_count = 100;
+
 public:
   class Parameters
   {
     friend class RadianceDistributionLearned;
-
   public:
-    Parameters(const CellData &cd) {}
+    Parameters(const CellData &cd, int round) : round{round} {}
+    int round;
   };
 
   RadianceDistributionLearned()
@@ -308,8 +327,7 @@ public:
   {
   }
 
-  void IncrementalFit(Span<const IncidentRadiance> buffer, const Parameters &params);
-
+  void IncrementalFit(Span<const IncidentRadiance> buffer, const Parameters &params, RadianceDistributionSampled &sampled_distrib);
   void InitialFit(Span<const IncidentRadiance> buffer, const Parameters &params);
 
   RadianceDistributionSampled IterationUpdateAndBake(const RadianceDistributionSampled &previous_radiance_dist);
@@ -469,6 +487,7 @@ class PathGuiding
         tbb::task_group the_task_group;
 
         int round = 0;
+        int sub_round = 0;
 };
 
 

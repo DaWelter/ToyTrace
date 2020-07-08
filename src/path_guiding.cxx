@@ -169,23 +169,34 @@ inline void PushWeight(
 }
 
 
-void RadianceDistributionLearned::IncrementalFit(Span<const IncidentRadiance> buffer, const Parameters &params)
+void RadianceDistributionLearned::IncrementalFit(
+  Span<const IncidentRadiance> buffer, 
+  const Parameters &params, 
+  RadianceDistributionSampled &dst)
 {
+  assert(params.round > 0);
+
   for (auto in : buffer)
   {
-    //const float weight = in.is_original ? in.weight * 0.2 : in.weight * 0.8;
-    // if (in.is_original)
-    //   incident_flux_density_accum += in.weight;
-
-    // if (in.weight <= 0.)
-    //   continue;
-
     if (in.is_original)
       continue;
-
     const auto uv = MapSphereToTree(in.reverse_incident_dir);
     PushWeight(tree, node_weights, uv, in.weight);
   }
+
+  Eigen::ArrayXd relative_counts = this->CalcRelativeCounts();
+  Eigen::ArrayXd node_means = relative_counts*this->node_weights.Mean();
+  const double total_flux = node_means[tree.GetRoot().idx];
+  Eigen::ArrayXd node_stddev = relative_counts*this->node_weights.MeanErr((double)LargeFloat, min_sample_count);
+  Eigen::ArrayXd mix_factor = good_sample_count / (good_sample_count + (node_weights.Counts().cast<double>()-min_sample_count).max(0.));
+  // This stuff is inspired by the UCB algorithm for Multi-Armed-Bandits. It should ensure that, as the number of training passes goes up, we 
+  // ocassionally re-visit each node and sample from it. It is an answer to the exporation-exploitation problem in reinforcement learning type problems.
+  // The difference to the regular UCB algorithm is that the sampling probability is proportional to the upper confidence bounds, instead of sampling the
+  // arm with the largest bound.
+  dst.node_sample_probs = (dst.node_sample_prior.cast<double>()*mix_factor + (node_means + node_stddev)*(1.-mix_factor)).cast<float>();
+  dst.node_sample_probs += total_flux*(std::log((double)params.round) * (node_weights.Counts()+1).cast<double>().cwiseInverse()).sqrt().cast<float>();
+  quadtree::PropagateLeafWeightsToParents(tree, AsSpan(dst.node_sample_probs), tree.GetRoot());
+  assert(dst.node_sample_probs.allFinite());
 }
 
 
@@ -203,17 +214,12 @@ void RadianceDistributionLearned::InitialFit(Span<const IncidentRadiance> buffer
     PushWeight(tree, node_weights, points[i], weights[i]);
   }
 
-  // incident_flux_density_accum = decltype(incident_flux_density_accum){};
-  // for (auto in : buffer)
-  // {
-  //   incident_flux_density_accum += in.weight;
-  // }
-
   //fmt::print("initial quadtree fit with {} nodes, root flux {}\n", tree.NumNodes(), node_weights[tree.GetRoot().idx]);
 }
 
 
-RadianceDistributionSampled RadianceDistributionLearned::IterationUpdateAndBake(const RadianceDistributionSampled &previous_radiance_dist)
+RadianceDistributionSampled RadianceDistributionLearned::IterationUpdateAndBake(
+  const RadianceDistributionSampled &previous_radiance_dist)
 {
   // The adaptation part
   if (node_weights.Counts()[tree.GetRoot().idx]>10)
@@ -242,17 +248,18 @@ RadianceDistributionSampled RadianceDistributionLearned::IterationUpdateAndBake(
 
     this->node_weights = adapted_stats;
 
-    const double min_sample_count = 2;
-    const double good_sample_count = 100;
     Eigen::ArrayXd mix_factor = good_sample_count / (good_sample_count + (node_weights.Counts().cast<double>()-min_sample_count).max(0.));
 
     RadianceDistributionSampled dst;
     dst.tree = this->tree;
     dst.node_means = relative_counts*this->node_weights.Mean();
-    dst.node_stddev = relative_counts*this->node_weights.MeanErr((double)LargeFloat, min_sample_count);
+    dst.node_stddev = relative_counts*this->node_weights.MeanErr(safe_error_number, min_sample_count);
     dst.node_sample_probs = (prior.cast<double>()*mix_factor + (dst.node_means + dst.node_stddev)*(1.-mix_factor)).cast<float>();
-    
     quadtree::PropagateLeafWeightsToParents(tree, AsSpan(dst.node_sample_probs), tree.GetRoot());
+    dst.node_sample_prior = dst.node_sample_probs;
+
+    this->node_weights = decltype(node_weights)(tree.NumNodes());
+
     assert(dst.node_means.allFinite());
     assert(dst.node_stddev.allFinite());
     assert(dst.node_sample_probs.allFinite());
@@ -271,18 +278,13 @@ RadianceDistributionSampled RadianceDistributionLearned::Bake() const
   
   auto relative_counts = this->CalcRelativeCounts();
   dst.node_means = relative_counts*this->node_weights.Mean();
-  dst.node_stddev = relative_counts*this->node_weights.MeanErr(LargeNumber, 10);
+  dst.node_stddev = relative_counts*this->node_weights.MeanErr(safe_error_number, 10);
   dst.node_sample_probs = dst.node_means.cast<float>();
+  dst.node_sample_prior = dst.node_sample_probs;
   quadtree::PropagateLeafWeightsToParents(tree, AsSpan(dst.node_sample_probs), tree.GetRoot());
   assert(dst.node_means.allFinite());
   assert(dst.node_stddev.allFinite());
   assert(dst.node_sample_probs.allFinite());
-
-  // dst.incident_flux_density = this->incident_flux_density_accum.Mean();
-  // dst.incident_flux_confidence_bounds = this->incident_flux_density_accum.Count() >= 10 ?
-  //   std::sqrt(this->incident_flux_density_accum.Var() / static_cast<double>(this->incident_flux_density_accum.Count())) : LargeNumber;
-  // assert(std::isfinite(dst.incident_flux_confidence_bounds));
-  // assert(std::isfinite(dst.incident_flux_density));
   return dst;
 }
 
@@ -439,7 +441,7 @@ void PathGuiding::FitTheSamples(Span<ThreadLocal*> thread_locals)
 
   auto cell_indices = ComputeCellIndices(AsSpan(samples));
 
-#if 1
+#if 1 // Stochastic smoothing filter samples
   const auto noriginal = samples.size();
   samples.reserve(noriginal*2);
   cell_indices.reserve(noriginal*2);
@@ -466,14 +468,16 @@ void PathGuiding::FitTheSamples(Span<ThreadLocal*> thread_locals)
       FitTheSamples(cell_data[cell_idx], samples);
     }
   });
+
+  ++sub_round;
 }
 
 
 
 void PathGuiding::FitTheSamples(CellData &cell, Span<IncidentRadiance> buffer) const
 {
-  RadianceDistributionLearned::Parameters params{ cell };
-  cell.learned.radiance_distribution.IncrementalFit(buffer, params);
+  RadianceDistributionLearned::Parameters params{ cell, sub_round };
+  cell.learned.radiance_distribution.IncrementalFit(buffer, params, cell.current_estimate.radiance_distribution);
   AddToPointStatistics(cell, buffer);
 
 #ifdef PATH_GUIDING_WRITE_SAMPLES_ACTUALLY_ENABLED
@@ -491,6 +495,7 @@ void PathGuiding::FitTheSamples(CellData &cell, Span<IncidentRadiance> buffer) c
 void PathGuiding::BeginRound(Span<ThreadLocal*> thread_locals)
 {
   round++;
+  sub_round = 1;
 
   const auto n = recording_tree.NumLeafs();
   assert(n == cell_data.size());
@@ -652,8 +657,8 @@ void PathGuiding::AdaptInitial(Span<ThreadLocal*> thread_locals)
       AddToPointStatistics(cd, cell_samples);
       InitializePcaFrame(cd.current_estimate, cd.learned);
 
-      RadianceDistributionLearned::Parameters params{ cd };
-      cd.learned.radiance_distribution.InitialFit(cell_samples, cd);
+      RadianceDistributionLearned::Parameters params{ cd, 1 };
+      cd.learned.radiance_distribution.InitialFit(cell_samples, params);
       cd.current_estimate.radiance_distribution = cd.learned.radiance_distribution.Bake();
   });
 
