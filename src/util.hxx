@@ -60,6 +60,21 @@ inline float Rcp(float x)
   return 1.f/x;
 }
 
+inline constexpr double Pow(double x, std::uint32_t e)
+{
+  // This is the binary exponentiation algorithm
+  // https://de.wikipedia.org/wiki/Bin%C3%A4re_Exponentiation
+  std::uint32_t bit = 1<< (sizeof(e)*8-1);
+  double ret = 1.;
+  while (bit)
+  {
+    ret = ret*ret;
+    ret = (e&bit) ? ret*x : ret;
+    bit >>= 1;
+  }
+  return ret;
+}
+
 // t = 0: Returns a
 // t = 1: Returns b
 // otherwise linear inter/extra-polation

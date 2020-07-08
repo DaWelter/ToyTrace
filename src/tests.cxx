@@ -242,6 +242,14 @@ TEST(TestMath, RaySphereClip)
 }
 
 
+TEST(TestMath, Pow)
+{
+  EXPECT_EQ(util::Pow(5.,0), 1.);
+  EXPECT_EQ(util::Pow(5.,1), 5.);
+  EXPECT_NEAR(util::Pow(5.,27), std::pow(5.,27.), 1.e-9);
+  EXPECT_NEAR(util::Pow(0.25,12), std::pow(0.25,12), 1.e-9);
+}
+
 
 
 TEST(Spectral, RGBConversion)
