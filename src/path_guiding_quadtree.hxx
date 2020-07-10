@@ -243,7 +243,7 @@ private:
   ToyVector<NewToOld> new_to_old;
   Weights all_weights;
   const Tree *tree = nullptr;
-  float weight_threshold{ NaN };
+  float weight_threshold{ std::numeric_limits<float>::quiet_NaN() };
 
   // Takes the weight of the original leaf as input
   Handle SplitLeaf(float weight, int depth, NewToOld old)
@@ -315,7 +315,7 @@ class Builder
   Points all_points;
   Weights all_weights;
   ToyVector<float> node_weights;
-  float weight_threshold = NaN;
+  float weight_threshold = std::numeric_limits<float>::quiet_NaN();
 
   Handle BuildRecursive(Points points, Weights weights, const Region &region, int depth);
 
