@@ -120,6 +120,11 @@ using MaybeSomeInteraction = std::optional<SomeInteraction>;
 
 Double3 AntiSelfIntersectionOffset(const SurfaceInteraction &interaction, const Double3 &exitant_dir);
 
+namespace scenereader
+{
+struct Scope;
+void AddDefaultMaterials(Scope &scope, const Scene &scene);
+}
 
 class Scene
 {
@@ -129,7 +134,8 @@ public:
 
 private:
   friend class NFFParser;
-  friend struct Scope;
+  //friend struct Scope;
+  friend void scenereader::AddDefaultMaterials(Scope &scope, const Scene &scene);
   friend class EmbreeAccelerator;
   friend class PrimitiveIterator;
   using Light = RadianceOrImportance::PointEmitter;
@@ -150,6 +156,7 @@ private:
   Medium* empty_space_medium;
   Shader* invisible_shader;
   Shader* default_shader;
+  Shader* black_shader;
   MaterialIndex default_material_index;
   MaterialIndex vacuum_material_index;
 

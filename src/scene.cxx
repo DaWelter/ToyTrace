@@ -13,10 +13,12 @@ Scene::Scene()
     auto vac_medium = std::make_unique<materials::VacuumMedium>();
     auto inv_shader = std::make_unique<InvisibleShader>();
     auto def_shader = std::make_unique<DiffuseShader>(Color::RGBToSpectrum({0.8_rgb, 0.8_rgb, 0.8_rgb}), nullptr);
+    auto black_shader = std::make_unique<DiffuseShader>(SpectralN::Zero(), nullptr);
     this->empty_space_medium = vac_medium.get();
     this->invisible_shader = inv_shader.get();
     this->default_shader = def_shader.get();
-    
+    this->black_shader = black_shader.get();
+
     materials.push_back(Material{def_shader.get(), vac_medium.get()});
     default_material_index = MaterialIndex(isize(materials)-1);
     materials.push_back(Material{inv_shader.get(), vac_medium.get()});
@@ -25,6 +27,7 @@ Scene::Scene()
     media.push_back(std::move(vac_medium));
     shaders.push_back(std::move(inv_shader));      
     shaders.push_back(std::move(def_shader));
+    shaders.push_back(std::move(black_shader));
 }
 
 

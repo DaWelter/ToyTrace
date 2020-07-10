@@ -125,7 +125,7 @@ target_include_directories(eigen_plugins INTERFACE "src/eigen_plugins")
 
 
 add_library(commonstuff STATIC
-  src/image.cxx  src/parsenff.cxx  src/shader.cxx src/ray.cxx src/sampler.cxx
+  src/image.cxx  src/parsenff.cxx src/parse_yaml_scene.cxx src/parse_common.cxx  src/shader.cxx src/ray.cxx src/sampler.cxx
   src/phasefunctions.cxx src/atmosphere.cxx src/spectral.cxx src/primitive.cxx src/renderingalgorithms.cxx 
   src/light.cxx src/texture.cxx src/embreeaccelerator.cxx src/scene.cxx src/lightpicker_trivial.cxx src/lightpicker_ucb.cxx src/renderingalgorithms_photonmap.cxx src/renderingalgorithms_pathtracing2.cxx 
   src/renderingalgorithms_normalvisualizer.cxx src/renderingalgorithms_pathtracing.cxx
