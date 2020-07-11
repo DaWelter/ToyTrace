@@ -247,3 +247,119 @@ s 0 0 0 1.0
   Scene scene;
   scene.ParseNFFString(scenestr);
 }
+
+
+TEST(Parser, YamlScene)
+{
+  const char* scenestr = R"""(
+view:
+    from: [ 0., 0.8, 1.3 ]
+    at: [ 0., 0.6, 0. ]
+    up: [ 0., 1., 0. ]
+    angle: 50
+
+media:
+  - name: water
+    class: homogeneous
+    absorb: [ 0.4, 0.7, 0.9 ]
+    scatter:  [ 0.01, 0.01, 0.01 ]
+   
+shaders:
+  - name: earthmap
+    class: glossytransmissivedielectric
+    alpha: 0.3
+    #alpha_min: 0.01
+    ior_ratio: 1.5
+    #alpha_texture: maptexture2.jpg
+    prefer_path_tracing: true
+
+  - class: glossytransmissivedielectric
+    name: dome
+    alpha: 0.2
+    #alpha_min: 0.01
+    ior_ratio: 1.5
+    #alpha_texture: starsondome.png
+    prefer_path_tracing: true
+
+  - class: glossytransmissivedielectric
+    name: glass
+    alpha: 0.01
+    ior_ratio: 1.5
+    prefer_path_tracing: true
+
+materials:
+  - name: glass_water
+    shader: glass
+    medium: water
+
+  - name: earthmap
+    shader:
+        class: glossytransmissivedielectric
+        alpha: 0.3
+        #alpha_min: 0.01
+        ior_ratio: 1.5
+        #alpha_texture: maptexture2.jpg
+        prefer_path_tracing: true
+
+  - name: light
+    shader: black
+    arealight:
+        class: uniform
+        rgb: [ 1., 1., 1. ]
+        rgb_x: 100
+
+  - name: bluediffuse
+    shader:
+      class: diffuse
+      rgb: [ 0., 0., 1. ]
+      rgb_x: 0.7
+
+  - name: red
+    shader:
+      class: diffuse
+      rgb: [ 1., 0., 0. ]
+      rgb_x: 0.7
+
+
+models:
+  - sphere:
+    defaultmaterial: earthmap
+    position: [ 1., 2., 3. ]
+    radius: 5.
+
+  - file: testing/scenes/cornelbox.dae
+    defaultmaterial: default
+    materialmap:
+      white: earthmap
+      blue: bluediffuse
+
+scopes:
+  - transforms: # Transform all of the scope
+          - pos: [-0.01, 0.4, -0.55]
+          - rotaxis: [30, 30, 0]
+          - scale: [ 0.35, 0.35, 0.35]
+          - pos: [-0.01, 0.4, -0.55]
+
+    models:
+    - sphere:
+      defaultmaterial: light
+      position: [ 0., 0., 0. ]
+      radius: 1.
+
+    - sphere:
+      defaultmaterial: somethingmat
+      position: [ 0., 0., 0. ]
+      radius: 1.
+
+    materials:
+    - name: somethingmat
+      shader:
+        class: glossy
+        alpha: 0.2
+        rgb: [ 1., 1., 1. ]
+        rgb_x: 0.3 
+  )""";
+  Scene scene;
+  std::istringstream is; is.str(scenestr);
+  scene.ParseYAML(is, nullptr, {});
+}

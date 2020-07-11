@@ -47,6 +47,7 @@ struct Material
   Shader* shader = {nullptr};
   Medium* medium = {nullptr};  // Within the geometry. I.e. on the other side of where the surface normal points.
   RadianceOrImportance::AreaEmitter *emitter = {nullptr};
+  Medium* outer_medium = { nullptr };
   
   struct Hash
   {
@@ -55,6 +56,7 @@ struct Material
       std::size_t h = boost::hash_value((key.shader));
       boost::hash_combine(h, boost::hash_value((key.medium)));
       boost::hash_combine(h, boost::hash_value((void*)key.emitter));
+      boost::hash_combine(h, boost::hash_value((void*)key.outer_medium));
       return h;
     }
   };
@@ -63,7 +65,8 @@ struct Material
   {
     return (a.shader == b.shader) &&
           (a.medium == b.medium) &&
-          (a.emitter == b.emitter);
+          (a.emitter == b.emitter) && 
+          (a.outer_medium == b.outer_medium);
   }
 };
 
@@ -124,6 +127,7 @@ namespace scenereader
 {
 struct Scope;
 void AddDefaultMaterials(Scope &scope, const Scene &scene);
+class YamlSceneReader;
 }
 
 class Scene
@@ -134,8 +138,8 @@ public:
 
 private:
   friend class NFFParser;
-  //friend struct Scope;
-  friend void scenereader::AddDefaultMaterials(Scope &scope, const Scene &scene);
+  friend class scenereader::YamlSceneReader;
+  friend void scenereader::AddDefaultMaterials(scenereader::Scope &scope, const Scene &scene);
   friend class EmbreeAccelerator;
   friend class PrimitiveIterator;
   using Light = RadianceOrImportance::PointEmitter;
@@ -171,9 +175,11 @@ private:
 public:
   Scene();
   ~Scene();
+  void ParseSceneFile(const boost::filesystem::path &filename, RenderingParameters *render_params = nullptr);
   void ParseNFF(const boost::filesystem::path &filename, RenderingParameters *render_params = nullptr);
   void ParseNFFString(const std::string &scenestr, RenderingParameters *render_params = nullptr);
   void ParseNFF(std::istream &is, RenderingParameters *render_params = nullptr);
+  void ParseYAML(std::istream &is, RenderingParameters *render_params, const boost::filesystem::path &filename_hint);
   void WriteObj(const boost::filesystem::path &filename) const;
 
   const Camera& GetCamera() const

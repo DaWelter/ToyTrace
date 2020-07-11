@@ -19,6 +19,8 @@ void AddDefaultMaterials(Scope &scope, const Scene &scene)
   scope.shaders.set_and_activate("none", nullptr);
   scope.shaders.set_and_activate("default", scene.default_shader);
   scope.areaemitters.set_and_activate("none", nullptr);
+  scope.materials["default"] = Material{ 
+    /*shader =*/ scene.default_shader };
 }
 
 
@@ -193,7 +195,7 @@ struct NodeRef
 
 
 
-void ReadNode(Scene &scene, Transform model_transform, MaterialGetter material_getter, const aiScene* aiscene, const NodeRef &ndref)
+void ReadNode(Scene &scene, Transform model_transform, MaterialGetter material_getter, bool material_assignment_by_object_names, const aiScene* aiscene, const NodeRef &ndref)
 {
   const auto *nd = ndref.node;
   for (unsigned int mesh_idx = 0; mesh_idx < nd->mNumMeshes; ++mesh_idx)
@@ -201,13 +203,20 @@ void ReadNode(Scene &scene, Transform model_transform, MaterialGetter material_g
     const aiMesh* aimesh = aiscene->mMeshes[nd->mMeshes[mesh_idx]];
     fmt::print("Mesh {} ({}), mat_idx={}\n", mesh_idx, aimesh->mName.C_Str(), aimesh->mMaterialIndex);
     auto mesh = ReadMesh(model_transform, ndref.local_to_world, aimesh);
-    auto material_name = GetMaterialName(aiscene, aimesh);
+    auto material_name = [&]() -> std::optional<std::string> {
+      if (material_assignment_by_object_names)
+      {
+        return { std::string{aimesh->mName.C_Str()} };
+      }
+      else
+        return GetMaterialName(aiscene, aimesh);
+    }();
     scene.Append(mesh, material_getter(material_name));
   }
 }
 
 
-void Read(Scene & scene, Transform model_transform, MaterialGetter material_getter, const fs::path & filename_path)
+void Read(Scene & scene, Transform model_transform, MaterialGetter material_getter, bool material_assignment_by_object_names, const fs::path & filename_path)
 {
   // Example see: https://github.com/assimp/assimp/blob/master/samples/SimpleOpenGL/Sample_SimpleOpenGL.c
   const std::string filename_str = filename_path.string();
@@ -233,7 +242,7 @@ void Read(Scene & scene, Transform model_transform, MaterialGetter material_gett
       nodestack.push_back({ ndref.node->mChildren[i], ndref.local_to_world });
     }
 
-    ReadNode(scene, model_transform, material_getter, aiscene, ndref);
+    ReadNode(scene, model_transform, material_getter, material_assignment_by_object_names, aiscene, ndref);
   }
 
   aiReleaseImport(aiscene);

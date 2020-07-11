@@ -303,3 +303,18 @@ void Scene::WriteObj(const boost::filesystem::path &filename) const
     of << "\n";
   }
 }
+
+
+void Scene::ParseSceneFile(const boost::filesystem::path &filename, RenderingParameters *render_params)
+{
+  const auto ext = filename.extension().string();
+  if (ext == ".yaml")
+  {
+    std::ifstream f{ filename.string() };
+    ParseYAML(f, render_params, filename);
+  }
+  else if (ext == ".nff")
+  {
+    ParseNFF(filename, render_params);
+  }
+}

@@ -30,7 +30,7 @@ static constexpr int NBINS = 36;
 // http://www.boost.org/doc/libs/1_61_0/libs/serialization/doc/strong_typedef.html
 using Spectral3    = Eigen::Array<Scalar, 3, 1>;
 using SpectralN    = Eigen::Array<Scalar, NBINS, 1>;
-using RGB          = Eigen::Array<RGBScalar, 3, 1>;  // Alias of Spectral3 which is not ideal because they can be mixed.
+using RGB          = Eigen::Array<RGBScalar, 3, 1>;
 using Wavelengths3 = Eigen::Array<Scalar, 3, 1>; // The actual wavelengths
 using Spectral3f   = Eigen::Array<float, 3, 1>;
 

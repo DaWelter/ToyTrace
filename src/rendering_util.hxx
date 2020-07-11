@@ -21,8 +21,7 @@ class MediumTracker
   const Medium* current;
   std::array<const Medium*, MAX_INTERSECTING_MEDIA> media;
   const Scene *scene;
-  void enterVolume(const Medium *medium);
-  void leaveVolume(const Medium *medium);
+  void goingThroughSurface(const Double3 &dir_of_travel, const Float3 &surf_normal, const Material &mat);
   const Medium* findMediumOfHighestPriority() const;
   bool remove(const Medium *medium);
   bool insert(const Medium *medium);
@@ -48,25 +47,46 @@ inline const Medium& MediumTracker::getCurrentMedium() const
 
 inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const SurfaceInteraction& intersection)
 {
-  const Medium *m = scene->GetMaterialOf(intersection.hitid).medium;
-  if (!m)
-    return;
-  if (Dot(dir_of_travel, intersection.geometry_normal) < 0)
-    enterVolume(m);
-  else
-    leaveVolume(m);
+  const auto& mat = scene->GetMaterialOf(intersection.hitid);
+  goingThroughSurface(dir_of_travel, intersection.geometry_normal.cast<float>(), mat);
 }
+
 
 
 inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const BoundaryIntersection& intersection)
 {
-  const Medium *m = scene->GetMaterialOf(intersection.geom, intersection.prim).medium;
-  if (!m)
+  const auto& mat = scene->GetMaterialOf(intersection.geom, intersection.prim);
+  goingThroughSurface(dir_of_travel, intersection.n, mat);
+}
+
+
+inline void MediumTracker::goingThroughSurface(const Double3 &dir_of_travel, const Float3 &surf_normal, const Material &mat)
+{
+  if (!mat.medium & !mat.outer_medium)
     return;
-  if (Dot(dir_of_travel.cast<float>(), intersection.n) < 0)
-    enterVolume(m);
-  else
-    leaveVolume(m);
+
+  const auto* to_enter = mat.medium;
+  const auto* to_exit = mat.outer_medium;
+  if (Dot(dir_of_travel.cast<float>(), surf_normal) > 0.f)
+    std::swap(to_enter, to_exit);
+  
+  if (to_exit)
+  {
+    // If the medium is in the media stack, remove it.
+    // And also make the medium of highest prio the current one.
+    remove(to_exit);
+    if (to_exit == current)
+    {
+      current = findMediumOfHighestPriority();
+    }
+  }
+  if (to_enter)
+  {
+    // Set one of the array entries that is currently nullptr to the new medium pointer.
+    // But only if there is room left. Otherwise the new medium is ignored.
+    bool was_inserted = insert(to_enter);
+    current = (was_inserted && to_enter->priority > current->priority) ? to_enter : current;
+  }
 }
 
 
@@ -105,26 +125,6 @@ inline bool MediumTracker::insert(const Medium *medium)
   return is_place_empty;
 }
 
-
-inline void MediumTracker::enterVolume(const Medium* medium)
-{
-  // Set one of the array entries that is currently nullptr to the new medium pointer.
-  // But only if there is room left. Otherwise the new medium is ignored.
-  bool was_inserted = insert(medium);
-  current = (was_inserted && medium->priority > current->priority) ? medium : current;
-}
-
-
-inline void MediumTracker::leaveVolume(const Medium* medium)
-{
-  // If the medium is in the media stack, remove it.
-  // And also make the medium of highest prio the current one.
-  remove(medium);
-  if (medium == current)
-  {
-    current = findMediumOfHighestPriority();
-  }
-}
 
 // For scattered rays, which can either be reflected or transmitted. But it is not clear which of them happened.
 inline void MaybeGoingThroughSurface(MediumTracker &mt, const Double3& dir_of_travel, const SurfaceInteraction &surf)

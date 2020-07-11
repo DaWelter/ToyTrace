@@ -486,6 +486,26 @@ struct Overload : Fs... {
 template <class ...Ts>
 Overload(Ts&&...) -> Overload<std::remove_reference_t<Ts>...>;
 
+// TODO: check if we have an iterator in It
+template<class It, class Trafo>
+inline std::string Join(const std::string &sep, It begin, It end, Trafo trafo)
+{
+  if (begin == end)
+    return {};
+  std::ostringstream os;
+  It prev = begin;
+  ++begin;
+  while (begin != end)
+  {
+    os << trafo(*prev) << sep;
+    prev = begin;
+    ++begin;
+  }
+  os << trafo(*prev);
+  return os.str();
+}
+
+
 } // namespace util
 
 using util::Overload;

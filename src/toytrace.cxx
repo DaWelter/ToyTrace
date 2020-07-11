@@ -98,13 +98,23 @@ int main(int argc, char *argv[])
   
   std::cout << "Parsing input file " << input_file << std::endl;
   std::cout << "Output to " << output_file << std::endl;
-  if (input_file.string() != "-")
+
+  try 
   {
-    scene.ParseNFF(input_file.c_str(), &render_params);
+    if (input_file.string() != "-")
+    {
+      scene.ParseSceneFile(input_file.c_str(), &render_params);
+    }
+    else
+    {
+      scene.ParseNFF(std::cin, &render_params);
+    }
   }
-  else
+  catch (const std::exception &e)
   {
-    scene.ParseNFF(std::cin, &render_params);
+    std::cerr << "Error parsing the scene file: " << e.what() << "\n";
+    std::cerr << "Exiting ...\n";
+    std::exit(-1);
   }
   
   if (!scene.HasCamera())

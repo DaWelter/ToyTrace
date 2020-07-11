@@ -269,7 +269,7 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
     smpl.value *= radiance_weight;
   }
   
-  assert((smpl.value*std::abs(Dot(surface_hit.shading_normal, smpl.coordinates)) / smpl.pdf_or_pmf).maxCoeff() < 2.0);
+  //assert((smpl.value*std::abs(Dot(surface_hit.shading_normal, smpl.coordinates)) / smpl.pdf_or_pmf).maxCoeff() < 2.0);
   
   if (ior_lambda_coeff != 0)
   {
