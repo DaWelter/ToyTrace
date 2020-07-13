@@ -1110,7 +1110,7 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
   {
     return Medium::InteractionSample{
         LargeNumber,
-        Spectral3{1.},
+        EvaluateTransmissionHomogeneous(segment.length, Take(sigma_ext, context.lambda_idx)),
         Spectral3::Zero(),
       };
   }
