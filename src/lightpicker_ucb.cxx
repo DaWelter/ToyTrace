@@ -107,7 +107,7 @@ void Stats::ComputeDistributionAndUpdate(Eigen::ArrayXd &cummulative_probs, doub
       if (count[i] >= 1)
       {
         auto confidence_bound = std::sqrt(2.* logt / count[i]);
-        cummulative_probs[i] = mean[i] + var[i] + confidence_bound; // TODO: sqrt(variance / n) ????
+        cummulative_probs[i] = mean[i] + std::sqrt(var[i]/count[i]) + confidence_bound;
       }
       else
         cummulative_probs[i] = large_weight;
@@ -115,6 +115,7 @@ void Stats::ComputeDistributionAndUpdate(Eigen::ArrayXd &cummulative_probs, doub
   }
   TowerSamplingInplaceCumSum(AsSpan(cummulative_probs));
   out_weight_sum = cummulative_probs[arm_count - 1];
+  assert(std::isfinite(out_weight_sum) && out_weight_sum > 0.);
   TowerSamplingNormalize(AsSpan(cummulative_probs));
 }
 
