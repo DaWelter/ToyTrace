@@ -166,8 +166,11 @@ int main(int argc, char *argv[])
   
 #ifdef HAVE_JSON
   Pathlogger::Init("/tmp/paths.json");
+  IncompletePaths::Init();
+  scene.WriteObj("/tmp/scene.obj");
 #endif
   
+
   auto algo = RenderAlgorithmFactory(scene, render_params);
   algo->InitializeScene(scene);
   

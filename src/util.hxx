@@ -75,6 +75,32 @@ inline constexpr double Pow(double x, std::uint32_t e)
   return ret;
 }
 
+
+template<class T>
+inline constexpr T Modulus(T a, T m, std::enable_if_t<std::is_integral_v<T> && std::is_signed_v<T>>* = nullptr)
+{
+  //  Example for operator%: -5 % 3 = -2
+  //  Should be one though. Can simply add m if result is negative.
+  const T tmp = a % m;
+  return tmp < 0 ? tmp + m : tmp;
+}
+
+template<class T>
+inline constexpr T Modulus(T a, T m, std::enable_if_t<std::is_integral_v<T> && std::is_unsigned_v<T>>* = nullptr)
+{
+  return a % m;
+}
+
+template<class T>
+inline constexpr T Modulus(T a, T m, std::enable_if_t<std::is_floating_point_v<T>>* = nullptr)
+{
+  //  Example for operator%: -5 % 3 = -2
+  //  Should be one though. Can simply add m if result is negative.
+  const T tmp = std::fmod(a, m);
+  return tmp < 0 ? tmp + m : tmp;
+}
+
+
 // t = 0: Returns a
 // t = 1: Returns b
 // otherwise linear inter/extra-polation

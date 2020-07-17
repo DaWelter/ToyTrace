@@ -1107,10 +1107,6 @@ void PathTracingAlgo2::InnerRenderIteration()
 
 inline void PathTracingAlgo2::Run()
 {
-  //#ifdef WRITE_DEBUG_OUT
-  //scene.WriteObj(guiding::GetDebugFilePrefix() / boost::filesystem::path("scene.obj"));
-  //#endif
-
   if (!stop_flag.load())
   {
     pickers->ComputeDistribution();

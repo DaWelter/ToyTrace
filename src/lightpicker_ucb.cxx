@@ -193,6 +193,7 @@ void PhotonUcbLightPicker::ObserveReturns(Span<const std::pair<int, float>> buff
   for (auto [path_index, value] : buffer)
   {
     ucb_photon_path_returns[path_index] += value;
+    assert(std::isfinite(ucb_photon_path_returns[path_index]));
   }
 }
 
@@ -203,16 +204,6 @@ void PhotonUcbLightPicker::ComputeDistribution()
 {
   ComputeDistributionAndUpdate(stats, distribution);
 }
-
-
-//void SetupGraph(tbb::flow::graph &g)
-//{
-//  tbb::flow::function_node<LightRefReturnsBuffer, tbb::flow::continue_msg> func(g, 1, [&](LightRefReturnsBuffer &buffer) {
-//    // fill
-//  });
-//}
-
-
 
 
 }

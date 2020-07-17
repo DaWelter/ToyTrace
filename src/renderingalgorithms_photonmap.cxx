@@ -94,7 +94,7 @@ inline double EvalKernel(const K &k, const Double3 &a, const Double3 &b)
 
 
 //#define DEBUG_BUFFERS
-//#define LOGGING
+#define LOGGING
 //#define DEBUG_PATH_THROUGHPUT
 
 class LightPickersUcbCombined
@@ -177,7 +177,7 @@ public:
     picker_photon.ComputeDistribution();
     std::cout << "NEE LP: ";
     picker_nee.Distribution().Print(std::cout);
-    std::cout << "NEE PH: ";
+    std::cout << "Photon LP: ";
     picker_photon.Distribution().Print(std::cout);
   }
 
@@ -190,8 +190,11 @@ struct Photon
 {
   Double3 position;
   Spectral3f weight;
-  int path_index;
   Float3 direction;
+#ifdef LOGGING
+  IncompletePaths::SubPathHandle path_handle;
+#endif
+  int path_index;
   short node_number; // Starts at no 2. First node is on the light source.
   bool monochromatic;
 };
@@ -228,9 +231,7 @@ public:
   SpectralN max_uncorrected_bsdf_weight{0};
 #endif
 #ifdef LOGGING
-  bool should_log_path = false;
-  static constexpr double log_path_weight_threshold = 1000.;
-  Pathlogger logger;
+  IncompletePaths logger;
 #endif
   PhotonmappingWorker(PhotonmappingRenderingAlgo *master, int worker_index);
   void StartNewPass(const LambdaSelection &lambda_selection);
@@ -266,7 +267,9 @@ class CameraRenderWorker
   Kernel2d kernel2d;
   Kernel3d kernel3d;
   const int worker_index;
-  
+#ifdef LOGGING
+  mutable Pathlogger logger;
+#endif
 private:
   void InitializePathState(PathState &p, Int2 pixel) const;
   bool TrackToNextInteractionAndRecordPixel(PathState &ps) const;
@@ -469,6 +472,11 @@ inline void PhotonmappingRenderingAlgo::Run()
       });
 
       pickers->OnPassEnd(AsSpan(emitter_refs));
+
+#ifdef LOGGING
+      IncompletePaths::Clear();
+#endif
+
     } // For spectrum sweep
     std::cout << "Sweep " << spp_schedule.GetTotal() << " finished" << std::endl;
     CallInterruptCb(true);
@@ -589,8 +597,8 @@ PhotonmappingWorker::PhotonmappingWorker(PhotonmappingRenderingAlgo *master, int
     context{},
     ray_termination{master->render_params}
 {
-  photons_surface.reserve(1024);
-  photons_volume.reserve(1024);
+  photons_surface.reserve(1024*1024);
+  photons_volume.reserve(1024*1024);
 }
 
 void PhotonmappingWorker::StartNewPass(const LambdaSelection &lambda_selection)
@@ -628,12 +636,12 @@ void PhotonmappingWorker::TracePhotons(int start_index, int count)
     medium_tracker.initializePosition(ray.org);
 #ifdef LOGGING
     {
-      should_log_path = false;
       logger.NewPath();
-      auto &l = logger.AddNode();
+      logger.PushNode();
+      auto &l = logger.GetNode(-1);
       l.position = ray.org;
       l.exitant_dir = ray.dir;
-      l.weight_after = Spectral3::Ones();
+      l.weight = this->current_emission;
     }
 #endif    
     bool keepgoing = true;
@@ -643,12 +651,6 @@ void PhotonmappingWorker::TracePhotons(int start_index, int count)
       keepgoing = TrackToNextInteractionAndScatter(ray, weight_accum);
     }
     while (keepgoing);
-#ifdef LOGGING
-    if (should_log_path)
-    {
-      logger.WritePath();
-    }
-#endif
   }
 }
 
@@ -666,14 +668,27 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
   const bool keepgoing = TrackToNextInteraction(master->scene, ray, context, weight_accum*current_emission, sampler, medium_tracker, nullptr,
     /*surface=*/[&](const SurfaceInteraction &interaction, double distance, const Spectral3 &track_weight) -> bool
     {
+#ifdef LOGGING
+      logger.GetNode(-1).transmission_weight_to_next = track_weight;
+#endif
       weight_accum *= track_weight;
       if (!GetShaderOf(interaction, master->scene).prefer_path_tracing_over_photonmap)
       {
+#ifdef LOGGING
+        logger.PushNode();
+        auto& lg = logger.GetNode(-1);
+        lg.position = interaction.pos;
+        lg.geom_normal = interaction.geometry_normal;
+        lg.is_surface = true;
+#endif
         photons_surface.push_back({
           interaction.pos,
           (weight_accum*current_emission).cast<float>(),
-          /*photon_path_index = */current_photon_index,
           ray.dir.cast<float>(),
+#ifdef LOGGING
+          logger.GetHandle(),
+#endif
+          /*photon_path_index = */current_photon_index,
           (short)current_node_count,
           monochromatic
         });
@@ -686,12 +701,21 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
     },
     /*volume=*/[&](const VolumeInteraction &interaction, double distance, const Spectral3 &track_weight) -> bool
     {
+#ifdef LOGGING
+      logger.GetNode(-1).transmission_weight_to_next = track_weight;
+      logger.PushNode();
+      auto& lg = logger.GetNode(-1);
+      lg.position = interaction.pos;
+#endif
       weight_accum *= track_weight;
       photons_volume.push_back({
         interaction.pos,
         (weight_accum*current_emission).cast<float>(),
-        /*photon_path_index = */current_photon_index,
         ray.dir.cast<float>(),
+#ifdef LOGGING
+          logger.GetHandle(),
+#endif
+        /*photon_path_index = */current_photon_index,
         (short)current_node_count,
         monochromatic
       });
@@ -703,6 +727,9 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
     },
     /*escape*/[&](const Spectral3 &weight) -> bool
     {
+#ifdef LOGGING
+      logger.GetNode(-1).transmission_weight_to_next = weight;
+#endif
       return false;
     }
   );
@@ -712,15 +739,6 @@ bool PhotonmappingWorker::TrackToNextInteractionAndScatter(Ray &ray, Spectral3 &
 
 bool PhotonmappingWorker::ScatterAt(Ray& ray, const SurfaceInteraction& interaction, const Spectral3 &, Spectral3& weight_accum)
 {
-#ifdef LOGGING
-  auto &l = logger.AddNode();
-  l.position = interaction.pos;
-  l.normal = interaction.shading_normal;
-  l.geom_normal = interaction.normal;
-  l.incident_dir = ray.dir;
-  l.weight_before = weight_accum;
-should_log_path |= weight_accum.maxCoeff() > log_path_weight_threshold;
-#endif
   const auto &shader = GetShaderOf(interaction,master->scene);
   auto smpl = shader.SampleBSDF(-ray.dir, interaction, sampler, context);
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, current_node_count, sampler))
@@ -744,9 +762,10 @@ should_log_path |= weight_accum.maxCoeff() > log_path_weight_threshold;
       medium_tracker.goingThroughSurface(ray.dir, interaction);
     }
 #ifdef LOGGING
+    auto &l = logger.GetNode(-1);
     l.exitant_dir = ray.dir;
-    l.weight_after = weight_accum;
-    should_log_path |= weight_accum.maxCoeff() > log_path_weight_threshold;
+    l.weight = smpl.value;
+    l.is_specular = smpl.pdf_or_pmf.IsFromDelta();
 #endif
     return true;
   }
@@ -757,23 +776,16 @@ should_log_path |= weight_accum.maxCoeff() > log_path_weight_threshold;
 
 bool PhotonmappingWorker::ScatterAt(Ray& ray, const VolumeInteraction& interaction, const Spectral3 &track_weight, Spectral3& weight_accum)
 {
-#ifdef LOGGING
-  auto &l = logger.AddNode();
-  l.position = interaction.pos;
-  l.incident_dir = ray.dir;
-  l.weight_before = weight_accum;
-  l.is_surface = false;
-  should_log_path |= weight_accum.maxCoeff() > log_path_weight_threshold;
-#endif
   auto smpl = interaction.medium().SamplePhaseFunction(-ray.dir, interaction.pos, sampler, context);
   bool survive = ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, current_node_count, sampler);
-  weight_accum *= interaction.sigma_s*smpl.value / smpl.pdf_or_pmf;
+  const Spectral3 weight = interaction.sigma_s*smpl.value / smpl.pdf_or_pmf;
+  weight_accum *= weight;
   ray.dir = smpl.coordinates;
   ray.org = interaction.pos;
 #ifdef LOGGING
+  auto &l = logger.GetNode(-1);
   l.exitant_dir = ray.dir;
-  l.weight_after = weight_accum;
-  should_log_path |= weight_accum.maxCoeff() > log_path_weight_threshold;
+  l.weight = smpl.value;
 #endif
   return survive;
 }
@@ -841,6 +853,16 @@ void CameraRenderWorker::InitializePathState(PathState &p, Int2 pixel) const
     p.ray = { pos.coordinates, dir.coordinates };
 
     p.medium_tracker.initializePosition(pos.coordinates);
+
+#ifdef LOGGING
+    logger.NewPath();
+    logger.PushNode();
+    auto &ln = logger.GetNode(-1);
+    ln.position = p.ray.org;
+    ln.exitant_dir = p.ray.dir;
+    ln.weight = p.weight;
+    logger.GetContribution().wavelengths = p.context.lambda_idx;
+#endif
 }
 
 
@@ -850,6 +872,16 @@ bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(PathState &ps) con
   TrackBeam(master->scene, ps.ray, ps.context, sampler, ps.medium_tracker,
     /*surface_visitor=*/[&ps, this, &keepgoing](const SurfaceInteraction &interaction, const Spectral3 &track_weight)
     {
+#ifdef LOGGING
+      {
+        logger.GetNode(-1).transmission_weight_to_next = track_weight;
+        logger.PushNode();
+        auto& ln = logger.GetNode(-1);
+        ln.position = interaction.pos;
+        ln.is_surface = true;
+        ln.geom_normal = interaction.geometry_normal;
+      }
+#endif
       ps.weight *= track_weight;
       AddPhotonContributions(interaction, ps);
       MaybeAddEmission(interaction, ps);
@@ -859,10 +891,17 @@ bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(PathState &ps) con
     },
     /*segment visitor=*/[&ps,this](const RaySegment &segment, const Medium &medium, const PiecewiseConstantTransmittance &pct, const Spectral3 &track_weight)
     {
+#ifdef LOGGING
+      logger.GetNode(-1).transmission_weight_to_next = track_weight;
+      // TODO: deal with these paths ...
+#endif
       AddPhotonBeamContributions(segment, medium, pct, track_weight, ps);
     },
     /* escape_visitor=*/[&ps,this](const Spectral3 &track_weight)
     {
+#ifdef LOGGING
+      logger.GetNode(-1).transmission_weight_to_next = track_weight;
+#endif
       ps.weight *= track_weight;
       AddEnvEmission(ps);
     }
@@ -937,6 +976,29 @@ void CameraRenderWorker::MaybeAddDirectLighting(const SurfaceInteraction &intera
 
     pickers->ObserveReturnNee(this->worker_index, light_ref, measurement_estimator);
     RecordMeasurementToCurrentPixel(measurement_estimator, ps);
+
+#ifdef LOGGING
+    {
+      auto &ln1 = logger.GetNode(-1);
+      ln1.transmission_weight_to_next = transmittance;
+      ln1.weight = bsdf_weight;
+      ln1.exitant_dir = ray.dir;
+    }
+    {
+      logger.PushNode();
+      auto& ln2 = logger.GetNode(-1);
+      ln2.weight = light_weight;
+      logger.GetContribution().pixel_contribution = measurement_estimator;
+      logger.WritePath();
+      logger.PopNode();
+    }
+    { // reset
+      auto &ln1 = logger.GetNode(-1);
+      ln1.transmission_weight_to_next.setZero();
+      ln1.weight.setZero();
+      ln1.exitant_dir.setZero();
+    }
+#endif
 }
 
 
@@ -949,11 +1011,20 @@ bool CameraRenderWorker::MaybeScatterAtSpecularLayer(const SurfaceInteraction &i
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, ps.current_node_count, sampler))
   {
     ps.monochromatic |= shader.require_monochromatic;
-    ps.weight *= smpl.value * DFactorPBRT(interaction, smpl.coordinates) / smpl.pdf_or_pmf;
+    Spectral3 scatter_weight = smpl.value * DFactorPBRT(interaction, smpl.coordinates) / smpl.pdf_or_pmf;
+    ps.weight *= scatter_weight;
     ps.ray.dir = smpl.coordinates;
     ps.ray.org = interaction.pos + AntiSelfIntersectionOffset(interaction, ps.ray.dir);
     MaybeGoingThroughSurface(ps.medium_tracker, ps.ray.dir, interaction);
     ps.last_scatter_pdf_value = smpl.pdf_or_pmf;
+#ifdef LOGGING
+    {
+      auto& ln = logger.GetNode(-1);
+      ln.weight = scatter_weight;
+      ln.exitant_dir = ps.ray.dir;
+      ln.is_specular = smpl.pdf_or_pmf.IsFromDelta();
+    }
+#endif
     return true;
   }
   else
@@ -981,7 +1052,18 @@ void CameraRenderWorker::MaybeAddEmission(const SurfaceInteraction &interaction,
 #ifdef DEBUG_BUFFERS 
     AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_BSDF, 0, radiance*weight_accum);
 #endif
-    RecordMeasurementToCurrentPixel(mis_weight*radiance*ps.weight, ps);
+    Spectral3 measurement_contribution = mis_weight * radiance*ps.weight;
+    RecordMeasurementToCurrentPixel(measurement_contribution, ps);
+
+#ifdef LOGGING
+    {
+      auto& ln = logger.GetNode(-1);
+      ln.weight = radiance;
+      logger.GetContribution().pixel_contribution = measurement_contribution;
+      logger.WritePath();
+      ln.weight.setZero();
+    }
+#endif
 }
 
 
@@ -1004,7 +1086,20 @@ void CameraRenderWorker::AddEnvEmission(const PathState &ps) const
 #ifdef DEBUG_BUFFERS 
     AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_BSDF, 0, radiance*path_weight);
 #endif
-    RecordMeasurementToCurrentPixel(mis_weight*radiance*ps.weight, ps);
+    const Spectral3 measurement_contribution = mis_weight * radiance*ps.weight;
+    RecordMeasurementToCurrentPixel(measurement_contribution, ps);
+
+#ifdef LOGGING
+    {
+      logger.PushNode();
+      auto& ln = logger.GetNode(-1);
+      ln.position = ps.ray.org + 100. * ps.ray.dir;
+      ln.weight = radiance;
+      logger.GetContribution().pixel_contribution = measurement_contribution;
+      logger.WritePath();
+      logger.PopNode();
+    }
+#endif
 }
 
 
