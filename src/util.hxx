@@ -220,9 +220,17 @@ class AlignedAllocator
     using propagate_on_container_move_assignment = std::true_type;
     using is_always_equal = std::true_type;
 
-    // By default we may have some random align a. But if type specify 
-    // alignas(b) with b>a, I'd get crashes without this little correction.
-    static constexpr size_t true_alignment = std::max(alignment, alignof(T));
+    static constexpr size_t ComputeTrueAlignment()
+    {
+      // By default we may have some random align a. But if type specify 
+      // alignas(b) with b>a, I'd get crashes without this little correction.
+      if constexpr (std::is_void_v<T>)
+        return alignment;
+      else
+        return std::max(alignment, alignof(T));
+    }
+
+    static constexpr size_t true_alignment = ComputeTrueAlignment();
     // Check requirements for posix_memalign.
     static_assert(true_alignment % sizeof(void*) == 0);
 
