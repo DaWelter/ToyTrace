@@ -71,7 +71,10 @@ class SphericalQuadtree(object):
 def read_quadtree(data):
     children = np.array(data['children']).T
     qt = path_guiding.QuadTree(children, data['root'])
-    weights = np.array(data['node_weights'])
+    if 'node_weights' in data:
+        weights = np.array(data['node_weights'])
+    else:
+        weights = np.array(data['node_means'])
     return SphericalQuadtree(qt, weights)
 
 

@@ -250,8 +250,8 @@ def make_the_all_spheres_poly_data(datas):
     # mapper
     mapper = vtk.vtkPolyDataMapper()
     mapper.SetInputData(appendFilter.GetOutput())
-    #mapper.SetLookupTable(generate_log_ctf(maxval))
-    mapper.SetLookupTable(lut)
+    mapper.SetLookupTable(generate_log_ctf(maxval))
+    #mapper.SetLookupTable(lut)
     mapper.SetColorModeToMapScalars()
     #mapper.SetScalarRange(0., maxval)
     #print ("maxval=",maxval)
