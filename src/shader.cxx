@@ -241,7 +241,8 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
   }
   assert (fresnel_reflectivity >= -0.00001 && fresnel_reflectivity <= 1.000001);
   
-  bool do_sample_reflection = sampler.Uniform01() < fresnel_reflectivity;
+  const double prob_reflection = wt ? std::max(0.1, std::min(0.9, fresnel_reflectivity)) : 1.;
+  bool do_sample_reflection = wt ? sampler.Uniform01() < prob_reflection : true;
   assert (do_sample_reflection || (bool)(wt));
   
   // First determine PDF and randomwalk direction.
@@ -249,17 +250,20 @@ ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &re
   if (do_sample_reflection)
   {
     smpl.coordinates = Reflected(reverse_incident_dir, surface_hit.shading_normal);
-    smpl.pdf_or_pmf = Pdf::MakeFromDelta(fresnel_reflectivity);
+    smpl.pdf_or_pmf = Pdf::MakeFromDelta(prob_reflection);
+    // Veach style handling of shading normals. See  Veach Figure 5.8.
+    // In this case, the BRDF and the BTDF are almost equal.
+    smpl.value = fresnel_reflectivity;
   }
   else
   {
     smpl.coordinates = *wt;
-    smpl.pdf_or_pmf = Pdf::MakeFromDelta(1.-fresnel_reflectivity);
+    smpl.pdf_or_pmf = Pdf::MakeFromDelta(1.- prob_reflection);
+    smpl.value = 1. - fresnel_reflectivity;
   }
-  
-  // Veach style handling of shading normals. See  Veach Figure 5.8.
-  // In this case, the BRDF and the BTDF are almost equal.
-  smpl.value = (double)smpl.pdf_or_pmf / std::abs(Dot(smpl.coordinates, surface_hit.shading_normal));
+
+  smpl.value /= std::abs(Dot(smpl.coordinates, surface_hit.shading_normal));
+
   // Must use the fresnel_reflectivity term like in the pdf to make it cancel.
   // Then I must use the dot product with the shading normal to make it cancel with the 
   // corresponding term in the reflection integration (outside of BSDF code).
