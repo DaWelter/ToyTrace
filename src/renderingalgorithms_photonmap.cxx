@@ -94,7 +94,7 @@ inline double EvalKernel(const K &k, const Double3 &a, const Double3 &b)
 
 
 //#define DEBUG_BUFFERS
-#define LOGGING
+//#define LOGGING
 //#define DEBUG_PATH_THROUGHPUT
 
 class LightPickersUcbCombined
