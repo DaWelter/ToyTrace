@@ -9,7 +9,7 @@
 
 #include "sampler.hxx"
 #include "spectral.hxx"
-#include "memory_arena.hxx"
+//#include "memory_arena.hxx"
 
 #ifdef PRODUCT_DISTRIBUTION_SAMPLING
 #include "distribution_mixture_models.hxx"
@@ -146,6 +146,7 @@ inline void Accumulate(VolumePdfCoefficients &accumulated, const VolumePdfCoeffi
 
 
 
+#if 0
 using PhaseFunctionPtr = util::MemoryArena::unique_ptr<PhaseFunctions::PhaseFunction>;
 
 class OnTheLine
@@ -160,7 +161,7 @@ class OnTheLine
 
 using OnTheLinePtr = util::MemoryArena::unique_ptr<OnTheLine>;
 using MemoryArena = util::MemoryArena;
-
+#endif
 
 /* Good reference for path tracing with emissive volumes:
     Raab et. al (2008) "Unbiased global illumination with participating media" */
@@ -198,7 +199,7 @@ public:
     is_homogeneous(flags & IS_HOMOGENEOUS), priority(_priority) {}
   virtual ~Medium() {}
 
-  virtual OnTheLinePtr GetOnTheLine(const RaySegment &segment, const PathContext &context, MemoryArena &arena) const;
+  //virtual OnTheLinePtr GetOnTheLine(const RaySegment &segment, const PathContext &context, MemoryArena &arena) const;
   virtual InteractionSample SampleInteractionPoint(const RaySegment &segment, const Spectral3 &initial_weights, Sampler &sampler, const PathContext &context) const = 0;
   virtual Spectral3 EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const = 0;
   virtual void ConstructShortBeamTransmittance(const RaySegment &segment, Sampler &sampler, const PathContext &context, PiecewiseConstantTransmittance &pct) const = 0;

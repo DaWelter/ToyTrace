@@ -970,11 +970,11 @@ Spectral3 Medium::EvaluateEmission(const Double3 &pos, const PathContext &contex
   return Spectral3::Zero();
 }
 
-OnTheLinePtr Medium::GetOnTheLine(const RaySegment &segment, const PathContext &context, MemoryArena &arena) const
-{
-  assert (!"not implemented");
-  return nullptr;
-}
+// OnTheLinePtr Medium::GetOnTheLine(const RaySegment &segment, const PathContext &context, MemoryArena &arena) const
+// {
+//   assert (!"not implemented");
+//   return nullptr;
+// }
 
 /*****************************************
 * Derived media classes 
