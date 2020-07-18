@@ -378,7 +378,7 @@ void NFFParser::Parse(Scope &scope)
       {
         std::shared_ptr<Texture> diffuse_texture = MaybeReadTexture("diffusetexture");
         InsertAndActivate(name, scope,
-          std::make_unique<DiffuseShader>(
+          MakeDiffuseShader(
             Color::RGBToSpectrum(kd * rgb), std::move(diffuse_texture)));
       }
       else throw MakeException("Error");
@@ -394,7 +394,7 @@ void NFFParser::Parse(Scope &scope)
       if (num == 5)
       {
         InsertAndActivate(name, scope,
-          std::make_unique<SpecularReflectiveShader>(
+          MakeSpecularReflectiveShader(
             Color::RGBToSpectrum(k * rgb)
           ));
       }
@@ -410,21 +410,7 @@ void NFFParser::Parse(Scope &scope)
       if (num == 2)
       {
         InsertAndActivate(name, scope,
-          std::make_unique<SpecularTransmissiveDielectricShader>(ior_ratio));
-      }
-      else throw MakeException("Error");
-      continue;
-    }
-    
-    if (!strcmp(token, "specularpurerefractive"))
-    {
-      double ior_ratio = 1.;
-      char name[LINESIZE];
-      int num = std::sscanf(line.c_str(), "specularpurerefractive %s %lg\n", name, &ior_ratio);
-      if (num == 2)
-      {
-        InsertAndActivate(name, scope,
-          std::make_unique<SpecularPureRefractiveShader>(ior_ratio));
+          MakeSpecularTransmissiveDielectricShader(ior_ratio));
       }
       else throw MakeException("Error");
       continue;
@@ -441,7 +427,7 @@ void NFFParser::Parse(Scope &scope)
       {
         std::shared_ptr<Texture> diffuse_texture = MaybeReadTexture("diffusetexture");
         InsertAndActivate(name, scope,
-          std::make_unique<SpecularDenseDielectricShader>(
+          MakeSpecularDenseDielectricShader(
             specular_coeff,
             Color::RGBToSpectrum(diffuse_coeff),
             std::move(diffuse_texture)));
@@ -462,7 +448,7 @@ void NFFParser::Parse(Scope &scope)
       {
         std::shared_ptr<Texture> glossy_texture = MaybeReadTexture("exponenttexture");
         InsertAndActivate(name, scope, 
-          std::make_unique<MicrofacetShader>(
+          MakeMicrofacetShader(
             Color::RGBToSpectrum(k*ks_rgb),
             phong_exponent,
             std::move(glossy_texture)));
@@ -936,7 +922,7 @@ void NFFParser::ParseYamlNode(const std::string &key, const YAML::Node &node, Sc
         // Assuming that ior_ratio is the number for lambda=589nm.
         ior_coeff = (ior_ratio-1)/v/(656-486); 
       }
-      auto shd = std::make_unique<SpecularTransmissiveDielectricShader>(ior_ratio, ior_coeff);
+      auto shd = MakeSpecularTransmissiveDielectricShader(ior_ratio, ior_coeff);
       InsertAndActivate(name.c_str(), scope, std::move(shd));
     }
     else if (class_ == "glossytransmissivedielectric")
@@ -974,7 +960,7 @@ void NFFParser::ParseYamlNode(const std::string &key, const YAML::Node &node, Sc
       }
       if (node["x"])
         k = RGBScalar{node["x"].as<double>()};
-      auto shd = std::make_unique<MicrofacetShader>(Color::RGBToSpectrum(k*ks_rgb), alpha, texture);
+      auto shd = MakeMicrofacetShader(Color::RGBToSpectrum(k*ks_rgb), alpha, texture);
       InsertAndActivate(name.c_str(), scope, std::move(shd));
     }
     else

@@ -1069,11 +1069,13 @@ PathTracingAlgo2::PathTracingAlgo2(
 
 void PathTracingAlgo2::InitializeScene(Scene &scene)
 {
+#ifdef PRODUCT_DISTRIBUTION_SAMPLING
   for (Scene::index_t i=0; i<scene.GetNumShaders(); ++i)
   {
     auto& shd = scene.GetShader(i);
     shd.IntializeLobes();
   }
+#endif
 }
 
 

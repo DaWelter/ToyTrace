@@ -4,37 +4,10 @@
 #include "shader_util.hxx"
 #include "normaldistributionfunction.hxx"
 #include "shader_physics.hxx"
+
+#ifdef PRODUCT_DISTRIBUTION_SAMPLING
 #include "ndarray.hxx"
-#include "distribution_mixture_models.hxx"
-
-
-namespace materials
-{
-
-//class BsdfLobe
-//{
-//public:
-//  virtual Double3 Sample(Sampler& sampler) const = 0;
-//  virtual Spectral3 Value(const Double3 &out_direction) const = 0;
-//  virtual double Pdf(const Double3 &out_direction) const = 0;
-//  virtual Spectral3 Estimator(const Double3 &out_direction) const;
-//  virtual std::tuple<Double3, double> GetLobeStatistics() const = 0; // Direction and mean cosine.
-//};
-//
-//using LobeOwner = MemoryArena::unique_ptr<BsdfLobe>;
-
-
-struct Lobe
-{
-  float x, z;
-  float concentration;
-  float weight;
-};
-
-using LobeContainer = boost::container::static_vector<materials::Lobe, 2>;
-
-}
-
+#endif
 
 namespace ShadingInternal
 {
@@ -82,7 +55,7 @@ double Shader::Pdf(const Double3& incident_dir, const SurfaceInteraction& surfac
   return pdf;
 }
 
-
+#ifdef PRODUCT_DISTRIBUTION_SAMPLING
 vmf_fitting::VonMisesFischerMixture<2> Shader::ComputeLobes(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const PathContext &context) const
 {
   return {};
@@ -92,11 +65,29 @@ vmf_fitting::VonMisesFischerMixture<2> Shader::ComputeLobes(const Double3 &incid
 void Shader::IntializeLobes()
 {
 }
+#endif
 
 double Shader::GuidingProbMixShaderAmount(const SurfaceInteraction &surface_hit) const
 {
   return 0.5;
 }
+
+
+
+
+
+class DiffuseShader : public Shader
+{
+  SpectralN kr_d; // between zero and 1/Pi.
+  std::shared_ptr<Texture> diffuse_texture; // TODO: Share textures among shaders?
+public:
+  DiffuseShader(const SpectralN &reflectance, std::shared_ptr<Texture> _diffuse_texture);
+  ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+};
+
+
+
 
 
 
@@ -154,6 +145,16 @@ ScatterSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const Surfa
 
 
 
+class SpecularReflectiveShader : public Shader
+{
+  SpectralN kr_s;
+public:
+  SpecularReflectiveShader(const SpectralN &reflectance);
+  ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+};
+
+
 SpecularReflectiveShader::SpecularReflectiveShader(const SpectralN& reflectance)
   : Shader(),
     kr_s(reflectance)
@@ -196,6 +197,18 @@ inline bool OnSameSide(const Double3 &reverse_incident_dir, const SurfaceInterac
   return Dot(other_dir, surface_hit.normal) >= 0.;
 }
 
+
+
+
+class SpecularTransmissiveDielectricShader : public Shader
+{
+  double ior_ratio; // Inside ior / Outside ior
+  double ior_lambda_coeff; // IOR gradient w.r.t. wavelength, taken at the center of the spectrum.
+public:
+  SpecularTransmissiveDielectricShader(double _ior_ratio, double ior_lambda_coeff_ = 0.);
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+};
 
 
 SpecularTransmissiveDielectricShader::SpecularTransmissiveDielectricShader(double _ior_ratio, double ior_lambda_coeff_) 
@@ -292,53 +305,6 @@ Spectral3 SpecularTransmissiveDielectricShader::EvaluateBSDF(const Double3 &reve
 
 
 
-SpecularPureRefractiveShader::SpecularPureRefractiveShader(double _ior_ratio) 
-  : Shader{}, ior_ratio{_ior_ratio}
-{
-  is_pure_specular = true;
-}
-
-
-ScatterSample SpecularPureRefractiveShader::SampleBSDF(const Double3& reverse_incident_dir, const SurfaceInteraction& surface_hit, Sampler& sampler, const PathContext& context) const
-{
-  ScatterSample smpl;
-  double shn_dot_i = std::abs(Dot(surface_hit.shading_normal, reverse_incident_dir));
-  bool entering = Dot(surface_hit.geometry_normal, reverse_incident_dir) > 0.;
-  double eta_i_over_t = entering ? 1./ior_ratio  : ior_ratio; // eta_i refers to ior on the side of the incomming random walk! 
-    
-  double radiance_weight = (context.transport==RADIANCE) ? Sqr(eta_i_over_t) : 1.;
-  
-  boost::optional<Double3> wt = Refracted(reverse_incident_dir, surface_hit.shading_normal, eta_i_over_t);
-  
-  if (!wt) // Total reflection. Neglected!
-  {
-    smpl.value = {0.};
-    smpl.pdf_or_pmf = Pdf::MakeFromDelta(1.);
-    smpl.coordinates = reverse_incident_dir;
-    return smpl;
-  }
-  smpl.coordinates = *wt;
-  smpl.pdf_or_pmf = Pdf::MakeFromDelta(1.);
-  if (OnSameSide(reverse_incident_dir, surface_hit, *wt))
-    smpl.value = Spectral3{0.}; // Should be on other side of geometric surface, but we are not!
-  else
-  {
-    smpl.value = Spectral3{-1./Dot(*wt, surface_hit.shading_normal)*radiance_weight};
-  }
-  return smpl;
-}
-
-
-Spectral3 SpecularPureRefractiveShader::EvaluateBSDF(const Double3& reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext& context, double* pdf) const
-{
-  if (pdf)
-    *pdf = 0.;
-  return Spectral3{0.};
-}
-
-
-
-
 namespace {
 struct LocalFrame // Helper
 {
@@ -420,6 +386,23 @@ struct MicrofacetShaderWrapper
 };
 
 }
+
+
+class MicrofacetShader : public Shader
+{
+  SpectralN kr_s;
+  double alpha_max;
+  std::shared_ptr<Texture> glossy_exponent_texture;
+public:
+  MicrofacetShader(
+    const SpectralN &_glossy_reflectance,
+    double _glossy_exponent,
+    std::shared_ptr<Texture> _glossy_exponent_texture
+  );
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+};
+
 
 
 MicrofacetShader::MicrofacetShader(
@@ -534,8 +517,6 @@ struct GlossyTransmissiveDielectricWrapper
 };
 
 
-//#define PRODUCT_DISTRIBUTION_SAMPLING
-
 class GlossyTransmissiveDielectricShader : public Shader
 {
   double ior_ratio; // Inside ior / Outside ior
@@ -557,11 +538,6 @@ public:
 #endif
 };
 
-
-std::unique_ptr<Shader> MakeGlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, double alpha_min_, std::shared_ptr<Texture> glossy_exponent_texture_)
-{
-  return std::make_unique<GlossyTransmissiveDielectricShader>(_ior_ratio, alpha_, alpha_min_, glossy_exponent_texture_);
-}
 
 
 GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, double alpha_min_, std::shared_ptr<Texture> glossy_exponent_texture_)
@@ -778,6 +754,16 @@ double GlossyTransmissiveDielectricShader::GuidingProbMixShaderAmount(const Surf
 
 
 
+
+class InvisibleShader : public Shader
+{
+public:
+  InvisibleShader() {}
+  ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+};
+
+
 Spectral3 InvisibleShader::EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
 {
   if (pdf)
@@ -797,6 +783,19 @@ ScatterSample InvisibleShader::SampleBSDF(const Double3 &incident_dir, const Sur
 
 
 
+class SpecularDenseDielectricShader : public Shader
+{
+  // Certainly, the compiler is going to de-virtualize calls to these members?!
+  DiffuseShader diffuse_part;
+  double specular_reflectivity;
+public:
+  SpecularDenseDielectricShader(
+    const double _specular_reflectivity,
+    const SpectralN &_diffuse_reflectivity,
+    std::shared_ptr<Texture> _diffuse_texture);
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+};
 
 
 SpecularDenseDielectricShader::SpecularDenseDielectricShader(const double _specular_reflectivity, const SpectralN& _diffuse_reflectivity, std::shared_ptr<Texture> _diffuse_texture): 
@@ -886,6 +885,65 @@ ScatterSample SpecularDenseDielectricShader::SampleBSDF(const Double3& reverse_i
     smpl.pdf_or_pmf *= (1.-reflected_fraction);
   }
   return smpl;
+}
+
+
+
+std::unique_ptr<Shader> MakeDiffuseShader(
+  const SpectralN &reflectance,
+  std::shared_ptr<Texture> _diffuse_texture)
+{
+  return std::make_unique<DiffuseShader>(reflectance, _diffuse_texture);
+}
+
+
+std::unique_ptr<Shader> MakeMicrofacetShader(
+  const SpectralN &_glossy_reflectance,
+  double _glossy_exponent,
+  std::shared_ptr<Texture> _glossy_exponent_texture)
+{
+  return std::make_unique<MicrofacetShader>(
+    _glossy_reflectance, _glossy_exponent, _glossy_exponent_texture);
+}
+
+
+
+std::unique_ptr<Shader> MakeSpecularTransmissiveDielectricShader(
+  double _ior_ratio,
+  double ior_lambda_coeff_)
+{
+  return std::make_unique<SpecularTransmissiveDielectricShader>(_ior_ratio, ior_lambda_coeff_);
+}
+
+
+std::unique_ptr<Shader> MakeSpecularDenseDielectricShader(
+  double _specular_reflectivity,
+  const SpectralN &_diffuse_reflectivity,
+  std::shared_ptr<Texture> _diffuse_texture)
+{
+  return std::make_unique<SpecularDenseDielectricShader>(
+    _specular_reflectivity, _diffuse_reflectivity, _diffuse_texture);
+}
+
+std::unique_ptr<Shader> MakeGlossyTransmissiveDielectricShader(
+  double _ior_ratio,
+  double alpha_,
+  double alpha_min_,
+  std::shared_ptr<Texture> glossy_exponent_texture_)
+{
+  return std::make_unique<GlossyTransmissiveDielectricShader>(
+    _ior_ratio, alpha_, alpha_min_, glossy_exponent_texture_);
+}
+
+std::unique_ptr<Shader> MakeSpecularReflectiveShader(const SpectralN &reflectance)
+{
+  return std::make_unique< SpecularReflectiveShader>(
+    reflectance);
+}
+
+std::unique_ptr<Shader> MakeInvisibleShader()
+{
+  return std::make_unique<InvisibleShader>();
 }
 
 

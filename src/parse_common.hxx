@@ -1,10 +1,9 @@
 #pragma once
 #include "scene.hxx"
 #include "camera.hxx"
-#include "infiniteplane.hxx"
+//#include "infiniteplane.hxx"
 #include "shader.hxx"
 #include "util.hxx"
-#include "atmosphere.hxx"
 #include "light.hxx"
 
 #include <vector>

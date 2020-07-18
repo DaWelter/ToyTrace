@@ -392,7 +392,7 @@ std::pair<string, Shader*> YamlSceneReader::ParseItem(const YAML::Node & origina
       // Assuming that ior_ratio is the number for lambda=589nm.
       ior_coeff = (ior_ratio - 1) / v / (656 - 486);
     }
-    shd = std::make_unique<SpecularTransmissiveDielectricShader>(ior_ratio, ior_coeff);
+    shd = MakeSpecularTransmissiveDielectricShader(ior_ratio, ior_coeff);
   }
   else if (class_ == "glossytransmissivedielectric")
   {
@@ -407,13 +407,13 @@ std::pair<string, Shader*> YamlSceneReader::ParseItem(const YAML::Node & origina
     auto alpha = Pop(node, "alpha").as<double>();
     auto texture = TryParseTexture(node, "alpha_texture");
     auto reflection = ParseSpectrum(node, "rgb");
-    shd = std::make_unique<MicrofacetShader>(reflection, alpha, texture);
+    shd = MakeMicrofacetShader(reflection, alpha, texture);
   }
   else if (class_ == "diffuse")
   {
     auto reflection = ParseSpectrum(node, "rgb");
     auto texture = TryParseTexture(node, "texture");
-    shd = std::make_unique<DiffuseShader>(reflection, texture);
+    shd = MakeDiffuseShader(reflection, texture);
   }
   else
     throw MakeException(node, fmt::format("Unkown class: {}", class_));

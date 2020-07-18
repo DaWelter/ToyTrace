@@ -2,6 +2,7 @@
 
 #include "gtest/gtest_prod.h"
 
+#include "shader_util.hxx"
 #include "shader.hxx"
 #include "ray.hxx"
 

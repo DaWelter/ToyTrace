@@ -1,17 +1,28 @@
 #ifndef SHADER_HXX
 #define SHADER_HXX
 
+//#define PRODUCT_DISTRIBUTION_SAMPLING
+
 #include <memory>
 #include <type_traits>
-#include <boost/container/static_vector.hpp>
+//#include <boost/container/static_vector.hpp>
 
-#include "shader_util.hxx"
+#include "sampler.hxx"
+#include "spectral.hxx"
 #include "memory_arena.hxx"
+
+#ifdef PRODUCT_DISTRIBUTION_SAMPLING
 #include "distribution_mixture_models.hxx"
+#endif
 
 struct TagScatterSample {};
 using ScatterSample = Sample<Double3, Spectral3, TagScatterSample>;
-  
+
+class Texture;
+struct SurfaceInteraction;
+struct PathContext;
+struct RaySegment;
+class PiecewiseConstantTransmittance;
 
 // Included here because it uses ScatterSample.
 #include"phasefunctions.hxx"
@@ -32,98 +43,51 @@ public:
   virtual double Pdf(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3 &out_direction, const PathContext &context) const;
   
   virtual double GuidingProbMixShaderAmount(const SurfaceInteraction &surface_hit) const;
+#ifdef PRODUCT_DISTRIBUTION_SAMPLING
   virtual vmf_fitting::VonMisesFischerMixture<2> ComputeLobes(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const PathContext &context) const;
   virtual void IntializeLobes();
+#endif
 
   //virtual materials::LobeOwner PickTheLobe(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler &sampler, const PathContext &context) const = 0;
 };
 
 
-class DiffuseShader : public Shader
-{
-  SpectralN kr_d; // between zero and 1/Pi.
-  std::shared_ptr<Texture> diffuse_texture; // TODO: Share textures among shaders?
-public:
-  DiffuseShader(const SpectralN &reflectance, std::shared_ptr<Texture> _diffuse_texture);
-  ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
-};
+std::unique_ptr<Shader> MakeGlossyTransmissiveDielectricShader(
+  double _ior_ratio, 
+  double alpha_, 
+  double alpha_min_, 
+  std::shared_ptr<Texture> glossy_exponent_texture_);
+
+std::unique_ptr<Shader> MakeDiffuseShader(
+  const SpectralN &reflectance, 
+  std::shared_ptr<Texture> _diffuse_texture);
+
+std::unique_ptr<Shader> MakeMicrofacetShader(
+  const SpectralN &_glossy_reflectance,
+  double _glossy_exponent,
+  std::shared_ptr<Texture> _glossy_exponent_texture);
+
+std::unique_ptr<Shader> MakeSpecularTransmissiveDielectricShader(
+  double _ior_ratio, 
+  double ior_lambda_coeff_ = 0.);
+
+std::unique_ptr<Shader> MakeSpecularDenseDielectricShader(
+  const double _specular_reflectivity,
+  const SpectralN &_diffuse_reflectivity,
+  std::shared_ptr<Texture> _diffuse_texture);
+
+std::unique_ptr<Shader> MakeSpecularReflectiveShader(const SpectralN &reflectance);
+
+std::unique_ptr<Shader> MakeInvisibleShader();
 
 
 
-class SpecularReflectiveShader : public Shader
-{
-  SpectralN kr_s;
-public:
-  SpecularReflectiveShader(const SpectralN &reflectance);
-  ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
-};
 
 
-class MicrofacetShader : public Shader
-{
-  SpectralN kr_s;
-  double alpha_max;
-  std::shared_ptr<Texture> glossy_exponent_texture;
-public:
-  MicrofacetShader(
-    const SpectralN &_glossy_reflectance,
-    double _glossy_exponent,
-    std::shared_ptr<Texture> _glossy_exponent_texture
-  );
-  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
-};
 
 
-class SpecularTransmissiveDielectricShader : public Shader
-{
-  double ior_ratio; // Inside ior / Outside ior
-  double ior_lambda_coeff; // IOR gradient w.r.t. wavelength, taken at the center of the spectrum.
-public:
-  SpecularTransmissiveDielectricShader(double _ior_ratio, double ior_lambda_coeff_ = 0.);
-  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
-};
 
 
-std::unique_ptr<Shader> MakeGlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, double alpha_min_, std::shared_ptr<Texture> glossy_exponent_texture_);
-
-
-// Purely refracting shader. Unphysical but useful for testing.
-class SpecularPureRefractiveShader : public Shader
-{
-  double ior_ratio;
-public:
-  SpecularPureRefractiveShader(double _ior_ratio);
-  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;    
-};
-
-
-class SpecularDenseDielectricShader : public Shader
-{
-  // Certainly, the compiler is going to de-virtualize calls to these members?!
-  DiffuseShader diffuse_part;
-  double specular_reflectivity;
-public:
-  SpecularDenseDielectricShader(
-    const double _specular_reflectivity,
-    const SpectralN &_diffuse_reflectivity,
-    std::shared_ptr<Texture> _diffuse_texture);
-  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;    
-};
-
-
-class InvisibleShader : public Shader
-{
-public:
-  InvisibleShader() {}
-  ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
-};
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Media
@@ -152,6 +116,35 @@ struct MediaCoefficients
   Spectral3 sigma_s;
   Spectral3 sigma_t;
 };
+
+
+struct VolumePdfCoefficients
+{
+  double pdf_scatter_fwd{ 1. }; // Moving forward. Pdf for scatter event to occur at the end of the given segment.
+  double pdf_scatter_bwd{ 1. }; // Backward. For scatter event at the segment start, moving from back to start.
+  double transmittance{ 1. }; // Corresponding transmittances.
+};
+
+
+inline std::tuple<double, double> FwdCoeffs(const VolumePdfCoefficients &c)
+{
+  return std::make_tuple(c.pdf_scatter_fwd, c.transmittance);
+}
+
+inline std::tuple<double, double> BwdCoeffs(const VolumePdfCoefficients &c)
+{
+  return std::make_tuple(c.pdf_scatter_bwd, c.transmittance);
+}
+
+
+inline void Accumulate(VolumePdfCoefficients &accumulated, const VolumePdfCoefficients &segment_coeff, bool is_first, bool is_last)
+{
+  accumulated.pdf_scatter_fwd *= is_last ? segment_coeff.pdf_scatter_fwd : segment_coeff.transmittance;
+  accumulated.pdf_scatter_bwd *= is_first ? segment_coeff.pdf_scatter_bwd : segment_coeff.transmittance;
+  accumulated.transmittance *= segment_coeff.transmittance;
+}
+
+
 
 using PhaseFunctionPtr = util::MemoryArena::unique_ptr<PhaseFunctions::PhaseFunction>;
 
@@ -298,6 +291,9 @@ public:
 
 
 using materials::Medium;
-
+using materials::VolumePdfCoefficients;
+using materials::FwdCoeffs;
+using materials::BwdCoeffs;
+using materials::Accumulate;
 
 #endif

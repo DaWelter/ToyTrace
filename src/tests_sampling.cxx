@@ -31,6 +31,7 @@
 #include "sampler.hxx"
 #include "embreeaccelerator.hxx"
 #include "cubature.h"
+#include "shader_util.hxx"
 
 using namespace materials;
 
@@ -1411,7 +1412,7 @@ namespace Diffuse
 
 Params P(const Double3 &wi, const Double3 &n)
 {
-  auto f = []() { return new DiffuseShader(Color::SpectralN{0.5}, nullptr); };
+  auto f = []() { return MakeDiffuseShader(Color::SpectralN{0.5}, nullptr).release(); };
   return Params{f, wi, n}.NumSamples(2000).Albedo(Spectral3{0.5});
 }
 
@@ -1442,7 +1443,7 @@ namespace SpecularReflective
 
 Params P(const Double3 &wi, const Double3 &n)
 {
-  auto f = []() { return new SpecularReflectiveShader(Color::SpectralN{0.5}); };
+  auto f = []() { return MakeSpecularReflectiveShader(Color::SpectralN{0.5}).release(); };
   return Params{f, wi, n}.NumSamples(100).Albedo(Spectral3{0.5}).TestSampleDistribution(false);
 }
   
@@ -1481,7 +1482,7 @@ namespace SpecularDenseDielectric
 // by reflectivity factor.
 Params P(const Double3 &wi, const Double3 &n)
 {
-  auto f = []() { return new SpecularDenseDielectricShader(0.2, Color::SpectralN{0.99}, nullptr); };
+  auto f = []() { return MakeSpecularDenseDielectricShader(0.2, Color::SpectralN{0.99}, nullptr).release(); };
   return Params{f, wi, n};
 }
 
@@ -1511,7 +1512,7 @@ namespace Microfacet
 
 Params P(const Double3 &wi, const Double3 &n)
 {
-  auto f = []() { return new MicrofacetShader(Color::SpectralN{0.3}, 0.4, nullptr); };
+  auto f = []() { return MakeMicrofacetShader(Color::SpectralN{0.3}, 0.4, nullptr).release(); };
   return Params{f, wi, n}.NumSamples(10000);
 }
   
@@ -1541,7 +1542,7 @@ namespace SpecularTransmissiveDielectric
 
 Params P(const Double3 &wi, const Double3 &n)
 {
-  auto f = []() { return new SpecularTransmissiveDielectricShader(1.3); };
+  auto f = []() { return MakeSpecularTransmissiveDielectricShader(1.3).release(); };
   return Params{f, wi, n, 1.3}.NumSamples(100).Albedo(Spectral3{1.}).TestSampleDistribution(false);
 }
 

@@ -5,6 +5,7 @@
 #include "distribution_mixture_models.hxx"
 #include "shader.hxx"
 #include "path_guiding_quadtree.hxx"
+#include "shader_util.hxx"
 
 #include <algorithm>
 #include <numeric>
@@ -224,12 +225,6 @@ struct PyShaderWrapper
     {
     }
 
-    template<class ShaderClass, class... Args>
-    static PyShaderWrapper* make(Args&&... args)
-    {
-        return new PyShaderWrapper(std::make_unique<ShaderClass>(std::forward<Args>(args)...));
-    }
-
     std::unique_ptr<Shader> shader;
     Sampler sampler; // Each to his own. So I don't have to wrap this, too.
     PathContext context;
@@ -247,10 +242,12 @@ Spectral3 Evaluate(PyShaderWrapper &pyshady, const Eigen::Vector3d &incident_dir
     return pyshady.shader->EvaluateBSDF(incident_dir, surface_hit, out_direction, pyshady.context, nullptr);
 }
 
+#ifdef PRODUCT_DISTRIBUTION_SAMPLING
 py_vmf_mixture::VonMisesFischerMixture<2> ComputeLobes(PyShaderWrapper &pyshady, const Eigen::Vector3d &incident_dir, const SurfaceInteraction &surface_hit)
 {
     return pyshady.shader->ComputeLobes(incident_dir, surface_hit, pyshady.context);
 }
+#endif
 
 // double EvaluatePdf(PyShaderWrapper &pyshady, const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3 &out_direction)
 // {
@@ -260,14 +257,17 @@ py_vmf_mixture::VonMisesFischerMixture<2> ComputeLobes(PyShaderWrapper &pyshady,
 
 void RegisterShaders(py::module &m)
 {
-    py::class_<PyShaderWrapper>(m, "PyShaderWrapper")
-        .def("Sample", Sample)
-        .def("Evaluate", Evaluate)
-        .def("InitializeLobes", [](PyShaderWrapper &pyshady) { pyshady.shader->IntializeLobes(); })
-        .def("ComputeLobes", ComputeLobes);
+  py::class_<PyShaderWrapper>(m, "PyShaderWrapper")
+    .def("Sample", Sample)
+    .def("Evaluate", Evaluate)
+#ifdef PRODUCT_DISTRIBUTION_SAMPLING
+    .def("InitializeLobes", [](PyShaderWrapper &pyshady) { pyshady.shader->IntializeLobes(); })
+    .def("ComputeLobes", ComputeLobes)
+#endif
+    ;
 
     m.def("DiffuseShader", [](const SpectralN &reflectance) {
-        return PyShaderWrapper::make<DiffuseShader>(reflectance, nullptr);
+      return PyShaderWrapper{ MakeDiffuseShader(reflectance, nullptr) };
     });
     m.def("GlossyTransmissiveDielectricShader", [](double ior_ratio,  double alpha) {
         //return PyShaderWrapper::make<GlossyTransmissiveDielectricShader>(ior_ratio, alpha, 0., nullptr);

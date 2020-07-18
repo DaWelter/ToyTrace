@@ -162,32 +162,6 @@ inline LambdaSelection SelectRgbPrimaryWavelengths()
 
 
 
-struct VolumePdfCoefficients
-{
-  double pdf_scatter_fwd{ 1. }; // Moving forward. Pdf for scatter event to occur at the end of the given segment.
-  double pdf_scatter_bwd{ 1. }; // Backward. For scatter event at the segment start, moving from back to start.
-  double transmittance{ 1. }; // Corresponding transmittances.
-};
-
-inline std::tuple<double, double> FwdCoeffs(const VolumePdfCoefficients &c)
-{
-  return std::make_tuple(c.pdf_scatter_fwd, c.transmittance);
-}
-
-inline std::tuple<double, double> BwdCoeffs(const VolumePdfCoefficients &c)
-{
-  return std::make_tuple(c.pdf_scatter_bwd, c.transmittance);
-}
-
-
-inline void Accumulate(VolumePdfCoefficients &accumulated, const VolumePdfCoefficients &segment_coeff, bool is_first, bool is_last)
-{
-  accumulated.pdf_scatter_fwd *= is_last ? segment_coeff.pdf_scatter_fwd : segment_coeff.transmittance;
-  accumulated.pdf_scatter_bwd *= is_first ? segment_coeff.pdf_scatter_bwd : segment_coeff.transmittance;
-  accumulated.transmittance *= segment_coeff.transmittance;
-}
-
-
 class PiecewiseConstantTransmittance
 {
   static constexpr int PIECEWISE_STATIC_ALLOC_SIZE = 96;
