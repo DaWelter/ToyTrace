@@ -9,7 +9,7 @@
 #include "ndarray.hxx"
 #endif
 
-namespace ShadingInternal
+namespace shading_detail
 {
 
 /* --- Textureing -------*/
@@ -34,278 +34,8 @@ inline double MaybeMultiplyTextureLookup(double _value, const Texture *tex, cons
   }
   return _value;
 }
-  
-}
-
-using namespace ShadingInternal;
 
 
-double Shader::Pdf(const Double3& incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext& context) const
-{
-  SurfaceInteraction intersect{surface_hit};
-  // Puke ... TODO: Abolish requirement of normal alignment with incident dir.
-  if (Dot(incident_dir, intersect.normal) < 0.)
-  {
-    intersect.normal = -intersect.normal;
-    intersect.shading_normal = -intersect.shading_normal;
-  }
-  // TODO: This should be implemented in each shader so that only the pdf is computed (?)!
-  double pdf;
-  this->EvaluateBSDF(incident_dir, intersect, out_direction, context, &pdf);
-  return pdf;
-}
-
-#ifdef PRODUCT_DISTRIBUTION_SAMPLING
-vmf_fitting::VonMisesFischerMixture<2> Shader::ComputeLobes(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const PathContext &context) const
-{
-  return {};
-}
-
-
-void Shader::IntializeLobes()
-{
-}
-#endif
-
-double Shader::GuidingProbMixShaderAmount(const SurfaceInteraction &surface_hit) const
-{
-  return 0.5;
-}
-
-
-
-
-
-class DiffuseShader : public Shader
-{
-  SpectralN kr_d; // between zero and 1/Pi.
-  std::shared_ptr<Texture> diffuse_texture; // TODO: Share textures among shaders?
-public:
-  DiffuseShader(const SpectralN &reflectance, std::shared_ptr<Texture> _diffuse_texture);
-  ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
-};
-
-
-
-
-
-
-DiffuseShader::DiffuseShader(const SpectralN &_reflectance, std::shared_ptr<Texture> _diffuse_texture)
-  : Shader(),
-    kr_d(_reflectance),
-    diffuse_texture(std::move(_diffuse_texture))
-{
-  is_pure_diffuse = true;
-  // Wtf? kr_d is the (constant) Lambertian BRDF. Energy conservation
-  // demands Int|_Omega kr_d cos(theta) dw <= 1. Working out the math
-  // I obtain kr_d <= 1/Pi. 
-  // But well, reflectance, also named Bihemispherical reflectance
-  // [TotalCompendium.pdf,pg.31] goes up to one. Therefore I divide by Pi. 
-  kr_d *= 1./Pi;
-}
-
-
-Spectral3 DiffuseShader::EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
-{
-  Spectral3 ret{0.};
-  assert (Dot(surface_hit.normal, incident_dir)>=0); // Because normal is aligned such that this conditions should be true.
-  double n_dot_out = Dot(surface_hit.normal, out_direction);
-  double nsh_dot_out = Dot(surface_hit.shading_normal, out_direction);
-  if (n_dot_out > 0.) // In/Out on same side of geometric surface?
-  {
-    Spectral3 kr_d_taken = Take(kr_d, context.lambda_idx);
-    ret = MaybeMultiplyTextureLookup(kr_d_taken, diffuse_texture.get(), surface_hit, context.lambda_idx);
-  }
-  if (pdf)
-  {
-    *pdf = std::max(0., nsh_dot_out)/Pi;
-  }
-  return ret;
-}
-
-
-ScatterSample DiffuseShader::SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
-{
-  auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
-  Double3 v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
-  double pdf = v[2]/Pi;
-  Double3 out_direction = m * v;
-  if (Dot(surface_hit.normal, out_direction) > 0)
-  {
-    Spectral3 value = Take(kr_d, context.lambda_idx);
-    value = MaybeMultiplyTextureLookup(value, diffuse_texture.get(), surface_hit, context.lambda_idx);
-    return ScatterSample{out_direction, value, pdf};
-  }
-  else
-  {
-    return ScatterSample{out_direction, Spectral3::Zero(), pdf};
-  }
-}
-
-
-
-class SpecularReflectiveShader : public Shader
-{
-  SpectralN kr_s;
-public:
-  SpecularReflectiveShader(const SpectralN &reflectance);
-  ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
-};
-
-
-SpecularReflectiveShader::SpecularReflectiveShader(const SpectralN& reflectance)
-  : Shader(),
-    kr_s(reflectance)
-{
-  is_pure_specular = true;
-}
-
-
-Spectral3 SpecularReflectiveShader::EvaluateBSDF(const Double3& incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double* pdf) const
-{
-  if (pdf)
-    *pdf = 0.;
-  return Spectral3{0.};
-}
-
-
-ScatterSample SpecularReflectiveShader::SampleBSDF(const Double3& incident_dir, const SurfaceInteraction& surface_hit, Sampler& sampler, const PathContext &context) const
-{
-  Double3 r = Reflected(incident_dir, surface_hit.shading_normal);
-  double cos_rn = Dot(surface_hit.normal, r);
-  
-  auto NominalSample = [&]() -> ScatterSample
-  {
-    double cos_rsdn = Dot(surface_hit.shading_normal, r);
-    auto kr_s_taken = Take(kr_s, context.lambda_idx);
-    return ScatterSample{r, kr_s_taken/cos_rsdn, 1.};
-  };
-  
-  ScatterSample smpl = (cos_rn < 0.) ?
-    ScatterSample{r, Spectral3{0.}, 1.} :
-    NominalSample();
-  SetPmfFlag(smpl);
-  return smpl;
-}
-
-
-inline bool OnSameSide(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const Double3 &other_dir)
-{
-  assert(Dot(reverse_incident_dir, surface_hit.normal) >= 0.);
-  return Dot(other_dir, surface_hit.normal) >= 0.;
-}
-
-
-
-
-class SpecularTransmissiveDielectricShader : public Shader
-{
-  double ior_ratio; // Inside ior / Outside ior
-  double ior_lambda_coeff; // IOR gradient w.r.t. wavelength, taken at the center of the spectrum.
-public:
-  SpecularTransmissiveDielectricShader(double _ior_ratio, double ior_lambda_coeff_ = 0.);
-  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
-};
-
-
-SpecularTransmissiveDielectricShader::SpecularTransmissiveDielectricShader(double _ior_ratio, double ior_lambda_coeff_) 
-  : Shader{}, ior_ratio{_ior_ratio}, ior_lambda_coeff{ior_lambda_coeff_}
-{
-  is_pure_specular = true;
-  if (ior_lambda_coeff != 0)
-    require_monochromatic = true;
-}
-
-
-ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
-{
-  double abs_shn_dot_i = std::abs(Dot(surface_hit.shading_normal, reverse_incident_dir));
-
-  // Continue with shader sampling ...
-  bool entering = Dot(surface_hit.geometry_normal, reverse_incident_dir) > 0.;
-  double eta_i_over_t = [this,entering,&context]() {
-    if (ior_lambda_coeff == 0)
-      return entering ? 1./ior_ratio  : ior_ratio; // eta_i refers to ior on the side of the incomming random walk!
-    else
-    {
-      double ior = ior_ratio + ior_lambda_coeff*context.wavelengths[0];
-      return entering ? 1./ior  : ior;
-    }
-  }();
-  
-  /* Citing Veach (pg. 147): "Specular BSDF’s contain Dirac distribu-
-  tions, which means that the only allowable operation is sampling: there must be an explicit
-  procedure that generates a sample direction and a weight. When the specular BSDF is not
-  symmetric, the direction and/or weight computation for the adjoint is different, and thus
-  there must be two different sampling procedures, or an explicit flag that specifies whether
-  the direct or adjoint BSDF is being sampled."! */
-
-  double radiance_weight = (context.transport==RADIANCE) ? Sqr(eta_i_over_t) : 1.;
-  
-  double fresnel_reflectivity = 1.;
-  boost::optional<Double3> wt = Refracted(reverse_incident_dir, surface_hit.shading_normal, eta_i_over_t);
-  if (wt)
-  {
-    double abs_shn_dot_r = std::abs(Dot(*wt, surface_hit.shading_normal));
-    fresnel_reflectivity = FresnelReflectivity(abs_shn_dot_i, abs_shn_dot_r, eta_i_over_t);
-  }
-  assert (fresnel_reflectivity >= -0.00001 && fresnel_reflectivity <= 1.000001);
-  
-  const double prob_reflection = wt ? std::max(0.1, std::min(0.9, fresnel_reflectivity)) : 1.;
-  bool do_sample_reflection = wt ? sampler.Uniform01() < prob_reflection : true;
-  assert (do_sample_reflection || (bool)(wt));
-  
-  // First determine PDF and randomwalk direction.
-  ScatterSample smpl;
-  if (do_sample_reflection)
-  {
-    smpl.coordinates = Reflected(reverse_incident_dir, surface_hit.shading_normal);
-    smpl.pdf_or_pmf = Pdf::MakeFromDelta(prob_reflection);
-    // Veach style handling of shading normals. See  Veach Figure 5.8.
-    // In this case, the BRDF and the BTDF are almost equal.
-    smpl.value = fresnel_reflectivity;
-  }
-  else
-  {
-    smpl.coordinates = *wt;
-    smpl.pdf_or_pmf = Pdf::MakeFromDelta(1.- prob_reflection);
-    smpl.value = 1. - fresnel_reflectivity;
-  }
-
-  smpl.value /= std::abs(Dot(smpl.coordinates, surface_hit.shading_normal));
-
-  // Must use the fresnel_reflectivity term like in the pdf to make it cancel.
-  // Then I must use the dot product with the shading normal to make it cancel with the 
-  // corresponding term in the reflection integration (outside of BSDF code).
-  if (Dot(smpl.coordinates, surface_hit.normal) < 0) 
-  {
-    // Evaluate BTDF
-    smpl.value *= radiance_weight;
-  }
-  
-  //assert((smpl.value*std::abs(Dot(surface_hit.shading_normal, smpl.coordinates)) / smpl.pdf_or_pmf).maxCoeff() < 2.0);
-  
-  if (ior_lambda_coeff != 0)
-  {
-    smpl.value[1] = smpl.value[2] = 0;
-  }
-  return smpl;
-}
-
-
-Spectral3 SpecularTransmissiveDielectricShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
-{
-  if (pdf)
-    *pdf = 0.;
-  return Spectral3{0.};
-}
-
-
-
-namespace {
 struct LocalFrame // Helper
 {
   Eigen::Matrix3d m_local;
@@ -324,8 +54,14 @@ LocalFrame::LocalFrame(const SurfaceInteraction& surface_hit)
 }
 
 
+
+inline double AlphaBroadeningFormula(double alpha, double abs_wi_dot_n)
+{
+  return alpha*(1.2 - 0.2*abs_wi_dot_n);
+}
+
+
 #define SAMPLE_VNDF
-//--gtest_break_on_failure
 
 struct MicrofacetShaderWrapper
 {
@@ -385,72 +121,6 @@ struct MicrofacetShaderWrapper
   }
 };
 
-}
-
-
-class MicrofacetShader : public Shader
-{
-  SpectralN kr_s;
-  double alpha_max;
-  std::shared_ptr<Texture> glossy_exponent_texture;
-public:
-  MicrofacetShader(
-    const SpectralN &_glossy_reflectance,
-    double _glossy_exponent,
-    std::shared_ptr<Texture> _glossy_exponent_texture
-  );
-  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
-};
-
-
-
-MicrofacetShader::MicrofacetShader(
-  const SpectralN &_glossy_reflectance,
-  double _glossy_exponent,
-  std::shared_ptr<Texture> _glossy_exponent_texture)
-  : Shader(),
-    kr_s(_glossy_reflectance), 
-    alpha_max(_glossy_exponent),
-    glossy_exponent_texture(std::move(_glossy_exponent_texture))
-{
-  is_pure_diffuse = true;
-}
-
-
-Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
-{
-  LocalFrame frame{surface_hit};
-  double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
-  BeckmanDistribution ndf{alpha};
-  Spectral3 kr_s_taken = Take(kr_s, context.lambda_idx);
-  const Double3 wi = frame.m_local_inv * reverse_incident_dir;
-  const Double3 wo = frame.m_local_inv * out_direction;
-  const Double3 wh = Normalized(wi+wo);
-  return MicrofacetShaderWrapper{context, ndf, frame, kr_s_taken}.Evaluate(wi, wh, wo, pdf);
-}
-
-
-ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
-{
-  LocalFrame frame{surface_hit};
-  double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
-  BeckmanDistribution ndf{alpha};
-  Spectral3 kr_s_taken = Take(kr_s, context.lambda_idx);
-  MicrofacetShaderWrapper brdf{context, ndf, frame, kr_s_taken};
-  const Double3 wi = frame.m_local_inv * reverse_incident_dir;
-  auto [wh, wo] = brdf.Sample(wi, sampler);
-  double pdf = NaN;
-  Spectral3 color = brdf.Evaluate(wi, wh, wo, &pdf);
-  return ScatterSample {
-    frame.m_local * wo,
-    color,
-    pdf
-  };
-}
-
-  
-  
 
 struct GlossyTransmissiveDielectricWrapper
 {
@@ -517,6 +187,512 @@ struct GlossyTransmissiveDielectricWrapper
 };
 
 
+} //namespace shading_detail
+
+using namespace shading_detail;
+
+
+double Shader::Pdf(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction) const
+{
+  SurfaceInteraction intersect{query.surface_hit};
+  query.surface_hit = intersect;
+  // Puke ... TODO: Abolish requirement of normal alignment with incident dir.
+  if (Dot(reverse_incident_dir, intersect.normal) < 0.)
+  {
+    intersect.normal = -intersect.normal;
+    intersect.shading_normal = -intersect.shading_normal;
+  }
+  // TODO: This should be implemented in each shader so that only the pdf is computed (?)!
+  double pdf;
+  this->EvaluateBSDF(reverse_incident_dir, query, out_direction, &pdf);
+  return pdf;
+}
+
+#ifdef PRODUCT_DISTRIBUTION_SAMPLING
+vmf_fitting::VonMisesFischerMixture<2> Shader::ComputeLobes(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const PathContext &context) const
+{
+  return {};
+}
+
+
+void Shader::IntializeLobes()
+{
+}
+#endif
+
+double Shader::GuidingProbMixShaderAmount(const SurfaceInteraction &surface_hit) const
+{
+  return 0.5;
+}
+
+ScatterSample Shader::SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surf_hit, Sampler& sampler, const PathContext &context) const
+{
+  return SampleBSDF(reverse_incident_dir, ShaderQuery{surf_hit, context}, sampler);
+}
+
+Spectral3 Shader::EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surf_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const
+{
+  return EvaluateBSDF(reverse_incident_dir, ShaderQuery{surf_hit, context}, out_direction, pdf);
+}
+
+double Shader::Pdf(const Double3 &reverse_incident_dir, const SurfaceInteraction &surf_hit, const Double3 &out_direction, const PathContext &context) const
+{
+  return Pdf(reverse_incident_dir, ShaderQuery{surf_hit, context}, out_direction);
+}
+
+double Shader::MyRoughness(ShaderQuery query) const
+{
+  return 0;
+}
+
+
+
+class DiffuseShader : public Shader
+{
+  SpectralN kr_d; // between zero and 1/Pi.
+  std::shared_ptr<Texture> diffuse_texture; // TODO: Share textures among shaders?
+public:
+  DiffuseShader(const SpectralN &reflectance, std::shared_ptr<Texture> _diffuse_texture);
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const override;
+};
+
+
+
+
+
+
+DiffuseShader::DiffuseShader(const SpectralN &_reflectance, std::shared_ptr<Texture> _diffuse_texture)
+  : Shader(),
+    kr_d(_reflectance),
+    diffuse_texture(std::move(_diffuse_texture))
+{
+  is_pure_diffuse = true;
+  // Wtf? kr_d is the (constant) Lambertian BRDF. Energy conservation
+  // demands Int|_Omega kr_d cos(theta) dw <= 1. Working out the math
+  // I obtain kr_d <= 1/Pi. 
+  // But well, reflectance, also named Bihemispherical reflectance
+  // [TotalCompendium.pdf,pg.31] goes up to one. Therefore I divide by Pi. 
+  kr_d *= 1./Pi;
+}
+
+
+Spectral3 DiffuseShader::EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const
+{
+  const auto& surface_hit = query.surface_hit.get();
+  Spectral3 ret{0.};
+  assert (Dot(surface_hit.normal, reverse_incident_dir)>=0); // Because normal is aligned such that this conditions should be true.
+  double n_dot_out = Dot(surface_hit.normal, out_direction);
+  double nsh_dot_out = Dot(surface_hit.shading_normal, out_direction);
+  if (n_dot_out > 0.) // In/Out on same side of geometric surface?
+  {
+    Spectral3 kr_d_taken = Take(kr_d, query.context.get().lambda_idx);
+    ret = MaybeMultiplyTextureLookup(kr_d_taken, diffuse_texture.get(), surface_hit, query.context.get().lambda_idx);
+  }
+  if (pdf)
+  {
+    *pdf = std::max(0., nsh_dot_out)/Pi;
+  }
+  return ret;
+}
+
+
+ScatterSample DiffuseShader::SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const
+{
+  const auto& surface_hit = query.surface_hit.get();
+  auto m = OrthogonalSystemZAligned(surface_hit.shading_normal);
+  Double3 v = SampleTrafo::ToCosHemisphere(sampler.UniformUnitSquare());
+  double pdf = v[2]/Pi;
+  Double3 out_direction = m * v;
+  if (Dot(surface_hit.normal, out_direction) > 0)
+  {
+    Spectral3 value = Take(kr_d, query.context.get().lambda_idx);
+    value = MaybeMultiplyTextureLookup(value, diffuse_texture.get(), surface_hit, query.context.get().lambda_idx);
+    return ScatterSample{out_direction, value, pdf};
+  }
+  else
+  {
+    return ScatterSample{out_direction, Spectral3::Zero(), pdf};
+  }
+}
+
+
+
+class SpecularReflectiveShader : public Shader
+{
+  SpectralN kr_s;
+public:
+  SpecularReflectiveShader(const SpectralN &reflectance);
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const override;
+};
+
+
+SpecularReflectiveShader::SpecularReflectiveShader(const SpectralN& reflectance)
+  : Shader(),
+    kr_s(reflectance)
+{
+  is_pure_specular = true;
+}
+
+
+Spectral3 SpecularReflectiveShader::EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const
+{
+  if (pdf)
+    *pdf = 0.;
+  return Spectral3{0.};
+}
+
+
+ScatterSample SpecularReflectiveShader::SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const
+{
+  const auto& surface_hit = query.surface_hit.get();
+  Double3 r = Reflected(reverse_incident_dir, surface_hit.shading_normal);
+  double cos_rn = Dot(surface_hit.normal, r);
+  
+  auto NominalSample = [&]() -> ScatterSample
+  {
+    double cos_rsdn = Dot(surface_hit.shading_normal, r);
+    auto kr_s_taken = Take(kr_s, query.context.get().lambda_idx);
+    return ScatterSample{r, kr_s_taken/cos_rsdn, 1.};
+  };
+  
+  ScatterSample smpl = (cos_rn < 0.) ?
+    ScatterSample{r, Spectral3{0.}, 1.} :
+    NominalSample();
+  SetPmfFlag(smpl);
+  return smpl;
+}
+
+
+inline bool OnSameSide(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const Double3 &other_dir)
+{
+  assert(Dot(reverse_incident_dir, surface_hit.normal) >= 0.);
+  return Dot(other_dir, surface_hit.normal) >= 0.;
+}
+
+
+
+
+class SpecularTransmissiveDielectricShader : public Shader
+{
+  double ior_ratio; // Inside ior / Outside ior
+  double ior_lambda_coeff; // IOR gradient w.r.t. wavelength, taken at the center of the spectrum.
+  ScatterSample SampleBsdfRegular(const Double3 &reverse_incident_dir, const SurfaceInteraction &surf_hit, Sampler& sampler, const PathContext &context) const;
+  Spectral3 EvaluateBsdfRegular(const Double3 &reverse_incident_dir, const SurfaceInteraction &surf_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const;
+  ScatterSample SampleBsdfMollified(const Double3 &reverse_incident_dir, const SurfaceInteraction &surf_hit, double roughness, Sampler& sampler, const PathContext &context) const;
+  Spectral3 EvaluateBsdfMollified(const Double3 &reverse_incident_dir, const SurfaceInteraction &surf_hit, double roughness, const Double3 &out_direction, const PathContext &context, double *pdf) const;
+public:
+  SpecularTransmissiveDielectricShader(double _ior_ratio, double ior_lambda_coeff_ = 0.);
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const override;
+};
+
+
+SpecularTransmissiveDielectricShader::SpecularTransmissiveDielectricShader(double _ior_ratio, double ior_lambda_coeff_) 
+  : Shader{}, ior_ratio{_ior_ratio}, ior_lambda_coeff{ior_lambda_coeff_}
+{
+  is_pure_specular = true;
+  if (ior_lambda_coeff != 0)
+    require_monochromatic = true;
+}
+
+
+ScatterSample SpecularTransmissiveDielectricShader::SampleBsdfRegular(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
+{
+  double abs_shn_dot_i = std::abs(Dot(surface_hit.shading_normal, reverse_incident_dir));
+
+  // Continue with shader sampling ...
+  bool entering = Dot(surface_hit.geometry_normal, reverse_incident_dir) > 0.;
+  double eta_i_over_t = [this,entering,&context]() {
+    if (ior_lambda_coeff == 0)
+      return entering ? 1./ior_ratio  : ior_ratio; // eta_i refers to ior on the side of the incomming random walk!
+    else
+    {
+      double ior = ior_ratio + ior_lambda_coeff*context.wavelengths[0];
+      return entering ? 1./ior  : ior;
+    }
+  }();
+  
+  /* Citing Veach (pg. 147): "Specular BSDF’s contain Dirac distribu-
+  tions, which means that the only allowable operation is sampling: there must be an explicit
+  procedure that generates a sample direction and a weight. When the specular BSDF is not
+  symmetric, the direction and/or weight computation for the adjoint is different, and thus
+  there must be two different sampling procedures, or an explicit flag that specifies whether
+  the direct or adjoint BSDF is being sampled."! */
+
+  double radiance_weight = (context.transport==RADIANCE) ? Sqr(eta_i_over_t) : 1.;
+  
+  double fresnel_reflectivity = 1.;
+  boost::optional<Double3> wt = Refracted(reverse_incident_dir, surface_hit.shading_normal, eta_i_over_t);
+  if (wt)
+  {
+    double abs_shn_dot_r = std::abs(Dot(*wt, surface_hit.shading_normal));
+    fresnel_reflectivity = FresnelReflectivity(abs_shn_dot_i, abs_shn_dot_r, eta_i_over_t);
+  }
+  assert (fresnel_reflectivity >= -0.00001 && fresnel_reflectivity <= 1.000001);
+  
+  const double prob_reflection = wt ? std::max(0.1, std::min(0.9, fresnel_reflectivity)) : 1.;
+  bool do_sample_reflection = wt ? sampler.Uniform01() < prob_reflection : true;
+  assert (do_sample_reflection || (bool)(wt));
+  
+  // First determine PDF and randomwalk direction.
+  ScatterSample smpl;
+  if (do_sample_reflection)
+  {
+    smpl.coordinates = Reflected(reverse_incident_dir, surface_hit.shading_normal);
+    smpl.pdf_or_pmf = Pdf::MakeFromDelta(prob_reflection);
+    // Veach style handling of shading normals. See  Veach Figure 5.8.
+    // In this case, the BRDF and the BTDF are almost equal.
+    smpl.value = fresnel_reflectivity;
+  }
+  else
+  {
+    smpl.coordinates = *wt;
+    smpl.pdf_or_pmf = Pdf::MakeFromDelta(1.- prob_reflection);
+    smpl.value = 1. - fresnel_reflectivity;
+  }
+
+  smpl.value /= std::abs(Dot(smpl.coordinates, surface_hit.shading_normal));
+
+  // Must use the fresnel_reflectivity term like in the pdf to make it cancel.
+  // Then I must use the dot product with the shading normal to make it cancel with the 
+  // corresponding term in the reflection integration (outside of BSDF code).
+  if (Dot(smpl.coordinates, surface_hit.normal) < 0) 
+  {
+    // Evaluate BTDF
+    smpl.value *= radiance_weight;
+  }
+  
+  if (ior_lambda_coeff != 0)
+  {
+    smpl.value[1] = smpl.value[2] = 0;
+  }
+  return smpl;
+}
+
+Spectral3 SpecularTransmissiveDielectricShader::EvaluateBsdfRegular(const Double3 &reverse_incident_dir, const SurfaceInteraction &surf_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const
+{
+  if (pdf)
+    *pdf = 0.;
+  return Spectral3{0.};
+}
+
+ScatterSample SpecularTransmissiveDielectricShader::SampleBsdfMollified(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, double roughness, Sampler& sampler, const PathContext &context) const
+{
+  const double opening_cos = 1. - roughness;
+  double abs_shn_dot_i = std::abs(Dot(surface_hit.shading_normal, reverse_incident_dir));
+
+  bool entering = Dot(surface_hit.geometry_normal, reverse_incident_dir) > 0.;
+  double eta_i_over_t = [this, entering, &context]() {
+    if (ior_lambda_coeff == 0)
+      return entering ? 1. / ior_ratio : ior_ratio; // eta_i refers to ior on the side of the incomming random walk!
+    else
+    {
+      double ior = ior_ratio + ior_lambda_coeff * context.wavelengths[0];
+      return entering ? 1. / ior : ior;
+    }
+  }();
+
+  double radiance_weight = (context.transport == RADIANCE) ? Sqr(eta_i_over_t) : 1.;
+
+  double fresnel_reflectivity = 1.;
+  boost::optional<Double3> wt = Refracted(reverse_incident_dir, surface_hit.shading_normal, eta_i_over_t);
+  if (wt)
+  {
+    double abs_shn_dot_r = std::abs(Dot(*wt, surface_hit.shading_normal));
+    fresnel_reflectivity = FresnelReflectivity(abs_shn_dot_i, abs_shn_dot_r, eta_i_over_t);
+  }
+  assert(fresnel_reflectivity >= -0.00001 && fresnel_reflectivity <= 1.000001);
+
+  const double prob_reflection = wt ? std::max(0.1, std::min(0.9, fresnel_reflectivity)) : 1.;
+  bool do_sample_reflection = wt ? sampler.Uniform01() < prob_reflection : true;
+  assert(do_sample_reflection || (bool)(wt));
+
+  const double sphere_section_pdf = SampleTrafo::UniformSphereSectionPdf(opening_cos);
+
+  // First determine PDF and randomwalk direction.
+  ScatterSample smpl;
+  if (do_sample_reflection)
+  {
+    smpl.coordinates = Reflected(reverse_incident_dir, surface_hit.shading_normal);
+    smpl.coordinates = OrthogonalSystemZAligned(smpl.coordinates)*SampleTrafo::ToUniformSphereSection(opening_cos, sampler.UniformUnitSquare());
+    smpl.pdf_or_pmf = prob_reflection * sphere_section_pdf;
+    // Veach style handling of shading normals. See  Veach Figure 5.8.
+    // In this case, the BRDF and the BTDF are almost equal.
+    smpl.value = fresnel_reflectivity * sphere_section_pdf;
+  }
+  else
+  {
+    smpl.coordinates = *wt;
+    smpl.coordinates = OrthogonalSystemZAligned(smpl.coordinates)*SampleTrafo::ToUniformSphereSection(opening_cos, sampler.UniformUnitSquare());
+    smpl.pdf_or_pmf = (1. - prob_reflection)*sphere_section_pdf;
+    smpl.value = (1. - fresnel_reflectivity)*sphere_section_pdf;
+  }
+
+  // Must use the fresnel_reflectivity term like in the pdf to make it cancel.
+  // Then I must use the dot product with the shading normal to make it cancel with the 
+  // corresponding term in the reflection integration (outside of BSDF code).
+  smpl.value /= std::abs(Dot(smpl.coordinates, surface_hit.shading_normal));
+  if (Dot(smpl.coordinates, surface_hit.normal) < 0)
+  {
+    // Evaluate BTDF
+    smpl.value *= radiance_weight;
+  }
+
+  if (ior_lambda_coeff != 0)
+  {
+    smpl.value[1] = smpl.value[2] = 0;
+  }
+  return smpl;
+}
+
+Spectral3 SpecularTransmissiveDielectricShader::EvaluateBsdfMollified(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, double roughness, const Double3 &out_direction, const PathContext &context, double *pdf) const
+{
+  const double opening_cos = 1. - roughness;
+
+  bool entering = Dot(surface_hit.geometry_normal, reverse_incident_dir) > 0.;
+  double eta_i_over_t = [this, entering, &context]() {
+    if (ior_lambda_coeff == 0)
+      return entering ? 1. / ior_ratio : ior_ratio; // eta_i refers to ior on the side of the incomming random walk!
+    else
+    {
+      double ior = ior_ratio + ior_lambda_coeff * context.wavelengths[0];
+      return entering ? 1. / ior : ior;
+    }
+  }();
+
+  double radiance_weight = (context.transport == RADIANCE) ? Sqr(eta_i_over_t) : 1.;
+
+  const double abs_shn_dot_i = std::abs(Dot(surface_hit.shading_normal, reverse_incident_dir));
+
+  double fresnel_reflectivity = 1.;
+  boost::optional<Double3> wt = Refracted(reverse_incident_dir, surface_hit.shading_normal, eta_i_over_t);
+  if (wt)
+  {
+    double abs_shn_dot_r = std::abs(Dot(*wt, surface_hit.shading_normal));
+    fresnel_reflectivity = FresnelReflectivity(abs_shn_dot_i, abs_shn_dot_r, eta_i_over_t);
+  }
+  assert(fresnel_reflectivity >= -0.00001 && fresnel_reflectivity <= 1.000001);
+
+  const double prob_reflection = wt ? std::max(0.1, std::min(0.9, fresnel_reflectivity)) : 1.;
+  const double sphere_section_pdf = SampleTrafo::UniformSphereSectionPdf(opening_cos);
+
+  const Double3 reflected = Reflected(reverse_incident_dir, surface_hit.shading_normal);
+  const bool maybe_reflected = (reflected.dot(out_direction) > opening_cos);
+  double reflection_pdf = maybe_reflected ? sphere_section_pdf*prob_reflection : 0.;
+  double reflection_val = maybe_reflected ? (prob_reflection*fresnel_reflectivity) : 0.;
+
+  double total_pdf = reflection_pdf;
+  double total_val = reflection_val;
+  if (wt)
+  {
+    const bool maybe_refracted = ((*wt).dot(out_direction) > opening_cos);
+    double refract_val = maybe_refracted ? ((1. - fresnel_reflectivity)*sphere_section_pdf) : 0.;
+    double refract_pdf = maybe_refracted ? ((1. - prob_reflection)*sphere_section_pdf) : 0.;
+    total_pdf += refract_pdf;
+    total_val += refract_val;
+  }
+
+  if (Dot(out_direction, surface_hit.normal) < 0)
+  {
+    // Evaluate BTDF
+    total_val *= radiance_weight;
+  }
+
+  total_val /= std::abs(Dot(out_direction, surface_hit.shading_normal));
+
+  if (pdf)
+    *pdf = total_pdf;
+
+  return Spectral3::Constant(total_val);
+}
+
+
+ScatterSample SpecularTransmissiveDielectricShader::SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const
+{
+  const auto& surface_hit = query.surface_hit.get();
+  if (query.minimum_roughness > 0.)
+    return SampleBsdfMollified(reverse_incident_dir, surface_hit, query.minimum_roughness, sampler, query.context.get());
+  else
+    return SampleBsdfRegular(reverse_incident_dir, surface_hit, sampler, query.context.get());
+}
+
+
+Spectral3 SpecularTransmissiveDielectricShader::EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const
+{
+  const auto& surface_hit = query.surface_hit.get();
+  if (query.minimum_roughness > 0.)
+    return EvaluateBsdfMollified(reverse_incident_dir, surface_hit, query.minimum_roughness, out_direction, query.context.get(), pdf);
+  else
+    return EvaluateBsdfRegular(reverse_incident_dir, surface_hit, out_direction, query.context.get(), pdf);
+}
+
+
+
+class MicrofacetShader : public Shader
+{
+  SpectralN kr_s;
+  double alpha_max;
+  std::shared_ptr<Texture> glossy_exponent_texture;
+public:
+  MicrofacetShader(
+    const SpectralN &_glossy_reflectance,
+    double _glossy_exponent,
+    std::shared_ptr<Texture> _glossy_exponent_texture
+  );
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const override;
+};
+
+
+
+MicrofacetShader::MicrofacetShader(
+  const SpectralN &_glossy_reflectance,
+  double _glossy_exponent,
+  std::shared_ptr<Texture> _glossy_exponent_texture)
+  : Shader(),
+    kr_s(_glossy_reflectance), 
+    alpha_max(_glossy_exponent),
+    glossy_exponent_texture(std::move(_glossy_exponent_texture))
+{
+  is_pure_diffuse = true;
+}
+
+
+Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const
+{
+  const auto& surface_hit = query.surface_hit.get();
+  LocalFrame frame{surface_hit};
+  double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
+  BeckmanDistribution ndf{alpha};
+  Spectral3 kr_s_taken = Take(kr_s, query.context.get().lambda_idx);
+  const Double3 wi = frame.m_local_inv * reverse_incident_dir;
+  const Double3 wo = frame.m_local_inv * out_direction;
+  const Double3 wh = Normalized(wi+wo);
+  return MicrofacetShaderWrapper{query.context.get(), ndf, frame, kr_s_taken}.Evaluate(wi, wh, wo, pdf);
+}
+
+
+ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const
+{
+  LocalFrame frame{query.surface_hit.get()};
+  double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), query.surface_hit.get());
+  BeckmanDistribution ndf{alpha};
+  Spectral3 kr_s_taken = Take(kr_s, query.context.get().lambda_idx);
+  MicrofacetShaderWrapper brdf{query.context.get(), ndf, frame, kr_s_taken};
+  const Double3 wi = frame.m_local_inv * reverse_incident_dir;
+  auto [wh, wo] = brdf.Sample(wi, sampler);
+  double pdf = NaN;
+  Spectral3 color = brdf.Evaluate(wi, wh, wo, &pdf);
+  return ScatterSample {
+    frame.m_local * wo,
+    color,
+    pdf
+  };
+}
+
+
 class GlossyTransmissiveDielectricShader : public Shader
 {
   double ior_ratio; // Inside ior / Outside ior
@@ -525,17 +701,22 @@ class GlossyTransmissiveDielectricShader : public Shader
   std::shared_ptr<Texture> glossy_exponent_texture;
 public:
   GlossyTransmissiveDielectricShader(double _ior_ratio, double alpha_, double alpha_min_, std::shared_ptr<Texture> glossy_exponent_texture_);
-  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const override;
 
   double GuidingProbMixShaderAmount(const SurfaceInteraction &surface_hit) const override;
 #ifdef PRODUCT_DISTRIBUTION_SAMPLING
 private:
   SimpleLookupTable<materials::LobeContainer,2> lobes_lookup_table;
 public:  
-  vmf_fitting::VonMisesFischerMixture<2> ComputeLobes(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const PathContext &context) const override;
+  vmf_fitting::VonMisesFischerMixture<2> ComputeLobes(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const PathContext &context) const override;
   void IntializeLobes() override;
 #endif
+
+  double MyRoughness(ShaderQuery query) const override
+  {
+    return alpha_min + MaybeMultiplyTextureLookup(alpha_max-alpha_min, glossy_exponent_texture.get(), query.surface_hit.get());
+  }
 };
 
 
@@ -550,41 +731,36 @@ GlossyTransmissiveDielectricShader::GlossyTransmissiveDielectricShader::GlossyTr
 }
 
 
-inline double AlphaBroadeningFormula(double alpha, double abs_wi_dot_n)
+Spectral3 GlossyTransmissiveDielectricShader::EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const
 {
-  return alpha*(1.2 - 0.2*abs_wi_dot_n);
-}
-
-
-
-Spectral3 GlossyTransmissiveDielectricShader::EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
-{
+  const auto& surface_hit = query.surface_hit.get();
   LocalFrame frame{surface_hit};
   const Double3 wi = frame.m_local_inv * reverse_incident_dir;
   const Double3 wo = frame.m_local_inv * out_direction;
   const double eta_i_over_t = (Dot(surface_hit.geometry_normal, reverse_incident_dir)<0.) ? ior_ratio : 1.0/ior_ratio;
   
-  const double alpha = alpha_min + MaybeMultiplyTextureLookup(alpha_max-alpha_min, glossy_exponent_texture.get(), surface_hit);
+  const double alpha = std::max(query.minimum_roughness, MyRoughness(query));
   BeckmanDistribution ndf{alpha};
   BeckmanDistribution broadened_ndf{AlphaBroadeningFormula(alpha,std::abs(wi[2]))};
   
-  GlossyTransmissiveDielectricWrapper shd{ wi, context, ndf, broadened_ndf, frame, eta_i_over_t };
+  GlossyTransmissiveDielectricWrapper shd{ wi, query.context.get(), ndf, broadened_ndf, frame, eta_i_over_t };
   const double result = shd.Evaluate(wo, pdf);
   return Spectral3{result};
 }
 
 
-ScatterSample GlossyTransmissiveDielectricShader::SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
+ScatterSample GlossyTransmissiveDielectricShader::SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const
 {
+  const auto& surface_hit = query.surface_hit.get();
   LocalFrame frame{surface_hit};
   const Double3 wi = frame.m_local_inv * reverse_incident_dir;
   const double eta_i_over_t = (Dot(surface_hit.geometry_normal, reverse_incident_dir)<0.) ? ior_ratio : 1.0/ior_ratio;
   
-  const double alpha = alpha_min + MaybeMultiplyTextureLookup(alpha_max-alpha_min, glossy_exponent_texture.get(), surface_hit);
+  const double alpha = std::max(query.minimum_roughness, MyRoughness(query));
   BeckmanDistribution ndf{alpha};
   BeckmanDistribution broadened_ndf{AlphaBroadeningFormula(alpha,std::abs(wi[2]))};
   
-  GlossyTransmissiveDielectricWrapper bsdf{wi, context, ndf, broadened_ndf, frame, eta_i_over_t};
+  GlossyTransmissiveDielectricWrapper bsdf{wi, query.context.get(), ndf, broadened_ndf, frame, eta_i_over_t};
   
   Double3 wo = bsdf.Sample(sampler);
   double pdf = NaN;
@@ -711,14 +887,14 @@ void GlossyTransmissiveDielectricShader::IntializeLobes()
 }
 
 
-vmf_fitting::VonMisesFischerMixture<2> GlossyTransmissiveDielectricShader::ComputeLobes(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const PathContext &context) const
+vmf_fitting::VonMisesFischerMixture<2> GlossyTransmissiveDielectricShader::ComputeLobes(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, const PathContext &context) const
 {
   const double alpha = alpha_min + MaybeMultiplyTextureLookup(alpha_max-alpha_min, glossy_exponent_texture.get(), surface_hit);  
-  const double z = incident_dir.dot(surface_hit.smooth_normal);
+  const double z = reverse_incident_dir.dot(surface_hit.smooth_normal);
   const auto& lobes = lobes_lookup_table({alpha, z});
 
   const Double3 ez = surface_hit.smooth_normal;
-  Double3 ex = incident_dir - ez.dot(incident_dir)*ez; 
+  Double3 ex = reverse_incident_dir - ez.dot(reverse_incident_dir)*ez; 
   const double len_sqr = ex.squaredNorm();
   if (len_sqr > 1.e-6)
   {
@@ -759,12 +935,12 @@ class InvisibleShader : public Shader
 {
 public:
   InvisibleShader() {}
-  ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const override;
 };
 
 
-Spectral3 InvisibleShader::EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const
+Spectral3 InvisibleShader::EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const
 {
   if (pdf)
     *pdf = 0.;
@@ -772,11 +948,12 @@ Spectral3 InvisibleShader::EvaluateBSDF(const Double3 &incident_dir, const Surfa
 }
 
 
-ScatterSample InvisibleShader::SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const
+ScatterSample InvisibleShader::SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const
 {
+  const auto& surface_hit = query.surface_hit.get();
   return ScatterSample{
-    -incident_dir, 
-    Spectral3{-1. / std::abs(Dot(incident_dir, surface_hit.shading_normal))},
+    -reverse_incident_dir, 
+    Spectral3{-1. / std::abs(Dot(reverse_incident_dir, surface_hit.shading_normal))},
     Pdf::MakeFromDelta(1.)};
 }
 
@@ -793,8 +970,8 @@ public:
     const double _specular_reflectivity,
     const SpectralN &_diffuse_reflectivity,
     std::shared_ptr<Texture> _diffuse_texture);
-  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const override;
-  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext &context, double *pdf) const override;
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const override;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const override;
 };
 
 
@@ -823,8 +1000,9 @@ double DiffuseAttenuationFactor(double albedo1, double albedo2, double average_a
 }
 
 
-Spectral3 SpecularDenseDielectricShader::EvaluateBSDF(const Double3& reverse_incident_dir, const SurfaceInteraction& surface_hit, const Double3& out_direction, const PathContext& context, double* pdf) const
+Spectral3 SpecularDenseDielectricShader::EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const
 { 
+  const auto& surface_hit = query.surface_hit.get();
   double cos_out_n = Dot(surface_hit.normal, out_direction);
   if (cos_out_n > 0.)
   {
@@ -835,7 +1013,7 @@ Spectral3 SpecularDenseDielectricShader::EvaluateBSDF(const Double3& reverse_inc
     double other_reflection_term = SchlicksApproximation(specular_reflectivity, cos_shn_exitant);  
     double average_albedo = AverageOfProjectedSchlicksApproximationOverHemisphere<double>(specular_reflectivity);
    
-    Spectral3 brdf_value = diffuse_part.EvaluateBSDF(reverse_incident_dir, surface_hit, out_direction, context, pdf); 
+    Spectral3 brdf_value = diffuse_part.EvaluateBSDF(reverse_incident_dir, query, out_direction, pdf); 
     brdf_value *= SmoothAndDenseDielectricDetail::DiffuseAttenuationFactor(
       reflected_fraction, other_reflection_term, average_albedo);
     
@@ -853,8 +1031,9 @@ Spectral3 SpecularDenseDielectricShader::EvaluateBSDF(const Double3& reverse_inc
 
 
 
-ScatterSample SpecularDenseDielectricShader::SampleBSDF(const Double3& reverse_incident_dir, const SurfaceInteraction& surface_hit, Sampler& sampler, const PathContext& context) const
+ScatterSample SpecularDenseDielectricShader::SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const
 {
+  const auto& surface_hit = query.surface_hit.get();
   double cos_shn_incident = std::max(0., Dot(surface_hit.shading_normal, reverse_incident_dir));
   double reflected_fraction = SchlicksApproximation(specular_reflectivity, cos_shn_incident);
   assert(reflected_fraction >= 0. && reflected_fraction <= 1.);
@@ -876,7 +1055,7 @@ ScatterSample SpecularDenseDielectricShader::SampleBSDF(const Double3& reverse_i
   }
   else
   {
-    smpl = diffuse_part.SampleBSDF(reverse_incident_dir, surface_hit, sampler, context);
+    smpl = diffuse_part.SampleBSDF(reverse_incident_dir, query, sampler);
     double cos_n_exitant = std::max(0., Dot(surface_hit.shading_normal, smpl.coordinates));
     double other_reflection_term = SchlicksApproximation(specular_reflectivity, cos_n_exitant);
     double average_albedo = AverageOfProjectedSchlicksApproximationOverHemisphere<double>(specular_reflectivity);
@@ -995,9 +1174,9 @@ Spectral3 EmissiveDemoMedium::EvaluatePhaseFunction(const Double3& indcident_dir
 }
 
 
-Medium::PhaseSample EmissiveDemoMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
+Medium::PhaseSample EmissiveDemoMedium::SamplePhaseFunction(const Double3& reverse_incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
 {
-  return phasefunction.SampleDirection(incident_dir, sampler);
+  return phasefunction.SampleDirection(reverse_incident_dir, sampler);
 }
 
 
@@ -1069,7 +1248,7 @@ Spectral3 EmissiveDemoMedium::EvaluateEmission(const Double3 &pos, const PathCon
   const bool in_emissive_volume = LengthSqr(pos - this->pos) < radius*radius;
   if (pos_pdf)
     *pos_pdf = in_emissive_volume ? one_over_its_volume : 0.;
-  return in_emissive_volume ? (sigma_a*Take(spectrum, context.lambda_idx)).eval() : Spectral3::Zero();
+  return in_emissive_volume ? (sigma_a*Take(spectrum, query.context.get().lambda_idx)).eval() : Spectral3::Zero();
 }
 
 
@@ -1098,10 +1277,10 @@ Medium::InteractionSample VacuumMedium::SampleInteractionPoint(const RaySegment&
 }
 
 
-ScatterSample VacuumMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
+ScatterSample VacuumMedium::SamplePhaseFunction(const Double3& reverse_incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
 {
   return ScatterSample{
-    -incident_dir,
+    -reverse_incident_dir,
     Spectral3{1.},
     1.
   };
@@ -1154,15 +1333,15 @@ HomogeneousMedium::HomogeneousMedium(const SpectralN& _sigma_s, const SpectralN&
 }
 
 
-Spectral3 HomogeneousMedium::EvaluatePhaseFunction(const Double3& incident_dir, const Double3& pos, const Double3& out_direction, const PathContext &context, double* pdf) const
+Spectral3 HomogeneousMedium::EvaluatePhaseFunction(const Double3& reverse_incident_dir, const Double3& pos, const Double3& out_direction, const PathContext &context, double* pdf) const
 {
-  return phasefunction->Evaluate(incident_dir, out_direction, pdf);
+  return phasefunction->Evaluate(reverse_incident_dir, out_direction, pdf);
 }
 
 
-ScatterSample HomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
+ScatterSample HomogeneousMedium::SamplePhaseFunction(const Double3& reverse_incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
 {
-  return phasefunction->SampleDirection(incident_dir, sampler);
+  return phasefunction->SampleDirection(reverse_incident_dir, sampler);
 }
 
 
@@ -1308,9 +1487,9 @@ Spectral3 MonochromaticHomogeneousMedium::EvaluatePhaseFunction(const Double3& i
 }
 
 
-Medium::PhaseSample MonochromaticHomogeneousMedium::SamplePhaseFunction(const Double3& incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
+Medium::PhaseSample MonochromaticHomogeneousMedium::SamplePhaseFunction(const Double3& reverse_incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
 {
-  return phasefunction->SampleDirection(incident_dir, sampler);
+  return phasefunction->SampleDirection(reverse_incident_dir, sampler);
 }
 
 

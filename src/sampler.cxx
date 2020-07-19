@@ -64,6 +64,12 @@ Double3 ToUniformSphereSection(double cos_opening_angle, Double2 r)
   return Double3{x,y,z};
 }
 
+double UniformSphereSectionPdf(double cos_opening_angle)
+{
+  return 1. / (2.*Pi*(1. - cos_opening_angle));
+}
+
+
 // Ref: Global Illumination Compendium (2003)
 Double3 ToCosHemisphere(Double2 r)
 {

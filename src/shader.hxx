@@ -27,6 +27,19 @@ class PiecewiseConstantTransmittance;
 // Included here because it uses ScatterSample.
 #include"phasefunctions.hxx"
 
+namespace materials
+{
+
+struct ShaderQuery
+{
+  std::reference_wrapper<const SurfaceInteraction> surface_hit;
+  std::reference_wrapper<const PathContext> context;
+  double minimum_roughness = 0.;
+};
+
+}
+
+using materials::ShaderQuery;
 
 class Shader
 {
@@ -38,10 +51,16 @@ public:
   bool supports_lobes = false;
   Shader() {}
   virtual ~Shader() {}
-  virtual ScatterSample SampleBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, Sampler& sampler, const PathContext &context) const = 0;
-  virtual Spectral3 EvaluateBSDF(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const = 0;
-  virtual double Pdf(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const Double3 &out_direction, const PathContext &context) const;
-  
+  // Old interface
+  ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surf_hit, Sampler& sampler, const PathContext &context) const;
+  Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, const SurfaceInteraction &surf_hit, const Double3 &out_direction, const PathContext &context, double *pdf) const;
+  double Pdf(const Double3 &reverse_incident_dir, const SurfaceInteraction &surf_hit, const Double3 &out_direction, const PathContext &context) const;
+  // New Interface
+  virtual ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const = 0;
+  virtual Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const = 0;
+  virtual double Pdf(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction) const;
+  virtual double MyRoughness(ShaderQuery query) const;
+
   virtual double GuidingProbMixShaderAmount(const SurfaceInteraction &surface_hit) const;
 #ifdef PRODUCT_DISTRIBUTION_SAMPLING
   virtual vmf_fitting::VonMisesFischerMixture<2> ComputeLobes(const Double3 &incident_dir, const SurfaceInteraction &surface_hit, const PathContext &context) const;

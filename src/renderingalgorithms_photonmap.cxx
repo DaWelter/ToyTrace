@@ -37,6 +37,8 @@ using Lightpickers::UcbLightPicker;
 using Lightpickers::PhotonUcbLightPicker;
 using Lightpickers::RadianceToObservationValue;
 
+static constexpr double mollification_cos = 1. - 0.003;
+
 class Kernel2d
 {
   double radius_inv_2;
@@ -926,7 +928,11 @@ void CameraRenderWorker::MaybeAddDirectLighting(const SurfaceInteraction &intera
     // To consider for direct lighting NEE with MIS.
     // Segment, DFactors, AntiselfIntersectionOffset, Medium Passage, Transmittance Estimate, BSDF/Le factor, inv square factor.
     // Mis weight. P_light, P_bsdf
-    
+    ShaderQuery query {
+      std::cref(interaction),
+      std::cref(ps.context),
+    };
+
     const auto &shader = GetShaderOf(interaction,master->scene);
     if (!shader.prefer_path_tracing_over_photonmap)
         return;
@@ -957,22 +963,34 @@ void CameraRenderWorker::MaybeAddDirectLighting(const SurfaceInteraction &intera
     Spectral3 path_weight = ps.weight;
     path_weight *= DFactorPBRT(interaction, ray.dir);
 
-    double bsdf_pdf = 0.;
-    Spectral3 bsdf_weight = shader.EvaluateBSDF(-ps.ray.dir, interaction, ray.dir, ps.context, &bsdf_pdf);
-    path_weight *= bsdf_weight;
-
     
+    double bsdf_pdf = 0.;
+    Spectral3 bsdf_weight = shader.EvaluateBSDF(-ps.ray.dir, query, ray.dir, &bsdf_pdf);
+#if 0 
+    // Idea from the Path Space Regularization paper. Use a mollified delta function for NEE.
+    // Make connection if the connection vector to the light source lies within a small cone
+    // around the true reflected direction.
+    if (bsdf_pdf == 0.) // Specular. This is just a stupid hack.
+    {
+      ScatterSample smpl = shader.SampleBSDF(-ps.ray.dir, query, this->sampler);
+      assert(smpl.pdf_or_pmf.IsFromDelta());
+      if (smpl.coordinates.dot(ray.dir) > mollification_cos)
+      {
+        bsdf_weight = smpl.value;
+        bsdf_pdf = SampleTrafo::UniformSphereSectionPdf(mollification_cos)*(double)smpl.pdf_or_pmf;
+      }
+    }
+#endif
     MediumTracker medium_tracker{ps.medium_tracker}; // Copy because well don't want to keep modifications.
     MaybeGoingThroughSurface(medium_tracker, ray.dir, interaction);
     Spectral3 transmittance = TransmittanceEstimate(master->scene, segment_to_light, medium_tracker, ps.context, sampler);
-    path_weight *= transmittance;
     
-    double mis_weight = MisWeight(pdf, bsdf_pdf);
+    path_weight *= MisWeight(pdf, bsdf_pdf)*transmittance*bsdf_weight;
     
 #ifdef DEBUG_BUFFERS 
     AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_DIRECT, 0, path_weight*weight);
 #endif
-    Spectral3 measurement_estimator = mis_weight*path_weight*light_weight;
+    Spectral3 measurement_estimator = path_weight*light_weight;
 
     pickers->ObserveReturnNee(this->worker_index, light_ref, measurement_estimator);
     RecordMeasurementToCurrentPixel(measurement_estimator, ps);
@@ -1005,7 +1023,11 @@ void CameraRenderWorker::MaybeAddDirectLighting(const SurfaceInteraction &intera
 bool CameraRenderWorker::MaybeScatterAtSpecularLayer(const SurfaceInteraction &interaction, PathState &ps) const
 {
   const auto &shader = GetShaderOf(interaction,master->scene);
-  auto smpl = shader.SampleBSDF(-ps.ray.dir, interaction, sampler, ps.context);
+  ShaderQuery query {
+    std::cref(interaction),
+    std::cref(ps.context),
+  };
+  auto smpl = shader.SampleBSDF(-ps.ray.dir, query, sampler);
   if (!smpl.pdf_or_pmf.IsFromDelta() && !shader.prefer_path_tracing_over_photonmap)
     return false;
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{1.}, ps.current_node_count, sampler))
@@ -1080,6 +1102,16 @@ void CameraRenderWorker::AddEnvEmission(const PathState &ps) const
     {
         const double prob_select = pickers->GetDistributionNee().Pmf(Lights::MakeLightRef(master->scene, emitter));
         const double pdf_env = emitter.EvaluatePdf(-ps.ray.dir, ps.context);
+        Pdf pdf_bsdf = *ps.last_scatter_pdf_value;
+#if 0 
+        // Idea from the Path Space Regularization paper. Use a mollified delta function for NEE. 
+        // How to use it with MIS? Should I simply replace the pdf use in the MIS weight. Makes sense,
+        // because with a delta distribution one would assume that the NEE connection has zero-probability.
+        if (pdf_bsdf.IsFromDelta())
+        {
+          pdf_bsdf = SampleTrafo::UniformSphereSectionPdf(mollification_cos)*(double)*ps.last_scatter_pdf_value;
+        }
+#endif
         mis_weight = MisWeight(*ps.last_scatter_pdf_value, pdf_env*prob_select);
     }
   
