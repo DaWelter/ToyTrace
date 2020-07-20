@@ -58,29 +58,6 @@ public:
 #endif
 
 
-class LightSelectionProbabilityMap
-{
-public:
-    LightSelectionProbabilityMap(const Scene &scene);
-
-    double Pmf(const LightRef &lr) const
-    {
-      return light_type_selection_probs[lr.type] * 
-        TowerSamplingProbabilityFromCmf(AsSpan(cummulative_probs[lr.type]), lr.idx);
-    }
-
-    template<class Visitor>
-    void Sample(Sampler &sampler, Visitor &&visitor) const;
-
-    void Print(std::ostream &os) const;
-
-    const Scene &scene;
-    std::array<Eigen::ArrayXd, Lights::NUM_LIGHT_TYPES> cummulative_probs;
-    Eigen::Array<double, 4, 1> light_type_selection_probs;
-};
-
-std::array<int, Lights::NUM_LIGHT_TYPES> GetNumLightTypes(const Scene &scene);
-
 
 // Accumulate statistics about radiance received from each light.
 class Stats
@@ -136,51 +113,6 @@ private:
     LightSelectionProbabilityMap distribution;
 };
 
-
-
-//======================================================================
-//======================================================================
-//======================================================================
-template<class Visitor>
-inline void LightSelectionProbabilityMap::Sample(Sampler & sampler, Visitor && visitor) const
-{
-  const int which_kind = TowerSampling<NUM_LIGHT_TYPES>(
-    light_type_selection_probs.data(), sampler.Uniform01());
-  const int idx = TowerSamplingBisection<double>(AsSpan(cummulative_probs[which_kind]), sampler.Uniform01());
-  const LightRef ref{ (uint32_t)which_kind, (uint32_t)idx };
-
-  const double prob = Pmf(ref);
-
-  switch (which_kind)
-  {
-  case IDX_PROB_ENV:
-  {
-    visitor(Lights::Env{ scene.GetTotalEnvLight() }, prob, ref);
-  }
-  break;
-  case IDX_PROB_POINT:
-  {
-
-    visitor(Lights::Point{ scene.GetPointLight(idx) }, prob, ref);
-  }
-  break;
-  case IDX_PROB_AREA:
-  {
-    auto prim_ref = scene.GetPrimitiveFromAreaLightIndex(idx);
-    visitor(Lights::Area{ prim_ref, scene }, prob, ref);
-  }
-  break;
-  case IDX_PROB_VOLUME:
-  {
-    assert(!"not implemented");
-    //const int n = isize(volume_light_refs);
-    //auto idx = volume_light_refs[sampler.UniformInt(0, n-1)];
-    //double prob = emitter_type_selection_probabilities[which_kind]/n;
-    //return visitor(*ASSERT_NOT_NULL(scene.GetMaterial(idx).medium), prob);
-  }
-  break;
-  }
-}
 
 //======================================================================
 //======================================================================

@@ -21,9 +21,6 @@
 #include "renderingalgorithms_interface.hxx"
 #include "renderingalgorithms_simplebase.hxx"
 #include "lightpicker_trivial.hxx"
-#include "lightpicker_ucb.hxx"
-
-
 
 
 namespace Photonmapping
@@ -33,9 +30,7 @@ using SimplePixelByPixelRenderingDetails::SamplesPerPixelScheduleConstant;
 class PhotonmappingRenderingAlgo;
 struct EmitterSampleVisitor;
 using Lights::LightRef;
-using Lightpickers::UcbLightPicker;
-using Lightpickers::PhotonUcbLightPicker;
-using Lightpickers::RadianceToObservationValue;
+using Lightpickers::TrivialLightPicker;
 
 static constexpr double mollification_cos = 1. - 0.003;
 
@@ -99,92 +94,45 @@ inline double EvalKernel(const K &k, const Double3 &a, const Double3 &b)
 //#define LOGGING
 //#define DEBUG_PATH_THROUGHPUT
 
-class LightPickersUcbCombined
+// TODO: redo this garbage
+class LightPickersCombined
 {
 private:
-  template<class T>
-  using Buffer = Span<T>;
-
-  template<class T>
-  Span<T> CopyToSpan(const ToyVector<T> &v)
-  {
-    auto mem = std::make_unique<T[]>(v.size());
-    memcpy(mem.get(), v.data(), sizeof(T)*v.size());
-    return Span<T>(mem.release(), v.size());
-  }
-
-  struct alignas(128) ThreadLocal
-  {
-    ToyVector<std::pair<Lights::LightRef, float>> nee_returns;
-    ToyVector<std::pair<int, float>> photon_returns;
-  };
-
-  static constexpr size_t BUFFER_SIZE = 10240;
-  tbb::flow::graph graph;
-  tbb::flow::function_node<Buffer<std::pair<LightRef, float>>> node_nee;
-  tbb::flow::function_node<Buffer<std::pair<int, float>>> node_photon;
-
-  ToyVector<ThreadLocal, tbb::cache_aligned_allocator<ThreadLocal>> local;
-  UcbLightPicker picker_nee;
-  PhotonUcbLightPicker picker_photon;
+  Lightpickers::LightSelectionProbabilityMap light_sampling_distribution;
 
 public:
-  LightPickersUcbCombined(const Scene &scene, int num_workers)
+  LightPickersCombined(const Scene &scene, int num_workers)
     :
-    graph(),
-    node_nee(this->graph, 1, [&](Buffer<std::pair<LightRef, float>> x) {  picker_nee.ObserveReturns(x); delete x.begin();  }),
-    node_photon(this->graph, 1, [&](Buffer<std::pair<int, float>> x) {  picker_photon.ObserveReturns(x); delete x.begin(); }),
-    local(num_workers),
-    picker_nee(scene), picker_photon(scene)
+    light_sampling_distribution(scene)
   {
    
   }
   void OnPassStart(const Span<LightRef> emitters_of_paths)
   {
-    picker_photon.OnPassStart(emitters_of_paths);
   }
 
   void ObserveReturnNee(int worker, LightRef lr, const Spectral3 &value)
   {
-    auto &l = local[worker];
-    l.nee_returns.push_back(std::make_pair(lr, Lightpickers::RadianceToObservationValue(value)));
-    if (l.nee_returns.size() >= BUFFER_SIZE)
-    {
-      node_nee.try_put(CopyToSpan(l.nee_returns));
-      l.nee_returns.clear();
-    }
   }
 
   void ObserveReturnPhoton(int worker, int path_index, const Spectral3 &value)
   {
-    auto &l = local[worker];
-    l.photon_returns.push_back(std::make_pair(path_index, Lightpickers::RadianceToObservationValue(value)));
-    if (l.photon_returns.size() >= BUFFER_SIZE)
-    {
-      node_photon.try_put(CopyToSpan(l.photon_returns));
-      l.photon_returns.clear();
-    }
   }
 
   void OnPassEnd(const Span<LightRef> emitters_of_paths)
   {
-    picker_photon.OnPassEnd(emitters_of_paths);
   }
 
   void ComputeDistribution()
   {
-    graph.wait_for_all();
-
-    picker_nee.ComputeDistribution();
-    picker_photon.ComputeDistribution();
-    std::cout << "NEE LP: ";
-    picker_nee.Distribution().Print(std::cout);
-    std::cout << "Photon LP: ";
-    picker_photon.Distribution().Print(std::cout);
+    // std::cout << "NEE LP: ";
+    // picker_nee.Distribution().Print(std::cout);
+    // std::cout << "Photon LP: ";
+    // picker_photon.Distribution().Print(std::cout);
   }
 
-  const Lightpickers::LightSelectionProbabilityMap& GetDistributionNee() const { return picker_nee.Distribution(); }
-  const Lightpickers::LightSelectionProbabilityMap& GetDistributionPhotons() const { return picker_photon.Distribution(); }
+  const Lightpickers::LightSelectionProbabilityMap& GetDistributionNee() const { return light_sampling_distribution; }
+  const Lightpickers::LightSelectionProbabilityMap& GetDistributionPhotons() const { return light_sampling_distribution; }
 };
 
 
@@ -206,7 +154,7 @@ class PhotonmappingWorker
 {
   friend struct EmitterSampleVisitor;
   PhotonmappingRenderingAlgo *master;
-  LightPickersUcbCombined* pickers;
+  LightPickersCombined* pickers;
   MediumTracker medium_tracker;
   Sampler sampler;
   int current_node_count = 0;
@@ -261,7 +209,7 @@ struct PathState
 class CameraRenderWorker
 {
   const PhotonmappingRenderingAlgo * const master;
-  LightPickersUcbCombined* const pickers;
+  LightPickersCombined* const pickers;
   mutable Sampler sampler;
   mutable Span<RGB> framebuffer;
   LambdaSelection lambda_selection;
@@ -324,7 +272,7 @@ private:
   ToyVector<PhotonmappingWorker> photonmap_workers;
   ToyVector<CameraRenderWorker> camerarender_workers;
   ToyVector<Lights::LightRef> emitter_refs;
-  std::unique_ptr<LightPickersUcbCombined> pickers;
+  std::unique_ptr<LightPickersCombined> pickers;
 #ifdef DEBUG_BUFFERS  
   ToyVector<Spectral3ImageBuffer> debugbuffers;
   static constexpr int DEBUGBUFFER_DEPTH = 10;
@@ -397,7 +345,7 @@ Photonmapping::PhotonmappingRenderingAlgo::PhotonmappingRenderingAlgo(
   framebuffer.resize(num_pixels, RGB{});
   samplesPerTile.resize(tileset.size(), 0);
 
-  pickers = std::make_unique<LightPickersUcbCombined>(scene, NumThreads());
+  pickers = std::make_unique<LightPickersCombined>(scene, NumThreads());
 
   for (int i = 0; i < the_task_arena.max_concurrency(); ++i)
   {
