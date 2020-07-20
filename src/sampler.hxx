@@ -27,23 +27,23 @@ Float2 ToNormal2d(const Float2 &r);
 }
 
 
-class Sampler
+class RandGen
 {
   pcg32 generator;
 public:
-  Sampler();
+  RandGen();
   void Seed(std::uint64_t seed);
-  
+
   void Uniform01(double *dest, int count);
   int UniformInt(int a, int b_inclusive);
-  
-  inline double Uniform01() 
+
+  inline double Uniform01()
   {
     double r;
     Uniform01(&r, 1);
     return r;
   }
-  
+
   inline Double2 UniformUnitSquare()
   {
     Double2 r;
@@ -60,43 +60,59 @@ public:
 };
 
 
+class SampleSequence
+{
+public:
+  virtual ~SampleSequence() {}
+
+  virtual void SetPixelIndex(Int2 pixel_coord) {}
+  // Within the sequence. Normally incremented once per pass, i.e. for each sample per pixel.
+  virtual void SetPointNum(int i) {}
+  // Normally the dimension
+  virtual void SetSubsequenceId(uint32_t id) {}
+
+  virtual double Uniform01() = 0;
+  virtual Double2 UniformUnitSquare() = 0;
+};
+
+
+class Sampler
+{
+  RandGen randgen;
+  std::unique_ptr<SampleSequence> sequence;
+public:
+  explicit Sampler(bool use_qmc_sequence=false);
+
+  RandGen& GetRandGen() { return randgen; }
+
+  void Seed(std::uint64_t seed) { randgen.Seed(seed); }
+
+  void SetPixelIndex(Int2 pixel_coord) { sequence->SetPixelIndex(pixel_coord); }
+  void SetPointNum(int i) { sequence->SetPointNum(i); }
+  void SetSubsequenceId(uint32_t id) { sequence->SetSubsequenceId(id); }
+
+  // TODO: use the quasi-random sequence here.
+  int UniformInt(int a, int b_inclusive) { return randgen.UniformInt(a, b_inclusive); }
+
+  inline double Uniform01() 
+  {
+    return sequence->Uniform01();
+  }
+
+  inline Double2 UniformUnitSquare()
+  {
+    return sequence->UniformUnitSquare();
+  }
+};
+
+
+
 template<class Iter>
-void RandomShuffle(Iter begin, Iter end, Sampler &sampler)
+void RandomShuffle(Iter begin, Iter end, RandGen &sampler)
 {
   assert(begin != end);
 	sampler.GetGenerator().shuffle(begin, end);
 }
-
-
-class Stratified2DSamples
-{
-    int nx, ny;
-    inline void FastIncrementCoordinates()
-    {
-      // Avoid branching. Use faster conditional moves.
-      ++current_x;
-      current_y = (current_x >= nx) ? current_y+1 : current_y;
-      current_y = (current_y >= ny) ? 0 : current_y;
-      current_x = (current_x >= nx) ? 0 : current_x;
-    }
-  public:
-    int current_x, current_y;
-    
-    Stratified2DSamples(int _nx, int _ny)
-      : nx(_nx), ny(_ny),
-        current_x(0), current_y(0)
-      {}
-    
-    Double2 UniformUnitSquare(Double2 r)
-    {
-      Double2 ret{
-        (current_x + r[0]) / nx,
-        (current_y + r[1]) / ny
-      };
-      FastIncrementCoordinates();
-      return ret;
-    }
-};
 
 
 inline double PowerHeuristic(double prob_of_estimator_evaluated, std::initializer_list<double> other_probs)

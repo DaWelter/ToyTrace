@@ -39,6 +39,7 @@ struct RenderingParameters
   int guiding_tree_subdivision_factor = 100;
   int guiding_max_spp = 512;
   bool linear_output = false;
+  bool qmc = false;
 };
 
 

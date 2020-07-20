@@ -75,14 +75,14 @@ struct LambdaSelectionStrategy
     for (int i=0; i<static_size<Spectral3>(); ++i)
     {
       auto bounds  = Color::GetWavelengthBinBounds(bin_indices[i]);
-      wl[i] = bounds.first + sampler.Uniform01()*(bounds.second-bounds.first);
+      wl[i] = bounds.first + sampler.GetRandGen().Uniform01()*(bounds.second-bounds.first);
     }
     return wl;
   }
   
   LambdaSelection WithWeights(Sampler &sampler) const
   {
-    int main_idx = sampler.UniformInt(0, strata_size-1);
+    int main_idx = sampler.GetRandGen().UniformInt(0, strata_size-1); // TODO: support stratified sampling? But why when I have the shuffling thing down there.
     auto idx     = MakeIndices(main_idx);
     auto weights = Take(lambda_weights, idx);
     return LambdaSelection{idx, weights, SampleWavelengthStrata(idx, sampler)};
@@ -105,7 +105,7 @@ class LambdaSelectionStrategyShuffling
     RandomShuffle(
       current_selection_permutation.begin(),
       current_selection_permutation.end(),
-      sampler);
+      sampler.GetRandGen());
   }
   
 public:
@@ -126,7 +126,7 @@ public:
     // To render a prism, for instance, the first wavelength would be taken to
     // determine the index of refraction and the contribution of the other 
     // two wavelengths would be zero'd out.
-    RandomShuffle(ret.data(), ret.data()+ret.size(), sampler);
+    RandomShuffle(ret.data(), ret.data()+ret.size(), sampler.GetRandGen());
     return ret;
   }
   

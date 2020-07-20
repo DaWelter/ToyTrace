@@ -199,7 +199,8 @@ TEST_F(RandomSamplingFixture, Uniform01)
 {
   static constexpr int N = 1000;
   double buffer[N];
-  sampler.Uniform01(buffer, N);
+  for (int i=0; i<N; ++i)
+    buffer[i] = sampler.Uniform01();
   double max_elem = *std::max_element(buffer, buffer+N);
   double min_elem = *std::min_element(buffer, buffer+N);
   ASSERT_LE(max_elem, 1.0);
@@ -1393,14 +1394,14 @@ protected:
 TEST_P(ShaderSymmetry, Pointwise)
 {
   const Params& p = this->GetParam();
-  PointwiseSymmetryTest test(*scatter, 100, 1.0/p.ior, p.ior, p.seed.value_or(Sampler::default_seed));
+  PointwiseSymmetryTest test(*scatter, 100, 1.0/p.ior, p.ior, p.seed.value_or(RandGen::default_seed));
   test.Run();
 }
 
 TEST_P(ShaderSymmetry, Integral)
 {
   const Params& p = this->GetParam();
-  IntegralSymmetryTest test(*scatter, p.num_samples, p.seed.value_or(Sampler::default_seed));
+  IntegralSymmetryTest test(*scatter, p.num_samples, p.seed.value_or(RandGen::default_seed));
   test.Run();
 }
 
@@ -1621,64 +1622,6 @@ INSTANTIATE_TEST_CASE_P(GlossyTransmissiveDielectric,
 
 
 } // namespace parameterized shader tests
-
-
-
-class StratifiedFixture : public testing::Test
-{
-public:
-  Stratified2DSamples stratified;
-  StratifiedFixture() :
-    stratified(2,2)
-  {}
-  
-  Double2 Get(Double2 v) 
-  { 
-    return stratified.UniformUnitSquare(v); 
-  }
-  
-  void CheckTrafo(double r1, double r2)
-  {
-    stratified.current_x = 0;
-    stratified.current_y = 0;
-    Double2 r = Get({r1, r2});
-    ASSERT_FLOAT_EQ(r[0], r1 * 0.5);
-    ASSERT_FLOAT_EQ(r[1], r2 * 0.5);
-  }
-  
-  void Next()
-  {
-    stratified.UniformUnitSquare({0.,0.});
-  }
-};
-
-
-TEST_F(StratifiedFixture, Incrementing)
-{
-  ASSERT_EQ(stratified.current_x, 0);
-  ASSERT_EQ(stratified.current_y, 0);
-  Next();
-  ASSERT_EQ(stratified.current_x, 1);
-  ASSERT_EQ(stratified.current_y, 0);
-  Next();
-  ASSERT_EQ(stratified.current_x, 0);
-  ASSERT_EQ(stratified.current_y, 1);
-  Next();
-  ASSERT_EQ(stratified.current_x, 1);
-  ASSERT_EQ(stratified.current_y, 1);
-  Next();
-  ASSERT_EQ(stratified.current_x, 0);
-  ASSERT_EQ(stratified.current_y, 0);
-  Next();
-}
-
-
-TEST_F(StratifiedFixture, SampleLocation)
-{
-  CheckTrafo(0., 0.);
-  CheckTrafo(1., 1.);
-  CheckTrafo(0.5, 0.5);
-}
 
 
 

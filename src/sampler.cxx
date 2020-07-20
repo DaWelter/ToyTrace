@@ -127,18 +127,208 @@ Float2 ToNormal2d(const Float2 &r)
 }
 
 
-Sampler::Sampler()
+namespace
+{
+// Copy pasted from Kollig & Keller 2012 "Efficient Multidimensional Sampling"
+
+using uint = std::uint32_t;
+
+uint ReverseBits(uint bits)
+{
+  bits = (bits << 16)
+    | (bits >> 16);
+  bits = ((bits & 0x00ff00ff) << 8)
+    | ((bits & 0xff00ff00) >> 8);
+  bits = ((bits & 0x0f0f0f0f) << 4)
+    | ((bits & 0xf0f0f0f0) >> 4);
+  bits = ((bits & 0x33333333) << 2)
+    | ((bits & 0xcccccccc) >> 2);
+  bits = ((bits & 0x55555555) << 1)
+    | ((bits & 0xaaaaaaaa) >> 1);
+  return bits;
+}
+
+double RI_vdC(uint bits, uint r = 0)
+{
+  bits = ReverseBits(bits);
+  bits ^= r;
+  return (double)bits / (double)0x100000000LL;
+}
+
+double RI_S(uint i, uint r = 0)
+{
+  for (uint v = 1 << 31; i; i >>= 1, v ^= v >> 1)
+    if (i & 1)
+      r ^= v;
+  return (double)r / (double)0x100000000LL;
+}
+
+
+//From here https://stackoverflow.com/questions/664014/what-integer-hash-function-are-good-that-accepts-an-integer-hash-key
+unsigned int hash(unsigned int x) {
+    x = ((x >> 16) ^ x) * 0x45d9f3b;
+    x = ((x >> 16) ^ x) * 0x45d9f3b;
+    x = (x >> 16) ^ x;
+    return x;
+}
+/*
+// From "Stratified Sampling for Stochastic Transparency"
+2: x ← reverseBits(x) + surfaceId
+3: x ← x ⊕ (x ⋅ 0x6C50B47Cu )
+4: x ← x ⊕ (x ⋅ 0xB82F1E52u )
+5: x ← x ⊕ (x ⋅ 0xC7AFE638u )
+6: x ← x ⊕ (x ⋅ 0x8D22F6E6u )
+7: return x scaled to range [0, 1]
+*/
+uint hash2(uint bits)
+{
+   bits ^= bits * 0x6C50B47Cu;
+   bits ^= bits * 0xB82F1E52u;
+   bits ^= bits * 0xC7AFE638u;
+   bits ^= bits * 0x8D22F6E6u;
+   return bits;
+}
+
+uint hash3(uint bits)
+{
+  // Just other constants
+   bits ^= bits * 0xd169f4d6u;
+   bits ^= bits * 0x2cbb59c8u;
+   bits ^= bits * 0xb64b806cu;
+   bits ^= bits * 0xa0836df0u;
+   return bits;
+}
+
+double AsUniform01(uint x)
+{
+  return (double)x / (double)0x100000000LL;
+}
+
+}
+
+
+static constexpr int rotation_block_size = 128;
+extern Double2 rotation_offsets[rotation_block_size*rotation_block_size];
+
+class QuasiRandomSequence : public SampleSequence
+{
+  static constexpr int rotation_block_size = 64;
+  static Double2 rotation_offsets[rotation_block_size*rotation_block_size];
+  //using OffsetTable2d = ToyVector<Double2>;
+  //OffsetTable2d rotation_offsets;
+  int rotation_idx = 0;
+  int point_idx = 0;
+  uint32_t scrambling_mask = 0;
+  Eigen::Vector2d subsequence_offsets{Eigen::zero};
+  std::unordered_map<uint32_t, uint32_t> scrambling_masks;
+  RandGen rnd;
+public:
+  QuasiRandomSequence()
+  {
+  }
+
+  void SetPixelIndex(Int2 pixel_coord) override
+  {
+    rotation_idx = 
+      (pixel_coord[0] % rotation_block_size) +
+      (pixel_coord[1] % rotation_block_size) * rotation_block_size;
+  }
+  
+  void SetPointNum(int i) override
+  {
+    assert(i >= 0);
+    point_idx = i;
+  }
+  
+
+  void SetSubsequenceId(uint32_t id) override
+  {
+    uint32_t m = scrambling_masks[id];
+    if (m == 0)
+    {
+      // Scrambling masks need to be pretty random.
+      // Otherwise there will be correlations across dimensions,
+      // leading to noticable errors or image artifacts.
+      m = rnd.GetGenerator().nextUInt();
+      scrambling_masks[id] = m;
+    }
+    scrambling_mask = m;
+    // Hashing is not too bad either. Not as good as random numbers though.
+    // Can use rotation in addition.
+    subsequence_offsets[0] = 0.; //AsUniform01(hash2(ReverseBits(id)));
+    subsequence_offsets[1] = 0.; //AsUniform01(hash3(ReverseBits(id)));
+  }
+  
+  double Uniform01() override
+  {
+    // I want another sequence. Not the one from the 2d sample.
+    // So I xor with scrambling mask with a random number.
+    // Probably not sufficient decorelation. Might have to try something more elaborate.
+    auto x = RI_vdC(point_idx, scrambling_mask ^ 0x9536a63a);
+    x += rotation_offsets[rotation_idx][0];
+    x = x >= 1. ? (x - 1.) : x;
+    return x;
+  }
+  
+  Double2 UniformUnitSquare() override
+  {
+    // The first two components of the Sobol sequence.
+    // XOR scrambled.
+    auto x = RI_vdC(point_idx, scrambling_mask);
+    auto y = RI_S(point_idx, scrambling_mask);
+    // And Cranley rotated
+    x += rotation_offsets[rotation_idx][0];
+    y += rotation_offsets[rotation_idx][1];
+    x = x >= 1. ? (x - 1.) : x;
+    y = (y >= 1.) ? (y - 1.) : y;
+    x += subsequence_offsets[0];
+    y += subsequence_offsets[1];
+    x = x >= 1. ? (x - 1.) : x;
+    y = (y >= 1.) ? (y - 1.) : y;
+    assert(x >= 0. && x < 1.);
+    assert(y >= 0. && y < 1.);
+    return { x, y };
+  }
+};
+
+
+
+class PseudoRandomSequence : public SampleSequence
+{
+  RandGen rg;
+public:
+  double Uniform01() override { return rg.Uniform01(); }
+  Double2 UniformUnitSquare() override { return rg.UniformUnitSquare(); }
+};
+
+
+
+
+Sampler::Sampler(bool use_qmc_sequence)
+{
+  if (use_qmc_sequence)
+  {
+    sequence = std::make_unique<QuasiRandomSequence>();
+  }
+  else
+  {
+    sequence = std::make_unique<PseudoRandomSequence>();
+  }
+}
+
+
+RandGen::RandGen()
 {
 }
 
 
-void Sampler::Seed(std::uint64_t seed)
+void RandGen::Seed(std::uint64_t seed)
 {
   generator = pcg32{seed};
 }
 
 
-void Sampler::Uniform01(double* dest, int count)
+void RandGen::Uniform01(double* dest, int count)
 {
   for (int i=0; i<count; ++i)
   {
@@ -148,7 +338,7 @@ void Sampler::Uniform01(double* dest, int count)
 }
 
 
-int Sampler::UniformInt(int a, int b_inclusive)
+int RandGen::UniformInt(int a, int b_inclusive)
 {
   const std::uint32_t x = generator.nextUInt(b_inclusive+1 - a);
   const int y = a + (int)x;
@@ -156,4 +346,4 @@ int Sampler::UniformInt(int a, int b_inclusive)
   return y;
 }
 
-constexpr std::uint64_t Sampler::default_seed;
+constexpr std::uint64_t RandGen::default_seed;

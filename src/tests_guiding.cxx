@@ -529,7 +529,7 @@ TEST(Guiding, QuadTreeDivideIntoChildRanges)
   using Vector = Eigen::Vector2f;
   ToyVector<Vector> points;
   ToyVector<float> weights;
-  Sampler sampler{};
+  RandGen sampler{};
 
   points = { {0.25, 0.25}, { 0.75, 0.25 }, {0.25, 0.75 }, { 0.75, 0.75 } };
   for (int i = 0; i < 4; ++i)

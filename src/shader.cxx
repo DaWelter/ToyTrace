@@ -1374,7 +1374,7 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
   int iteration = 0;
   while (++iteration < emergency_abort_max_num_iterations)
   {
-    smpl.t -= std::log(sampler.Uniform01()) * inv_sigma_t_majorant;
+    smpl.t -= std::log(sampler.GetRandGen().Uniform01()) * inv_sigma_t_majorant;
     if (smpl.t > segment.length)
     {
       return smpl;
@@ -1384,7 +1384,7 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
       assert(sigma_n.minCoeff() >= -1.e-3); // By definition of the majorante
       double prob_t, prob_n;
       TrackingDetail::ComputeProbabilitiesHistoryScheme(smpl.weight*initial_weights, {sigma_s, sigma_n}, {prob_t, prob_n});
-      double r = sampler.Uniform01();
+      double r = sampler.GetRandGen().Uniform01();
       if (r < prob_t) // Scattering/Absorption
       {
         smpl.weight *= inv_sigma_t_majorant / prob_t;
@@ -1422,7 +1422,7 @@ void HomogeneousMedium::ConstructShortBeamTransmittance(const RaySegment& segmen
   std::pair<double,int> items[N]; 
   for (int i=0; i<N; ++i)
   {
-    items[i].first = - std::log(1-sampler.Uniform01()) / sigma_ext[i];
+    items[i].first = - std::log(1-sampler.GetRandGen().Uniform01()) / sigma_ext[i];
     items[i].second = i;
     for (int j=i; j>0 && items[j-1].first>items[j].first; --j)
     {
@@ -1496,7 +1496,7 @@ Medium::PhaseSample MonochromaticHomogeneousMedium::SamplePhaseFunction(const Do
 Medium::InteractionSample MonochromaticHomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, const Spectral3 &initial_weights, Sampler& sampler, const PathContext &context) const
 {
   Medium::InteractionSample smpl;
-  smpl.t = - std::log(1-sampler.Uniform01()) / sigma_ext;
+  smpl.t = - std::log(1-sampler.GetRandGen().Uniform01()) / sigma_ext;
   smpl.t = smpl.t < LargeNumber ? smpl.t : LargeNumber;
   smpl.weight = (smpl.t >= segment.length) ? 
     1.0  // This is transmittance divided by probability to pass through the medium undisturbed which happens to be also the transmittance. Thus this simplifies to one.
@@ -1525,7 +1525,7 @@ Spectral3 MonochromaticHomogeneousMedium::EvaluateTransmission(const RaySegment&
 
 void MonochromaticHomogeneousMedium::ConstructShortBeamTransmittance(const RaySegment& segment, Sampler& sampler, const PathContext& context, PiecewiseConstantTransmittance& pct) const
 {
-  double t = - std::log(1-sampler.Uniform01()) / sigma_ext;
+  double t = - std::log(1-sampler.GetRandGen().Uniform01()) / sigma_ext;
   pct.PushBack(t, Spectral3::Ones());
 }
 

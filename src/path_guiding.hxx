@@ -116,7 +116,7 @@ public:
     return std::make_pair(incident_flux_density, incident_flux_confidence_bounds);
   }
 
-  Float3 ComputeStochasticFilteredDirection(const IncidentRadiance & rec, Sampler &sampler) const;
+  Float3 ComputeStochasticFilteredDirection(const IncidentRadiance & rec, RandGen &sampler) const;
 
   rapidjson::Value ToJSON(rapidjson::MemoryPoolAllocator<rapidjson::CrtAllocator> &a) const;
 };
@@ -290,7 +290,7 @@ public:
     return AssertFinite({ node_means[tree.GetRoot().idx], node_stddev[tree.GetRoot().idx] });
   }
 
-  Float3 ComputeStochasticFilteredDirection(const IncidentRadiance & rec, Sampler &sampler) const;
+  Float3 ComputeStochasticFilteredDirection(const IncidentRadiance & rec, RandGen &sampler) const;
 
   rapidjson::Value ToJSON(rapidjson::MemoryPoolAllocator<rapidjson::CrtAllocator> &a) const;
 };
@@ -463,7 +463,7 @@ class PathGuiding
         ToyVector<ToyVector<IncidentRadiance>> SortSamplesIntoCells(Span<const int> cell_indices, Span<const IncidentRadiance> samples) const;
         void GenerateStochasticFilteredSamplesInplace(Span<int> cell_indices, Span<IncidentRadiance> samples) const;
 
-        static IncidentRadiance ComputeStochasticFilterPosition(const IncidentRadiance & rec, const CellData &cd, Sampler &sampler);
+        static IncidentRadiance ComputeStochasticFilterPosition(const IncidentRadiance & rec, const CellData &cd, RandGen &sampler);
         
         void FitTheSamples(CellData &cell, Span<IncidentRadiance> buffer) const;
         

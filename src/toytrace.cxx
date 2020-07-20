@@ -167,7 +167,7 @@ int main(int argc, char *argv[])
 #ifdef HAVE_JSON
   Pathlogger::Init("/tmp/paths.json");
   IncompletePaths::Init();
-  scene.WriteObj("/tmp/scene.obj");
+  //scene.WriteObj("/tmp/scene.obj");
 #endif
   
 
@@ -250,6 +250,7 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
       ("h,h", po::value<int>(), "Height")
       ("rd", po::value<int>(), "Max ray depth")
       ("spp", po::value<int>(), "Max samples per pixel")
+      ("qmc", po::bool_switch()->default_value(false), "Quasi-Monte-Carlo")
       ("guide-em-every", po::value<int>(), "Guiding: Expectancy maximization every x samples.")
       ("guide-prior-strength", po::value<double>(), "Guiding: Roughly the number of samples were prior becomes insignificant.")
       ("guide-subdiv-factor", po::value<int>(), "Guiding: Less makes the tree more refined. Value ranges around 100 to 10000.")
@@ -417,6 +418,8 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
       std::cout << "WARNING: Not opening display and no sample count given. Will run until killed." << std::endl;
     display = MakeDisplay(open_display);
     
+    render_params.qmc = vm["qmc"].as<bool>();
+
     if (vm.count("include"))
     {
       auto list_of_includes = vm["include"].as<std::vector<std::string>>();

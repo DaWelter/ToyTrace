@@ -28,7 +28,7 @@ using Lights::LightRef;
 using Lightpickers::UcbLightPicker;
 class PathTracingAlgo2;
 
-#if 1 // If I want to use the UCB light picker ...
+#if 0 // If I want to use the UCB light picker ...
 class LightPickerUcbBufferedQueue
 {
 private:
@@ -161,6 +161,14 @@ private:
   
   void RecordMeasurementToCurrentPixel(const Spectral3 &measurement, const PathState &ps) const;
 
+  enum SmplNodeType : uint32_t
+  {
+    NEE_LIGHT = 1,
+    BSDF = 0,
+  };
+
+  void PrepSamplerDimension(const PathState &ps, SmplNodeType t) const;
+
 public:
   CameraRenderWorker(PathTracingAlgo2 *master, int worker_index);
   void Render(const ImageTileSet::Tile & tile);
@@ -213,6 +221,7 @@ public:
 protected:
   inline int GetNumPixels() const { return num_pixels; }
   inline int GetSamplesPerPixel() const { return spp_schedule.GetPerIteration(); }
+  inline int GetTotalSamplesPerPixel() const { return spp_schedule.GetTotal(); }
   inline int NumThreads() const {
     return the_task_arena.max_concurrency();
   }
@@ -249,8 +258,6 @@ PathTracingAlgo2::PathTracingAlgo2(
 
 inline void PathTracingAlgo2::Run()
 {
-  Sampler sampler;
-
   while (!stop_flag.load() && spp_schedule.GetPerIteration() > 0)
   {
     pickers->ComputeDistribution();
@@ -297,9 +304,16 @@ inline std::unique_ptr<Image> PathTracingAlgo2::GenerateImage()
 CameraRenderWorker::CameraRenderWorker(PathTracingAlgo2* master, int worker_index)
   : master{ master },
   pickers{ master->pickers.get() },
+  sampler{ master->render_params.qmc },
   ray_termination{ master->render_params }
 {
   framebuffer = AsSpan(master->framebuffer);
+}
+
+
+void CameraRenderWorker::PrepSamplerDimension(const PathState &ps, SmplNodeType t) const
+{
+  sampler.SetSubsequenceId((ps.current_node_count << 1) | (uint32_t)t);
 }
 
 
@@ -314,8 +328,10 @@ void CameraRenderWorker::Render(const ImageTileSet::Tile &tile)
   {
     for (int ix = tile.corner[0]; ix < end[0]; ++ix)
     {
+      sampler.SetPixelIndex({ ix, iy });
       for (int i = 0; i < samples_per_pixel; ++i)
       {
+        sampler.SetPointNum(i + master->GetTotalSamplesPerPixel());
         const auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
         InitializePathState(state, { ix, iy }, lambda_selection);
         bool keepgoing = true;
@@ -336,19 +352,22 @@ void CameraRenderWorker::InitializePathState(PathState &p, Int2 pixel, const Lam
   const auto& camera = master->scene.GetCamera();
   p.context = PathContext(lambda_selection, camera.PixelToUnit({ pixel[0], pixel[1] }));
   
-  p.current_node_count = 2; // First node on camera. We start with the node code of the next interaction.
+  p.current_node_count = 0;
   p.monochromatic = false;
   p.weight = lambda_selection.weights;
   p.last_scatter_pdf_value = boost::none;
-
-
+  
+  PrepSamplerDimension(p, BSDF);
   auto pos = camera.TakePositionSample(p.context.pixel_index, sampler, p.context);
   p.weight *= pos.value / pos.pdf_or_pmf;
+  p.current_node_count++;
+  PrepSamplerDimension(p, BSDF);
   auto dir = camera.TakeDirectionSampleFrom(p.context.pixel_index, pos.coordinates, sampler, p.context);
   p.weight *= dir.value / dir.pdf_or_pmf;
   p.ray = { pos.coordinates, dir.coordinates };
-
   p.medium_tracker.initializePosition(pos.coordinates);
+  // First node on camera. We start with the node code of the next interaction. Which is 2.
+  p.current_node_count++;
 }
 
 
@@ -369,12 +388,10 @@ bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(PathState &ps) con
       [&](const SurfaceInteraction &si)  {
         MaybeAddEmission(si, ps);
         AddDirectLighting(si, ps);
-        ps.current_node_count++;
         return MaybeScatter(si, ps);
       },
       [&](const VolumeInteraction &vi) {
         AddDirectLighting(vi, ps);
-        ps.current_node_count++;
         return MaybeScatter(vi, ps);
       }
   ), *interaction);
@@ -398,6 +415,8 @@ void CameraRenderWorker::AddDirectLighting(const SomeInteraction & interaction, 
   Pdf pdf;
   Spectral3 light_weight;
   LightRef light_ref;
+
+  PrepSamplerDimension(ps, NEE_LIGHT);
 
   pickers->GetDistributionNee().Sample(sampler, [&](auto &&light, double prob, const LightRef &light_ref_)
   {
@@ -490,9 +509,13 @@ void PrepareStateForAfterScattering(PathState &ps, const VolumeInteraction &inte
 
 bool CameraRenderWorker::MaybeScatter(const SomeInteraction &interaction, PathState &ps) const
 {
+  PrepSamplerDimension(ps, BSDF);
+
   auto smpl = mpark::visit([this, &ps, &scene{ master->scene }](auto &&ia) {
     return SampleScatterer(ia, -ps.ray.dir, scene, sampler, ps.context);
   }, interaction);
+  
+  ps.current_node_count++;
 
   if (ray_termination.SurvivalAtNthScatterNode(smpl.value, Spectral3{ 1. }, ps.current_node_count, sampler))
   {

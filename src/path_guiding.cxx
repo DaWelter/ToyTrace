@@ -76,7 +76,7 @@ RadianceDistributionLearned::Parameters::Parameters(const CellData &cell)
 }
 
 
-Float3 RadianceDistributionSampled::ComputeStochasticFilteredDirection(const IncidentRadiance & rec, Sampler &sampler) const
+Float3 RadianceDistributionSampled::ComputeStochasticFilteredDirection(const IncidentRadiance & rec, RandGen &sampler) const
 {
   const float prob = 0.1f;
   const float pdf = Pdf(rec.reverse_incident_dir.cast<double>().eval());
@@ -128,7 +128,7 @@ Eigen::Vector3f MapTreeToSphere(const Eigen::Vector2f &uv)
 }
 
 
-Float3 RadianceDistributionSampled::ComputeStochasticFilteredDirection(const IncidentRadiance & rec, Sampler &sampler) const
+Float3 RadianceDistributionSampled::ComputeStochasticFilteredDirection(const IncidentRadiance & rec, RandGen &sampler) const
 {
   using namespace guiding::quadtree;
 
@@ -358,7 +358,7 @@ void PathGuiding::AddSample(
 }
 
 
-IncidentRadiance PathGuiding::ComputeStochasticFilterPosition(const IncidentRadiance & rec, const CellData &cd, Sampler &sampler)
+IncidentRadiance PathGuiding::ComputeStochasticFilterPosition(const IncidentRadiance & rec, const CellData &cd, RandGen &sampler)
 {
   IncidentRadiance new_rec{rec};
 
@@ -413,7 +413,7 @@ ToyVector<ToyVector<IncidentRadiance>> PathGuiding::SortSamplesIntoCells(Span<co
 
 void PathGuiding::GenerateStochasticFilteredSamplesInplace(Span<int> cell_indices, Span<IncidentRadiance> samples) const
 {
-  tbb::enumerable_thread_specific<Sampler> tls_samplers;
+  tbb::enumerable_thread_specific<RandGen> tls_samplers;
   tbb::parallel_for(tbb::blocked_range<long>(0, samples.size(), 1000), [&, this](tbb::blocked_range<long> r)
   {
     auto sampler = tls_samplers.local();
@@ -457,7 +457,7 @@ void PathGuiding::FitTheSamples(Span<ThreadLocal*> thread_locals)
 
   auto sorted_samples = SortSamplesIntoCells(AsSpan(cell_indices), AsSpan(samples));
 
-  tbb::enumerable_thread_specific<Sampler> samplers;
+  tbb::enumerable_thread_specific<RandGen> samplers;
 
   tbb::parallel_for<int>(0, isize(cell_data), [&, this](int cell_idx) 
   {

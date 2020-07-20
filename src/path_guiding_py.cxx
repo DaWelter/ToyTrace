@@ -367,6 +367,23 @@ void Register(py::module &m)
 } // py_quadtree
 
 
+namespace py_sampling
+{
+
+void Register(py::module &m)
+{
+  py::class_<Sampler>(m, "Sampler")
+    .def(py::init<bool>())
+    .def("UniformUnitSquare", &Sampler::UniformUnitSquare)
+    .def("SetPixelIndex", &Sampler::SetPixelIndex)
+    .def("SetPointNum", &Sampler::SetPointNum)
+    .def("SetSubsequenceId", &Sampler::SetSubsequenceId);
+}
+
+}
+
+
+
 PYBIND11_MODULE(path_guiding, m)
 {
     py::module::import("numpy");
@@ -392,4 +409,6 @@ PYBIND11_MODULE(path_guiding, m)
     m.def("ExpApproximation", [](float x) { return vmf_fitting::ExpApproximation(x);  });
 
     py_quadtree::Register(m);
+
+    py_sampling::Register(m);
 }

@@ -131,7 +131,7 @@ add_library(commonstuff STATIC
   src/renderingalgorithms_normalvisualizer.cxx src/renderingalgorithms_pathtracing.cxx
   src/rendering_util.cxx src/pathlogger.cxx src/photonintersector.cxx  external/cubature/hcubature.c 
   src/path_guiding.cxx src/renderingalgorithms_pathtracing_guided.cxx src/distribution_mixture_models.cxx src/path_guiding_tree.cxx src/path_guiding_quadtree.cxx
-  src/ndarray.hxx)
+  src/ndarray.hxx src/sampler_tables.cxx)
 
   file(GLOB headers RELATIVE ${CMAKE_SOURCE_DIR} "src/*.hxx")
 target_sources(commonstuff PRIVATE ${headers})
