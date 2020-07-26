@@ -1,6 +1,7 @@
 #pragma once
 
-#include <Eigen/Core>
+#include "eigen.hxx"
+#include "util.hxx"
 
 template<int dim_, class Index_ = int>
 class LatticeIndexing // Uniform lattice -> integer type index or pointer
@@ -66,7 +67,7 @@ public:
    First dimension moves fastest in linear memory. No shared memory or
    reference counting.
 */
-template<class T, int dim_, class Allocator_ = AlignedAllocator<T, 16>>
+template<class T, int dim_, class Allocator_ = util::AlignedAllocator<T, 16>>
 class SimpleNdArray
 {
 public:
@@ -194,7 +195,7 @@ public:
 };
 
 
-template<class T, int dim_, class Allocator_ = AlignedAllocator<T, 16>>
+template<class T, int dim_, class Allocator_ = util::AlignedAllocator<T, 16>>
 class SimpleLookupTable
 {
 public:

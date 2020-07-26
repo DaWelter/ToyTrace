@@ -1237,7 +1237,7 @@ void EmissiveDemoMedium::ConstructShortBeamTransmittance(const RaySegment& segme
 
 Medium::VolumeSample EmissiveDemoMedium::SampleEmissionPosition(Sampler &sampler, const PathContext &context) const
 {
-  Double3 r { sampler.Uniform01(), sampler.Uniform01(), sampler.Uniform01() };
+  Double3 r { sampler.GetRandGen().Uniform01(), sampler.GetRandGen().Uniform01(), sampler.GetRandGen().Uniform01() };
   Double3 pos = SampleTrafo::ToUniformSphere3d(r)*radius + this->pos;
   return { pos };
 }

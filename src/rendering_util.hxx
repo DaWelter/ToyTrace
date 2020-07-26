@@ -422,7 +422,7 @@ private:
     assert (coeff.maxCoeff() >= 0.);
     // Clip at 0.9 to make the path terminate in high-albedo scenes.
     double p_survive = std::min(0.9, coeff.maxCoeff());
-    if (sampler.Uniform01() > p_survive)
+    if (sampler.GetRandGen().Uniform01() > p_survive)
       return false;
     weight *= 1./p_survive;
     return true;

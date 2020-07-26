@@ -119,6 +119,17 @@ inline Span<T> AsSpan(std::array<T, N> &a)
   return Span<T>(a.data(), a.size());
 }
 
+template<class T, int rows, int cols>
+Span<const T> RowSpan(const Eigen::Matrix<T, rows, cols, Eigen::RowMajor> &x, Eigen::Index row)
+{
+  return Span<const T>(x.row(row).data(), (ptrdiff_t)x.cols());
+}
+
+template<class T, int rows, int cols>
+Span<T> RowSpan(Eigen::Matrix<T, rows, cols, Eigen::RowMajor> &x, Eigen::Index row)
+{
+  return Span<T>(x.row(row).data(), (ptrdiff_t)x.cols());
+}
 
 template<class T>
 auto AsEigenArray(Span<T> s)
@@ -147,3 +158,4 @@ inline void ReorderInplace(Span<T> &s, Span<const ptrdiff_t> indices)
 using util::Span;
 using util::AsSpan;
 using util::Subspan;
+using util::RowSpan;

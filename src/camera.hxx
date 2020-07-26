@@ -111,11 +111,10 @@ public:
   virtual DirectionalSample TakeDirectionSampleFrom(int unit_index, const Double3 &pos, Sampler &sampler, const PathContext &context) const override
   {
     auto pixel = this->UnitToPixel(unit_index);
-    double r1 = sampler.Uniform01();
-    double r2 = sampler.Uniform01();
+    Double2 r = sampler.UniformUnitSquare();
     Double3 v(
-      xmin + (r1 + std::get<0>(pixel)) * xperpixel,
-      ymin + (r2 + std::get<1>(pixel)) * yperpixel,
+      xmin + (r[0] + std::get<0>(pixel)) * xperpixel,
+      ymin + (r[1] + std::get<1>(pixel)) * yperpixel,
       1.0);
     Normalize(v);
     Double3 emission_dir = frame.right*v[0] + frame.up*v[1] + frame.dir*v[2];

@@ -208,12 +208,10 @@ double AsUniform01(uint x)
 
 
 static constexpr int rotation_block_size = 128;
-extern Double2 rotation_offsets[rotation_block_size*rotation_block_size];
+extern float rotation_offsets[rotation_block_size*rotation_block_size][2];
 
 class QuasiRandomSequence : public SampleSequence
 {
-  static constexpr int rotation_block_size = 64;
-  static Double2 rotation_offsets[rotation_block_size*rotation_block_size];
   //using OffsetTable2d = ToyVector<Double2>;
   //OffsetTable2d rotation_offsets;
   int rotation_idx = 0;
