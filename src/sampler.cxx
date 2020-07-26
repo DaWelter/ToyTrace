@@ -204,9 +204,22 @@ double AsUniform01(uint x)
   return (double)x / (double)0x100000000LL;
 }
 
+double SobolMatrixMult(uint32_t point_idx, const uint32_t* m)
+{
+    uint32_t c = 0;
+    for (int i=0; i<32; ++i)
+    {
+      c ^= (point_idx&1) ? m[i] : 0;
+      point_idx >>= 1;
+    }
+    return AsUniform01(c);
 }
 
 
+}
+
+
+extern uint32_t sobol_generator_matrices[64][32];
 static constexpr int rotation_block_size = 128;
 extern float rotation_offsets[rotation_block_size*rotation_block_size][2];
 
@@ -217,9 +230,9 @@ class QuasiRandomSequence : public SampleSequence
   int rotation_idx = 0;
   int point_idx = 0;
   uint32_t scrambling_mask = 0;
-  Eigen::Vector2d subsequence_offsets{Eigen::zero};
-  std::unordered_map<uint32_t, uint32_t> scrambling_masks;
-  RandGen rnd;
+  // Eigen::Vector2d subsequence_offsets{Eigen::zero};
+  // std::unordered_map<uint32_t, uint32_t> scrambling_masks;
+  // RandGen rnd;
 public:
   QuasiRandomSequence()
   {
@@ -241,20 +254,8 @@ public:
 
   void SetSubsequenceId(uint32_t id) override
   {
-    uint32_t m = scrambling_masks[id];
-    if (m == 0)
-    {
-      // Scrambling masks need to be pretty random.
-      // Otherwise there will be correlations across dimensions,
-      // leading to noticable errors or image artifacts.
-      m = rnd.GetGenerator().nextUInt();
-      scrambling_masks[id] = m;
-    }
-    scrambling_mask = m;
-    // Hashing is not too bad either. Not as good as random numbers though.
-    // Can use rotation in addition.
-    subsequence_offsets[0] = 0.; //AsUniform01(hash2(ReverseBits(id)));
-    subsequence_offsets[1] = 0.; //AsUniform01(hash3(ReverseBits(id)));
+    assert(id < 32);
+    scrambling_mask = 2*id;
   }
   
   double Uniform01() override
@@ -270,17 +271,11 @@ public:
   
   Double2 UniformUnitSquare() override
   {
-    // The first two components of the Sobol sequence.
-    // XOR scrambled.
-    auto x = RI_vdC(point_idx, scrambling_mask);
-    auto y = RI_S(point_idx, scrambling_mask);
+    double x = SobolMatrixMult(point_idx, sobol_generator_matrices[scrambling_mask]);
+    double y = SobolMatrixMult(point_idx, sobol_generator_matrices[scrambling_mask+1]);
     // And Cranley rotated
     x += rotation_offsets[rotation_idx][0];
     y += rotation_offsets[rotation_idx][1];
-    x = x >= 1. ? (x - 1.) : x;
-    y = (y >= 1.) ? (y - 1.) : y;
-    x += subsequence_offsets[0];
-    y += subsequence_offsets[1];
     x = x >= 1. ? (x - 1.) : x;
     y = (y >= 1.) ? (y - 1.) : y;
     assert(x >= 0. && x < 1.);
