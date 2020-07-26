@@ -643,6 +643,8 @@ public:
   );
   ScatterSample SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const override;
   Spectral3 EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const override;
+
+  double MyRoughness(ShaderQuery query) const override;
 };
 
 
@@ -660,11 +662,20 @@ MicrofacetShader::MicrofacetShader(
 }
 
 
+double MicrofacetShader::MyRoughness(ShaderQuery query) const
+{
+  const double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), query.surface_hit.get());
+  return alpha;
+}
+
+
 Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, const Double3 &out_direction, double *pdf) const
 {
   const auto& surface_hit = query.surface_hit.get();
   LocalFrame frame{surface_hit};
-  double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit);
+  const double alpha = std::max(
+    MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), surface_hit),
+    query.minimum_roughness);
   BeckmanDistribution ndf{alpha};
   Spectral3 kr_s_taken = Take(kr_s, query.context.get().lambda_idx);
   const Double3 wi = frame.m_local_inv * reverse_incident_dir;
@@ -677,7 +688,9 @@ Spectral3 MicrofacetShader::EvaluateBSDF(const Double3 &reverse_incident_dir, Sh
 ScatterSample MicrofacetShader::SampleBSDF(const Double3 &reverse_incident_dir, ShaderQuery query, Sampler& sampler) const
 {
   LocalFrame frame{query.surface_hit.get()};
-  double alpha = MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), query.surface_hit.get());
+  const double alpha = std::max(
+    MaybeMultiplyTextureLookup(alpha_max, glossy_exponent_texture.get(), query.surface_hit.get()),
+    query.minimum_roughness);
   BeckmanDistribution ndf{alpha};
   Spectral3 kr_s_taken = Take(kr_s, query.context.get().lambda_idx);
   MicrofacetShaderWrapper brdf{query.context.get(), ndf, frame, kr_s_taken};

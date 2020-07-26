@@ -8,6 +8,7 @@
 #include <tbb/flow_graph.h>
 
 #include "scene.hxx"
+#include "shader.hxx"
 #include "util.hxx"
 #include "shader_util.hxx"
 #include "camera.hxx"
@@ -132,6 +133,7 @@ struct PathState
   Ray ray;
   Spectral3 weight;
   boost::optional<Pdf> last_scatter_pdf_value; // For MIS.
+  double shader_roughness = 0.;
   int current_node_count;
   bool monochromatic;
 };
@@ -356,6 +358,7 @@ void CameraRenderWorker::InitializePathState(PathState &p, Int2 pixel, const Lam
   p.monochromatic = false;
   p.weight = lambda_selection.weights;
   p.last_scatter_pdf_value = boost::none;
+  p.shader_roughness = 0.;
   
   PrepSamplerDimension(p, BSDF);
   auto pos = camera.TakePositionSample(p.context.pixel_index, sampler, p.context);
@@ -446,7 +449,13 @@ void CameraRenderWorker::AddDirectLighting(const SomeInteraction & interaction, 
   {
     // Surface specific
     path_weight *= DFactorPBRT(*si, ray.dir);
-    Spectral3 bsdf_weight = GetShaderOf(*si, master->scene).EvaluateBSDF(-ps.ray.dir, *si, ray.dir, ps.context, &bsdf_pdf);
+    const auto &shd = GetShaderOf(*si, master->scene);
+    ShaderQuery query {
+      std::cref(*si),
+      std::cref(ps.context),
+      ps.shader_roughness,
+    };
+    Spectral3 bsdf_weight = shd.EvaluateBSDF(-ps.ray.dir, query, ray.dir, &bsdf_pdf);
     path_weight *= bsdf_weight;
     MaybeGoingThroughSurface(medium_tracker, ray.dir, *si);
   }
@@ -473,14 +482,21 @@ namespace
 {
 
 
-ScatterSample SampleScatterer(const SurfaceInteraction &interaction, const Double3 &reverse_incident_dir, const Scene &scene, Sampler &sampler, const PathContext &context)
+ScatterSample SampleScatterer(const SurfaceInteraction &interaction, const Double3 &reverse_incident_dir, const Scene &scene, Sampler &sampler, PathState &ps)
 {
-  return GetShaderOf(interaction, scene).SampleBSDF(reverse_incident_dir, interaction, sampler, context);
+  const auto &shd = GetShaderOf(interaction, scene);
+  materials::ShaderQuery query{
+    std::cref(interaction),
+    std::cref(ps.context),
+    ps.shader_roughness
+  };
+  ps.shader_roughness = std::max(shd.MyRoughness(query), ps.shader_roughness);
+  return shd.SampleBSDF(reverse_incident_dir, query, sampler);
 }
 
-ScatterSample SampleScatterer(const VolumeInteraction &interaction, const Double3 &reverse_incident_dir, const Scene &scene, Sampler &sampler, const PathContext &context)
+ScatterSample SampleScatterer(const VolumeInteraction &interaction, const Double3 &reverse_incident_dir, const Scene &scene, Sampler &sampler, PathState &ps)
 {
-  ScatterSample s = interaction.medium().SamplePhaseFunction(reverse_incident_dir, interaction.pos, sampler, context);
+  ScatterSample s = interaction.medium().SamplePhaseFunction(reverse_incident_dir, interaction.pos, sampler, ps.context);
   s.value *= interaction.sigma_s;
   return s;
 }
@@ -512,7 +528,7 @@ bool CameraRenderWorker::MaybeScatter(const SomeInteraction &interaction, PathSt
   PrepSamplerDimension(ps, BSDF);
 
   auto smpl = mpark::visit([this, &ps, &scene{ master->scene }](auto &&ia) {
-    return SampleScatterer(ia, -ps.ray.dir, scene, sampler, ps.context);
+    return SampleScatterer(ia, -ps.ray.dir, scene, sampler, ps);
   }, interaction);
   
   ps.current_node_count++;
