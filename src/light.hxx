@@ -1,8 +1,6 @@
 #pragma once
 
 #include "vec3f.hxx"
-#pragma once
-
 #include "ray.hxx"
 #include "sampler.hxx"
 #include "radianceorimportance.hxx"
@@ -225,7 +223,8 @@ class EnvMapLight : public EnvironmentalRadianceField
 {
   Eigen::Matrix3f frame;
   const Texture* texture;
-  ToyVector<double> cmf; // Cumulative (probability) mass function. 1 value per pixel. Row major order.
+  Eigen::VectorXf cmf_rows; // Cummulative density over rows. Marginalized over columns.
+  Eigen::Matrix<float,Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> cmf_cols; // Conditional cummulative density, given that a particular row was selected.
   std::pair<int,int> MapToImage(const Double3 &dir_out) const;
 public:
   EnvMapLight(const Texture* _texture, const Double3 &_up_dir);

@@ -1,6 +1,9 @@
 #include "light.hxx"
+#include "sampler.hxx"
 #include "scene.hxx"
 #include "rendering_util.hxx"
+
+#include <tbb/parallel_for.h>
 
 namespace RadianceOrImportance 
 {
@@ -82,28 +85,34 @@ double TotalEnvironmentalRadianceField::EvaluatePdf(const Double3& dir_out, cons
 
 
 
-EnvMapLight::EnvMapLight(const Texture* _texture, const Double3 &_up_dir)
-  : texture{_texture}
+EnvMapLight::EnvMapLight(const Texture* texture_, const Double3 &up_dir_)
+  : frame{OrthogonalSystemZAligned(up_dir_.cast<float>())}, texture{texture_}
 {
-  frame = OrthogonalSystemZAligned(_up_dir.cast<float>());
-  int num_pixels = texture->Height()*texture->Width();
-  cmf.resize(num_pixels);
-  
+
   const int w = texture->Width();
   const int h = texture->Height();
-  for (int y=0; y<h; ++y)
+  const int num_pixels = h*w;
+  
+  cmf_rows.resize(h);
+  cmf_cols.resize(h, w);
+
+  tbb::parallel_for(0, h, [w,this](int y)
   {
+    double row_weight = 0.;
     for (int x=0; x<w; ++x)
     {
       RGB col = texture->GetPixel(x, y);
       Float2 angles = Projections::UvToSpherical(PixelCenterToUv(*texture, {x, y}));
-      double weight = std::sin(angles[1]); // Because differential solid angle is dS = sin(theta)*dtheta*dphi
+      double weight = std::sin(angles[1])*(double)col.mean(); // Because differential solid angle is dS = sin(theta)*dtheta*dphi
       // We neglect the integration over pixels because we have piecewise constant uniform grid, so 
       // the delta_theta*delta_phi factors are the same for every pixel.
-      cmf[util::RowMajorOffset(x, y, w, h)] = weight*(double)col.mean();
+      row_weight += weight;
+      cmf_cols(y, x) = row_weight; // Cumulative sum.
     }
-  }
-  TowerSamplingComputeNormalizedCumSum(AsSpan(cmf));
+    cmf_cols.row(y) /= row_weight;
+    cmf_rows[y] = row_weight;
+  });
+  TowerSamplingComputeNormalizedCumSum(AsSpan(cmf_rows));
 }
 
 
@@ -119,22 +128,27 @@ std::pair<int,int> EnvMapLight::MapToImage(const Double3 &dir_out) const
 
 DirectionalSample EnvMapLight::TakeDirectionSample(Sampler &sampler, const PathContext &context) const
 {
-#if ENV_MAP_IMPORTANCE_SAMPLING // No importance sampling
-    auto pixel_index = TowerSamplingBisection(AsSpan(cmf), sampler.Uniform01());
-    assert(pixel_index <= texture->Width()*texture->Height());
-    int x, y; std::tie(x,y) = util::RowMajorPixel((int)pixel_index, texture->Width(), texture->Height());
+#if ENV_MAP_IMPORTANCE_SAMPLING
+    const Double2 r = sampler.UniformUnitSquare();
+    const auto y = TowerSamplingBisection<float>(AsSpan(cmf_rows), r[1]);
+    const float proby = TowerSamplingProbabilityFromCmf(AsSpan(cmf_rows), y);
+    assert(0 <= y && y < texture->Height());
+    const auto rowspan = RowSpan(cmf_cols,y);
+    const auto x = TowerSamplingBisection<float>(rowspan, r[0]);
+    const float probx = TowerSamplingProbabilityFromCmf(rowspan, x);
+    assert(0 <= x && x < texture->Width());
     auto uv_bounds = PixelToUvBounds(*texture,{x, y});
     Float2 angles_lower = Projections::UvToSpherical(uv_bounds.first);
     Float2 angles_upper = Projections::UvToSpherical(uv_bounds.second);
     const double z0 = std::cos(angles_lower[1]);
     const double z1 = std::cos(angles_upper[1]);
-    Float3 dir_out = frame*SampleTrafo::ToUniformSphereSection(sampler.UniformUnitSquare(), angles_lower[0], z0, angles_upper[0], z1).cast<float>();
+    Float3 dir_out = frame*SampleTrafo::ToUniformSphereSection(sampler.GetRandGen().UniformUnitSquare(), angles_lower[0], z0, angles_upper[0], z1).cast<float>();
     ASSERT_NORMALIZED(dir_out);
-    double pdf = TowerSamplingProbabilityFromCmf(AsSpan(cmf), pixel_index);
+    double pdf = proby*probx;
     pdf /= (z1-z0)*(angles_upper[0]-angles_lower[0]);
     assert(pdf > 0);
     Spectral3 col = Color::RGBToSpectralSelection(texture->GetPixel(x,y), context.lambda_idx);
-#else
+#else  // No importance sampling
     auto dir_out = frame.cast<double>() * SampleTrafo::ToUniformSphere(sampler.UniformUnitSquare());
     auto pdf = EvaluatePdf(dir_out, context);
     auto col = Evaluate(dir_out, context);
@@ -158,14 +172,15 @@ Spectral3 EnvMapLight::Evaluate(const Double3 &dir_out, const PathContext &conte
 double EnvMapLight::EvaluatePdf(const Double3 &dir_out, const PathContext &context) const
 {
 #if ENV_MAP_IMPORTANCE_SAMPLING
-  auto pix = MapToImage(dir_out);
-  int pixel_index = util::RowMajorOffset(pix.first, pix.second, texture->Width(), texture->Height());
-  double pdf = TowerSamplingProbabilityFromCmf(AsSpan(cmf), pixel_index);
-  auto uv_bounds = PixelToUvBounds(*texture, pix);
+  auto [x,y] = MapToImage(dir_out);
+  const float proby = TowerSamplingProbabilityFromCmf(AsSpan(cmf_rows), y);
+  const float probx = TowerSamplingProbabilityFromCmf(RowSpan(cmf_cols,y), x);
+  auto uv_bounds = PixelToUvBounds(*texture, {x,y});
   Float2 angles_lower = Projections::UvToSpherical(uv_bounds.first);
   Float2 angles_upper = Projections::UvToSpherical(uv_bounds.second);
   const double z0 = std::cos(angles_lower[1]);
   const double z1 = std::cos(angles_upper[1]);
+  double pdf = proby*probx;
   pdf /= (z1-z0)*(angles_upper[0]-angles_lower[0]);
   return pdf;
 #else
