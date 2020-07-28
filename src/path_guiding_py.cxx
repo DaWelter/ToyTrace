@@ -370,6 +370,8 @@ void Register(py::module &m)
 namespace py_sampling
 {
 
+extern std::uint32_t sobol_generator_matrices[21201][32];
+
 void Register(py::module &m)
 {
   py::class_<Sampler>(m, "Sampler")
@@ -377,7 +379,10 @@ void Register(py::module &m)
     .def("UniformUnitSquare", &Sampler::UniformUnitSquare)
     .def("SetPixelIndex", &Sampler::SetPixelIndex)
     .def("SetPointNum", &Sampler::SetPointNum)
-    .def("SetSubsequenceId", &Sampler::SetSubsequenceId);
+    .def("SetSubsequenceId", &Sampler::SetSubsequenceId)
+    .def("Uniform01", &Sampler::Uniform01);
+
+  m.def("SobolSequence", &SobolSequence);
 }
 
 }

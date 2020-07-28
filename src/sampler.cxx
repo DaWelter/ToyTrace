@@ -199,6 +199,23 @@ uint hash3(uint bits)
    return bits;
 }
 
+uint KenslerHash( uint i, unsigned p) {
+  // From Correlated Multi-Jittered Sampling
+  // Listing 4
+  i ^= p;
+  i ^= i >> 17;
+  i ^= i >> 10;
+  i *= 0xb36534e5;
+  i ^= i >> 12;
+  i ^= i >> 21;
+  i *= 0x93fc4795;
+  i ^= 0xdf6e307f;
+  i ^= i >> 17;
+  i *= 1 | p >> 18;
+  return i;
+}
+
+
 double AsUniform01(uint x)
 {
   return (double)x / (double)0x100000000LL;
@@ -219,9 +236,20 @@ double SobolMatrixMult(uint32_t point_idx, const uint32_t* m)
 }
 
 
-extern uint32_t sobol_generator_matrices[64][32];
+
+static constexpr int MAX_SOBOL_DIM = 21201;
+extern std::uint32_t sobol_generator_matrices[MAX_SOBOL_DIM][32];
+
 static constexpr int rotation_block_size = 128;
 extern float rotation_offsets[rotation_block_size*rotation_block_size][2];
+
+
+double SobolSequence(int point, int dim)
+{
+  assert(dim < MAX_SOBOL_DIM);
+  return SobolMatrixMult(point, sobol_generator_matrices[dim]);
+}
+
 
 class QuasiRandomSequence : public SampleSequence
 {
@@ -230,9 +258,13 @@ class QuasiRandomSequence : public SampleSequence
   int rotation_idx = 0;
   int point_idx = 0;
   uint32_t scrambling_mask = 0;
+  uint32_t subsequence_id = 0;
+  static constexpr int SEQ_ID_SHIFT = 6;
+  static constexpr int DIMS_FOR_1D_SAMPLING = (1<<SEQ_ID_SHIFT) - 2;
   // Eigen::Vector2d subsequence_offsets{Eigen::zero};
   // std::unordered_map<uint32_t, uint32_t> scrambling_masks;
-  // RandGen rnd;
+  //RandGen rnd;
+  pcg32 pcg;
 public:
   QuasiRandomSequence()
   {
@@ -252,20 +284,34 @@ public:
   }
   
 
+/*
+Dimension reservation
+2 per scattering event / node
+  10 per distance sample
+2 per nee
+  10 per nee transmittance
+*/
+
   void SetSubsequenceId(uint32_t id) override
   {
-    assert(id < 32);
-    scrambling_mask = 2*id;
+    assert(id < 64);
+    scrambling_mask = id << SEQ_ID_SHIFT;
+    subsequence_id = 0;
   }
   
   double Uniform01() override
   {
-    // I want another sequence. Not the one from the 2d sample.
-    // So I xor with scrambling mask with a random number.
-    // Probably not sufficient decorelation. Might have to try something more elaborate.
-    auto x = RI_vdC(point_idx, scrambling_mask ^ 0x9536a63a);
+    //uint32_t hash = hash2((scrambling_mask << 16) | (subsequence_id++));
+    //uint32_t hash = pcg.nextUInt();
+    //auto x = RI_vdC(point_idx, hash);
+    //x += pcg.nextFloat();
+    //x = x >= 1. ? (x - 1.) : x;
+    double x = (subsequence_id < DIMS_FOR_1D_SAMPLING) ? 
+      SobolMatrixMult(point_idx, sobol_generator_matrices[scrambling_mask+2+subsequence_id]) :
+      pcg.nextDouble();
     x += rotation_offsets[rotation_idx][0];
     x = x >= 1. ? (x - 1.) : x;
+    ++subsequence_id;
     return x;
   }
   

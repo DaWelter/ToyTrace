@@ -144,14 +144,14 @@ ScatterSample Combined::SampleDirection(const Double3& reverse_incident_dir, Sam
   constexpr int NC = NUM_CONSTITUENTS;
   static_assert(NC == 2, "Must be 2 constituents");
 
-  int lambda = TowerSampling<NL, Color::Scalar>(prob_lambda.data(), sampler.Uniform01());
+  int lambda = TowerSampling<NL, Color::Scalar>(prob_lambda.data(), sampler.GetRandGen().Uniform01());
   Color::Scalar contiguous_probs[NC] = {
     prob_constituent_given_lambda[0][lambda],
     prob_constituent_given_lambda[1][lambda]
   };
   Color::Scalar pf_pdf[NUM_CONSTITUENTS];
   
-  int constituent = TowerSampling<NC, Color::Scalar>(contiguous_probs, sampler.Uniform01());
+  int constituent = TowerSampling<NC, Color::Scalar>(contiguous_probs, sampler.GetRandGen().Uniform01());
   int not_sampled_constituent = constituent==0 ? 1 : 0;
   
   auto smpl = pf[constituent]->SampleDirection(reverse_incident_dir, sampler);
@@ -240,7 +240,7 @@ ScatterSample SimpleCombined::SampleDirection(const Double3& reverse_incident_di
   static_assert(NC == 2, "Must be 2 constituents");
   Color::Scalar pf_pdf[NC];
   
-  int constituent = TowerSampling<NC, Color::Scalar>(selection_probability, sampler.Uniform01());
+  int constituent = TowerSampling<NC, Color::Scalar>(selection_probability, sampler.GetRandGen().Uniform01());
   int not_sampled_constituent = constituent==0 ? 1 : 0;
   
   auto smpl = pf[constituent]->SampleDirection(reverse_incident_dir, sampler);

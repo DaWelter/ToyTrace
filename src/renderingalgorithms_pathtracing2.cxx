@@ -147,8 +147,8 @@ class alignas(128) CameraRenderWorker
   mutable Sampler sampler;
   mutable Span<RGB> framebuffer;
   RayTermination ray_termination;
-  LambdaSelectionStrategyShuffling lambda_selection_factory;
-  static constexpr int num_lambda_sweeps = decltype(lambda_selection_factory)::NUM_SAMPLES_REQUIRED;
+  LambdaSelectionStrategy lambda_selection_factory;
+  //static constexpr int num_lambda_sweeps = decltype(lambda_selection_factory)::NUM_SAMPLES_REQUIRED;
 
 private:
   void InitializePathState(PathState &p, Int2 pixel, const LambdaSelection &lambda_selection) const;
@@ -389,12 +389,16 @@ bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(PathState &ps) con
   return mpark::visit(
     Overload(
       [&](const SurfaceInteraction &si)  {
+        PrepSamplerDimension(ps, NEE_LIGHT);
         MaybeAddEmission(si, ps);
         AddDirectLighting(si, ps);
+        PrepSamplerDimension(ps, BSDF);
         return MaybeScatter(si, ps);
       },
       [&](const VolumeInteraction &vi) {
+        PrepSamplerDimension(ps, NEE_LIGHT);
         AddDirectLighting(vi, ps);
+        PrepSamplerDimension(ps, BSDF);
         return MaybeScatter(vi, ps);
       }
   ), *interaction);
@@ -418,8 +422,6 @@ void CameraRenderWorker::AddDirectLighting(const SomeInteraction & interaction, 
   Pdf pdf;
   Spectral3 light_weight;
   LightRef light_ref;
-
-  PrepSamplerDimension(ps, NEE_LIGHT);
 
   pickers->GetDistributionNee().Sample(sampler, [&](auto &&light, double prob, const LightRef &light_ref_)
   {
@@ -525,8 +527,6 @@ void PrepareStateForAfterScattering(PathState &ps, const VolumeInteraction &inte
 
 bool CameraRenderWorker::MaybeScatter(const SomeInteraction &interaction, PathState &ps) const
 {
-  PrepSamplerDimension(ps, BSDF);
-
   auto smpl = mpark::visit([this, &ps, &scene{ master->scene }](auto &&ia) {
     return SampleScatterer(ia, -ps.ray.dir, scene, sampler, ps);
   }, interaction);

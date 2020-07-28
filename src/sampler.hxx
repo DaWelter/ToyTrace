@@ -60,6 +60,9 @@ public:
 };
 
 
+double SobolSequence(int point, int dim);
+
+
 class SampleSequence
 {
 public:

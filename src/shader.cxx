@@ -4,6 +4,7 @@
 #include "shader_util.hxx"
 #include "normaldistributionfunction.hxx"
 #include "shader_physics.hxx"
+#include "media_integrator.hxx"
 
 #ifdef PRODUCT_DISTRIBUTION_SAMPLING
 #include "ndarray.hxx"
@@ -1387,7 +1388,7 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
   int iteration = 0;
   while (++iteration < emergency_abort_max_num_iterations)
   {
-    smpl.t -= std::log(sampler.GetRandGen().Uniform01()) * inv_sigma_t_majorant;
+    smpl.t -= std::log(sampler.Uniform01()) * inv_sigma_t_majorant;
     if (smpl.t > segment.length)
     {
       return smpl;
@@ -1397,7 +1398,7 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
       assert(sigma_n.minCoeff() >= -1.e-3); // By definition of the majorante
       double prob_t, prob_n;
       TrackingDetail::ComputeProbabilitiesHistoryScheme(smpl.weight*initial_weights, {sigma_s, sigma_n}, {prob_t, prob_n});
-      double r = sampler.GetRandGen().Uniform01();
+      double r = sampler.Uniform01();
       if (r < prob_t) // Scattering/Absorption
       {
         smpl.weight *= inv_sigma_t_majorant / prob_t;
@@ -1509,7 +1510,7 @@ Medium::PhaseSample MonochromaticHomogeneousMedium::SamplePhaseFunction(const Do
 Medium::InteractionSample MonochromaticHomogeneousMedium::SampleInteractionPoint(const RaySegment& segment, const Spectral3 &initial_weights, Sampler& sampler, const PathContext &context) const
 {
   Medium::InteractionSample smpl;
-  smpl.t = - std::log(1-sampler.GetRandGen().Uniform01()) / sigma_ext;
+  smpl.t = - std::log(1-sampler.Uniform01()) / sigma_ext;
   smpl.t = smpl.t < LargeNumber ? smpl.t : LargeNumber;
   smpl.weight = (smpl.t >= segment.length) ? 
     1.0  // This is transmittance divided by probability to pass through the medium undisturbed which happens to be also the transmittance. Thus this simplifies to one.

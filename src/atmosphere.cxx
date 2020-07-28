@@ -10,6 +10,7 @@
 #include "phasefunctions.hxx"
 #include "shader_util.hxx"
 #include "util.hxx"
+#include "media_integrator.hxx"
 
 namespace materials
 {
@@ -93,6 +94,8 @@ Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_
         altitude, sigma_s, sigma_a, context.lambda_idx);
       Spectral3 sigma_n = sigma_t_majorant - sigma_s - sigma_a;
       assert(sigma_n.minCoeff() >= -1.e-3); // By definition of the majorante
+      assert(sigma_s.minCoeff() >= 0.);
+      sigma_n = sigma_n.cwiseMax(0.);
       TrackingDetail::ComputeProbabilitiesHistoryScheme(smpl.weight, {sigma_s, sigma_n}, {prob_t, prob_n});
       double r = sampler.Uniform01();
       if (r < prob_t) // Scattering/Absorption

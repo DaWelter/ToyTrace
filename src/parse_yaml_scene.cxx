@@ -1,4 +1,5 @@
 #include "parse_common.hxx"
+#include "shader.hxx"
 
 namespace scenereader
 {
@@ -414,6 +415,13 @@ std::pair<string, Shader*> YamlSceneReader::ParseItem(const YAML::Node & origina
     auto reflection = ParseSpectrum(node, "rgb");
     auto texture = TryParseTexture(node, "texture");
     shd = MakeDiffuseShader(reflection, texture);
+  }
+  else if (class_ == "speculardensedielectric")
+  {
+    auto reflection = Pop(node, "specular").as<double>();
+    auto diffuse = ParseSpectrum(node, "rgb");
+    auto texture = TryParseTexture(node, "texture");
+    shd = MakeSpecularDenseDielectricShader(reflection, diffuse, texture);
   }
   else
     throw MakeException(node, fmt::format("Unkown class: {}", class_));
