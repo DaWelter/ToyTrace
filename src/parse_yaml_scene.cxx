@@ -64,6 +64,8 @@ public:
     }
   }
 
+  Transform ParseTransform(YAML::Node & node);
+  std::unique_ptr<PhaseFunctions::PhaseFunction> ParsePhaseFunction(YAML::Node &node);
   std::pair<string, Shader*> ParseItem(const YAML::Node &original_node, const Scope &scope, DispatchOverload<Shader>);
   std::pair<string, materials::Medium*> ParseItem(const YAML::Node &node, const Scope &scope, DispatchOverload<Medium>);
   std::pair<string, AreaEmitter*> ParseItem(const YAML::Node &node, const Scope &scope, DispatchOverload<AreaEmitter>);
@@ -103,7 +105,8 @@ public:
     Scope scope{ parent_scope };
     // Note: the order matters. Shaders, media, lights and models may depend on the transforms.
     //       Materials depend on shaders and media and lights.  Models depend on materials as well.
-    ParseItems(node, "transforms", scope, &YamlSceneReader::ParseAndInsertTransform);
+    if (YAML::Node trnode = node["transforms"]; trnode)
+      ParseAndInsertTransform(trnode, scope);
     ParseItems(node, "shaders", scope, &YamlSceneReader::ParseAndInsertItem<Shader>);
     ParseItems(node, "media", scope, &YamlSceneReader::ParseAndInsertItem<Medium>);
     ParseItems(node, "arealights", scope, &YamlSceneReader::ParseAndInsertItem<AreaEmitter>);
@@ -215,40 +218,49 @@ public:
   }
 };
 
+Transform YamlSceneReader::ParseTransform(YAML::Node & trnode)
+{
+  auto trafo = Transform::Identity();
+  for (auto it = trnode.begin(); it != trnode.end(); ++it)
+  {
+    YAML::Node node = *it;
+    if (auto pos_node = TryPop(node, "pos"); pos_node)
+    {
+      trafo = trafo * Eigen::Translation3d(pos_node.as<Double3>());
+    }
+    else if (auto hpb_node = TryPop(node, "hpb"); hpb_node)
+    {
+      auto r = hpb_node.as<Double3>();
+      if (!TryPop(node, "rad", false))
+        r *= Pi / 180.;
+      // The heading, pitch, bank convention assuming Y is up and Z is forward!
+      trafo = trafo *
+        Eigen::AngleAxisd(r[0], Eigen::Vector3d::UnitY()) *
+        Eigen::AngleAxisd(r[1], Eigen::Vector3d::UnitX()) *
+        Eigen::AngleAxisd(r[2], Eigen::Vector3d::UnitZ());
+    }
+    if (auto rotaxis_node = TryPop(node, "rotaxis"); rotaxis_node)
+    {
+      auto r = rotaxis_node.as<Double3>();
+      if (!TryPop(node, "rad", false))
+        r *= Pi / 180.;
+      trafo = trafo * Eigen::AngleAxisd(r.norm(), r.normalized());
+    }
+    if (auto scale_node = TryPop(node, "scale"); scale_node)
+    {
+      auto s = scale_node.as<Double3>();
+      trafo = trafo * Eigen::Scaling(s);
+    }
+    ErrorOnRemainingKeys(node);
+  }
+  trnode.reset();
+  return trafo;
+}
 
 void YamlSceneReader::ParseAndInsertTransform(const YAML::Node & original_node, Scope & scope)
 {
   YAML::Node node = original_node;
-  auto trafo = Transform::Identity();
-
-  if (auto pos_node = TryPop(node, "pos"); pos_node)
-  {
-    trafo = Eigen::Translation3d(pos_node.as<Double3>());
-  }
-  else if (auto hpb_node = TryPop(node, "hpb"); hpb_node)
-  {
-    auto r = hpb_node.as<Double3>();
-    if (!TryPop(node,"rad",false))
-      r *= Pi / 180.;
-    // The heading, pitch, bank convention assuming Y is up and Z is forward!
-    trafo = trafo *
-      Eigen::AngleAxisd(r[0], Eigen::Vector3d::UnitY()) *
-      Eigen::AngleAxisd(r[1], Eigen::Vector3d::UnitX()) *
-      Eigen::AngleAxisd(r[2], Eigen::Vector3d::UnitZ());
-  }
-  if (auto rotaxis_node = TryPop(node, "rotaxis"); rotaxis_node)
-  {
-    auto r = rotaxis_node.as<Double3>();
-    if (!TryPop(node, "rad", false))
-      r *= Pi / 180.;
-    trafo = trafo * Eigen::AngleAxisd(r.norm(), r.normalized());
-  }
-  if (auto scale_node = TryPop(node, "scale"); scale_node)
-  {
-    auto s = scale_node.as<Double3>();
-    trafo = trafo * Eigen::Scaling(s);
-  }
-  ErrorOnRemainingKeys(node);
+  auto trafo = ParseTransform(node);
   scope.currentTransform = scope.currentTransform * trafo;
   std::cout << "Transform: t=\n" << scope.currentTransform.translation() << "\nr=\n" << scope.currentTransform.linear() << std::endl;
 }
@@ -336,6 +348,23 @@ void YamlSceneReader::ParseView(const YAML::Node &original_node)
 }
 
 
+std::unique_ptr<PhaseFunctions::PhaseFunction> YamlSceneReader::ParsePhaseFunction(YAML::Node &node)
+{
+  auto class_ = Pop(node, "class").as<std::string>();
+  if (class_ == "rayleigh")
+  {
+    return std::make_unique<PhaseFunctions::Rayleigh>();
+  }
+  else if (class_ == "henleygreenstein")
+  {
+    auto g = TryPop(node, "g", 1.);
+    return std::make_unique<PhaseFunctions::HenleyGreenstein>(g);
+  }
+  else
+    throw MakeException(node, fmt::format("Unkown class {}", class_));
+}
+
+
 std::pair<string, materials::Medium*> YamlSceneReader::ParseItem(const YAML::Node & original_node, const Scope & scope, DispatchOverload<Medium>)
 {
   YAML::Node node = original_node;
@@ -345,20 +374,36 @@ std::pair<string, materials::Medium*> YamlSceneReader::ParseItem(const YAML::Nod
   std::unique_ptr<materials::Medium> medium;
   if (class_ == "homogeneous")
   {
-    auto absorb = Pop(node, "absorb");
-    auto scatter = Pop(node, "scatter");
-    if (absorb.IsScalar() && scatter.IsScalar())
+    auto absorb = ParseSpectrum(node, "absorb");
+    auto scatter = ParseSpectrum(node, "scatter");
+    auto m = std::make_unique<materials::HomogeneousMedium>(
+      scatter, absorb, scope.mediums.size());
+    auto pfnode = TryPop(node, "phasefunction");
+    if (pfnode)
     {
-      medium = std::make_unique<materials::MonochromaticHomogeneousMedium>(
-        scatter.as<double>(), absorb.as<double>(), scope.mediums.size());
+      m->phasefunction = ParsePhaseFunction(pfnode);
     }
-    else
+    medium = std::move(m);
+  }
+  else if (class_ == "modulateddensity")
+  {
+    auto absorb = ParseSpectrum(node, "absorb");
+    auto scatter = ParseSpectrum(node, "scatter");
+    auto fractional_low_density = Pop(node, "low_density").as<double>();
+    Transform trafo = scope.currentTransform;
+    auto trnode = TryPop(node, "transforms");
+    if (trnode)
     {
-      medium = std::make_unique<materials::HomogeneousMedium>(
-        Color::RGBToSpectrum(scatter.as<Double3>().cast<RGBScalar>()), 
-        Color::RGBToSpectrum(absorb.as<Double3>().cast<RGBScalar>()),
-        scope.mediums.size());
+      trafo = trafo * ParseTransform(trnode);
     }
+    auto m = std::make_unique<materials::ModulatedDensityMedium>(
+      scatter, absorb, fractional_low_density, trafo, scope.mediums.size());
+    auto pfnode = TryPop(node, "phasefunction");
+    if (pfnode)
+    {
+      m->phasefunction = ParsePhaseFunction(pfnode);
+    }
+    medium = std::move(m);
   }
   else
     throw MakeException(node, fmt::format("Unknown class {}", class_));
@@ -521,8 +566,6 @@ void YamlSceneReader::ParseAndInsertLight(const YAML::Node & original_node, Scop
   else if (class_ == "directional")
   {
     auto dir = Normalized(Pop(node, "direction").as<Double3>());
-    //auto col = TryPop<RGB>(node, "color", RGB::Ones());
-    //auto intensity = TryPop<double>(node, "intensity", 1.);
     auto spectrum = ParseSpectrum(node, "rgb");
     auto light = std::make_unique<DistantDirectionalLight>(
       spectrum, -dir);
@@ -531,11 +574,8 @@ void YamlSceneReader::ParseAndInsertLight(const YAML::Node & original_node, Scop
   else if (class_ == "dome")
   {
     auto dir = Normalized(Pop(node, "direction").as<Double3>());
-    //auto col = TryPop<RGB>(node, "color", RGB::Ones());
-    //auto intensity = TryPop<double>(node, "intensity", 1.);
     auto spectrum = ParseSpectrum(node, "rgb");
-    auto light = std::make_unique<DistantDirectionalLight>(
-      //intensity*Color::RGBToSpectrum(col),
+    auto light = std::make_unique<DistantDomeLight>(
       spectrum, dir);
     ctx.GetScene().envlights.push_back(std::move(light));
   }

@@ -495,9 +495,9 @@ void NFFParser::Parse(Scope &scope)
       }
       else if(num == 3)
       {
-        auto medium = std::make_unique<MonochromaticHomogeneousMedium>(
-          value(buffer[0]), 
-          value(buffer[1]), 
+        auto medium = std::make_unique<HomogeneousMedium>(
+          Color::RGBToSpectrum({ buffer[0], buffer[0], buffer[0] }),
+          Color::RGBToSpectrum({ buffer[1], buffer[1], buffer[1] }),
           scope.mediums.size());
         auto pf = MaybeReadPF();
         if (pf)

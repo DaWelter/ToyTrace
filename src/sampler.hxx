@@ -79,12 +79,24 @@ public:
 };
 
 
+class MockSequence : public SampleSequence
+{
+  ToyVector<double> numbers1d;
+  int index1d = 0;
+public:
+  MockSequence(ToyVector<double> &&numbers1d);
+  double Uniform01() override;
+  Double2 UniformUnitSquare() override;
+};
+
+
 class Sampler
 {
   RandGen randgen;
   std::unique_ptr<SampleSequence> sequence;
 public:
   explicit Sampler(bool use_qmc_sequence=false);
+  explicit Sampler(std::unique_ptr<SampleSequence> &&sequence);
 
   RandGen& GetRandGen() { return randgen; }
 
@@ -347,6 +359,11 @@ class OnlineVariance
     T Stddev() const
     {
       return sqrt(Var());
+    }
+
+    T MeanErr() const
+    {
+      return sqrt(Var()/Count());
     }
 
     // Replace counts, keeping mean. Variance changes for small counts.

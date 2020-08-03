@@ -250,6 +250,7 @@ void HandleCommandLineArguments(int argc, char* argv[], fs::path &input_file, fs
       ("h,h", po::value<int>(), "Height")
       ("rd", po::value<int>(), "Max ray depth")
       ("spp", po::value<int>(), "Max samples per pixel")
+      ("sw", po::bool_switch()->default_value(false), "Single wavelength per path")
       ("qmc", po::bool_switch()->default_value(false), "Quasi-Monte-Carlo")
       ("guide-em-every", po::value<int>(), "Guiding: Expectancy maximization every x samples.")
       ("guide-prior-strength", po::value<double>(), "Guiding: Roughly the number of samples were prior becomes insignificant.")

@@ -84,6 +84,8 @@ struct LambdaSelectionStrategy
   {
     int main_idx = sampler.GetRandGen().UniformInt(0, strata_size-1); // TODO: support stratified sampling? But why when I have the shuffling thing down there.
     auto idx     = MakeIndices(main_idx);
+    int rotation = sampler.GetRandGen().UniformInt(0, 2);
+    std::swap(idx[0], idx[rotation]);
     auto weights = Take(lambda_weights, idx);
     return LambdaSelection{idx, weights, SampleWavelengthStrata(idx, sampler)};
   }

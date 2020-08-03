@@ -1147,22 +1147,6 @@ namespace materials
  * Media
  ***********************************/
 
-// Just to make the compiler happy. We don't really want an implementation for this.
-// TODO: Use interface class. Multi inherit from regular medium and, say, IEmissiveMedium, if a medium is emissive.
-// Then dynamic_cast to determine if we have to consider emission. I'm not sure. Usually this is considered bad design.
-// But so is a default implementation with arbitrary return values.
-// I could decompose the medium class into an emissive component and a scattering/absorbing part, but it would make the implementation more messy.
-Medium::VolumeSample Medium::SampleEmissionPosition(Sampler &sampler, const PathContext &context) const
-{
-  return VolumeSample{ /* pos = */ Double3::Zero() };
-}
-
-Spectral3 Medium::EvaluateEmission(const Double3 &pos, const PathContext &context, double *pos_pdf) const
-{
-  if (pos_pdf) *pos_pdf = 0;
-  return Spectral3::Zero();
-}
-
 // OnTheLinePtr Medium::GetOnTheLine(const RaySegment &segment, const PathContext &context, MemoryArena &arena) const
 // {
 //   assert (!"not implemented");
@@ -1173,104 +1157,6 @@ Spectral3 Medium::EvaluateEmission(const Double3 &pos, const PathContext &contex
 * Derived media classes 
 ****************************************/
 
-#if 0
-EmissiveDemoMedium::EmissiveDemoMedium(double _sigma_s, double _sigma_a, double extra_emission_multiplier_, double temperature, const Double3 &pos_, double radius_, int priority)
-  : Medium(priority, true), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{_sigma_s + _sigma_a}, spectrum{Color::MaxwellBoltzmanDistribution(temperature)}, pos{pos_}, radius{radius_}
-{
-  one_over_its_volume = 1./(UnitSphereVolume*std::pow(radius, 3));
-  spectrum *= extra_emission_multiplier_;
-}
-
-
-Spectral3 EmissiveDemoMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, const PathContext &context, double* pdf) const
-{
-  return phasefunction.Evaluate(indcident_dir, out_direction, pdf);
-}
-
-
-Medium::PhaseSample EmissiveDemoMedium::SamplePhaseFunction(const Double3& reverse_incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
-{
-  return phasefunction.SampleDirection(reverse_incident_dir, sampler);
-}
-
-
-Medium::InteractionSample EmissiveDemoMedium::SampleInteractionPoint(const RaySegment& segment, const Spectral3 &initial_weights, Sampler& sampler, const PathContext &context) const
-{
-  auto [ok, tnear, tfar] = ClipRayToSphereInterior(segment.ray.org, segment.ray.dir, 0, segment.length, this->pos, this->radius);
-  Medium::InteractionSample smpl;
-  if (ok)
-  {
-    smpl.t = - std::log(1-sampler.Uniform01()) / sigma_ext;
-    smpl.t += tnear;
-    if (smpl.t < tfar)
-    {
-      smpl.weight = 1.0 / sigma_ext;
-      smpl.sigma_s = sigma_s;
-      return smpl;
-    } // else there is no interaction within the sphere.
-  } // else didn't hit the sphere.
-  
-  // Must return something larger than the segment length, so the rendering algo knows that there is no interaction with the medium.
-  smpl.t = LargeNumber;
-  smpl.weight = 1.0;
-  smpl.sigma_s = Spectral3::Zero();
-  return smpl;
-}
-
-
-VolumePdfCoefficients EmissiveDemoMedium::ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const
-{
-  auto [ok, tnear, tfar] = ClipRayToSphereInterior(segment.ray.org, segment.ray.dir, 0, segment.length, this->pos, this->radius);
-  const bool end_is_in_emissive_volume = LengthSqr(segment.EndPoint() - this->pos) < radius*radius;
-  const bool start_is_in_emissive_volume = LengthSqr(segment.ray.org - this->pos) < radius*radius;
-  double tr = ok ? std::exp(-sigma_ext*(tfar - tnear)) : 1;
-  double end_sigma_ext = end_is_in_emissive_volume ? sigma_ext : 0;
-  double start_sigma_ext = start_is_in_emissive_volume ? sigma_ext : 0;
-  return VolumePdfCoefficients{
-    end_sigma_ext*tr,
-    start_sigma_ext*tr,
-    tr,
-  };
-}
-
-
-Spectral3 EmissiveDemoMedium::EvaluateTransmission(const RaySegment& segment, Sampler &sampler, const PathContext &context) const
-{
-  auto [ok, tnear, tfar] = ClipRayToSphereInterior(segment.ray.org, segment.ray.dir, 0, segment.length, this->pos, this->radius);
-  double tr = ok ? std::exp(-sigma_ext*(tfar - tnear)) : 1;
-  return Spectral3{tr};
-}
-
-
-void EmissiveDemoMedium::ConstructShortBeamTransmittance(const RaySegment& segment, Sampler& sampler, const PathContext& context, PiecewiseConstantTransmittance& pct) const
-{
-  throw std::runtime_error("not implemented");
-}
-
-
-
-Medium::VolumeSample EmissiveDemoMedium::SampleEmissionPosition(Sampler &sampler, const PathContext &context) const
-{
-  Double3 r { sampler.GetRandGen().Uniform01(), sampler.GetRandGen().Uniform01(), sampler.GetRandGen().Uniform01() };
-  Double3 pos = SampleTrafo::ToUniformSphere3d(r)*radius + this->pos;
-  return { pos };
-}
-
-
-Spectral3 EmissiveDemoMedium::EvaluateEmission(const Double3 &pos, const PathContext &context, double *pos_pdf) const
-{
-  const bool in_emissive_volume = LengthSqr(pos - this->pos) < radius*radius;
-  if (pos_pdf)
-    *pos_pdf = in_emissive_volume ? one_over_its_volume : 0.;
-  return in_emissive_volume ? (sigma_a*Take(spectrum, query.context.get().lambda_idx)).eval() : Spectral3::Zero();
-}
-
-
-Medium::MaterialCoefficients EmissiveDemoMedium::EvaluateCoeffs(const Double3& pos, const PathContext& context) const
-{
-  throw std::runtime_error("not implemented");
-}
-#endif
 
 ////////////////////////////////////////////////////////////
 Spectral3 VacuumMedium::EvaluatePhaseFunction(const Double3& indcident_dir, const Double3& pos, const Double3& out_direction, const PathContext &context, double* pdf) const
@@ -1322,6 +1208,11 @@ VolumePdfCoefficients VacuumMedium::ComputeVolumePdfCoefficients(const RaySegmen
   };
 }
 
+Spectral3 VacuumMedium::ComputeMajorante(const RaySegment & segment, const PathContext & context) const
+{
+  return Spectral3::Zero();
+}
+
 Medium::MaterialCoefficients VacuumMedium::EvaluateCoeffs(const Double3& pos, const PathContext& context) const
 {
   return { 
@@ -1330,18 +1221,18 @@ Medium::MaterialCoefficients VacuumMedium::EvaluateCoeffs(const Double3& pos, co
   };
 }
 
-namespace {
-inline MediumFlags MakeFlags(const SpectralN& _sigma_s, const SpectralN& _sigma_a)
+namespace 
 {
-  return ((_sigma_s>0.).any() ? IS_SCATTERING : MediumFlags(0)) | IS_HOMOGENEOUS |
-    (_sigma_s.isConstant(_sigma_s[0], Epsilon) ? IS_MONOCHROMATIC : MediumFlags(0));
-
+inline MediumFlags MakeFlags(const SpectralN& sigma_s, const SpectralN& sigma_a)
+{
+  const bool is_monochromatic = (sigma_s + sigma_a).isConstant(sigma_s[0] + sigma_a[0], Epsilon);
+  return ((sigma_s>0.).any() ? IS_SCATTERING : MediumFlags(0)) | IS_HOMOGENEOUS |
+    (is_monochromatic ? IS_MONOCHROMATIC : MediumFlags(0));
 }
 }
 
 HomogeneousMedium::HomogeneousMedium(const SpectralN& _sigma_s, const SpectralN& _sigma_a, int priority)
   : Medium(priority, MakeFlags(_sigma_s, sigma_a)), sigma_s{_sigma_s}, sigma_a{_sigma_a}, sigma_ext{sigma_s + sigma_a},
-    is_scattering{(_sigma_s>0.).any()},
     phasefunction{new PhaseFunctions::Uniform()}
 {
 }
@@ -1369,50 +1260,8 @@ Medium::InteractionSample HomogeneousMedium::SampleInteractionPoint(const RaySeg
         Spectral3::Zero(),
       };
   }
-
-  // Ref: Kutz et a. (2017) "Spectral and Decomposition Tracking for Rendering Heterogeneous Volumes"
-  // Much simplified with constant coefficients.
-  // Also, very importantly, sigma_s is not multiplied to the final weight! Compare with Algorithm 4, Line 10.
-  Medium::InteractionSample smpl{
-    0.,
-    Spectral3::Ones(),
-    Spectral3::Zero()
-  };
-  // Shadow the member var by the new var taking only the current lambdas.
-  const Spectral3 sigma_ext = Take(this->sigma_ext, context.lambda_idx);
-  const Spectral3 sigma_s   = Take(this->sigma_s,   context.lambda_idx);
-  double sigma_t_majorant = sigma_ext.maxCoeff();
-  const Spectral3 sigma_n = sigma_t_majorant - sigma_ext;
-  double inv_sigma_t_majorant = 1./sigma_t_majorant;
-  constexpr int emergency_abort_max_num_iterations = 100;
-  int iteration = 0;
-  while (++iteration < emergency_abort_max_num_iterations)
-  {
-    smpl.t -= std::log(sampler.Uniform01()) * inv_sigma_t_majorant;
-    if (smpl.t > segment.length)
-    {
-      return smpl;
-    }
-    else
-    {
-      assert(sigma_n.minCoeff() >= -1.e-3); // By definition of the majorante
-      double prob_t, prob_n;
-      TrackingDetail::ComputeProbabilitiesHistoryScheme(smpl.weight*initial_weights, {sigma_s, sigma_n}, {prob_t, prob_n});
-      double r = sampler.Uniform01();
-      if (r < prob_t) // Scattering/Absorption
-      {
-        smpl.weight *= inv_sigma_t_majorant / prob_t;
-        smpl.sigma_s = sigma_s;
-        return smpl;
-      }
-      else // Null collision
-      {
-        smpl.weight *= inv_sigma_t_majorant / prob_n * sigma_n;
-      }
-    }
-  }
-  assert (false);
-  return smpl;
+  return TrackingDetail::HomogeneousSpectralTracking(
+    *this, segment, initial_weights, sampler, context);
 }
 
 
@@ -1431,25 +1280,8 @@ Spectral3 HomogeneousMedium::EvaluateTransmission(const RaySegment& segment, Sam
 
 void HomogeneousMedium::ConstructShortBeamTransmittance(const RaySegment& segment, Sampler& sampler, const PathContext& context, PiecewiseConstantTransmittance& pct) const
 {
-  const Spectral3 sigma_ext = Take(this->sigma_ext, context.lambda_idx);
-  constexpr auto N = static_size<Spectral3>();
-  std::pair<double,int> items[N]; 
-  for (int i=0; i<N; ++i)
-  {
-    items[i].first = - std::log(1-sampler.GetRandGen().Uniform01()) / sigma_ext[i];
-    items[i].second = i;
-    for (int j=i; j>0 && items[j-1].first>items[j].first; --j)
-    {
-      std::swap(items[j-1], items[j]);
-    }
-  }
-  // Zero out the spectral channels one after another.
-  Spectral3 w = Spectral3::Ones();
-  for (int i=0; i<N; ++i)
-  {
-    pct.PushBack(items[i].first, w);
-    w[items[i].second] = 0;
-  }
+  TrackingDetail::HomogeneousConstructShortBeamTransmittance(
+    *this, segment, sampler, context, pct);
 }
 
 
@@ -1469,6 +1301,12 @@ VolumePdfCoefficients HomogeneousMedium::ComputeVolumePdfCoefficients(const RayS
 }
 
 
+Spectral3 HomogeneousMedium::ComputeMajorante(const RaySegment & segment, const PathContext & context) const
+{
+  Spectral3 vals = Take(this->sigma_ext, context.lambda_idx);
+  return vals;
+}
+
 Medium::MaterialCoefficients HomogeneousMedium::EvaluateCoeffs(const Double3& pos, const PathContext& context) const
 {
   return {
@@ -1479,6 +1317,80 @@ Medium::MaterialCoefficients HomogeneousMedium::EvaluateCoeffs(const Double3& po
 
 
 
+
+ModulatedDensityMedium::ModulatedDensityMedium(const SpectralN& _sigma_s, const SpectralN& _sigma_a, double low_density_fraction, const Eigen::Affine3d &trafo, int priority)
+  : Medium(priority, MakeFlags(_sigma_s, sigma_a)), trafo{ trafo }, sigma_s{ _sigma_s }, sigma_a{ _sigma_a }, sigma_ext{ sigma_s + sigma_a },
+  low_density_fraction{ low_density_fraction },
+  phasefunction{ new PhaseFunctions::Uniform() }
+{
+}
+
+Spectral3 ModulatedDensityMedium::EvaluatePhaseFunction(const Double3& reverse_incident_dir, const Double3& pos, const Double3& out_direction, const PathContext &context, double* pdf) const
+{
+  return phasefunction->Evaluate(reverse_incident_dir, out_direction, pdf);
+}
+
+
+ScatterSample ModulatedDensityMedium::SamplePhaseFunction(const Double3& reverse_incident_dir, const Double3& pos, Sampler& sampler, const PathContext &context) const
+{
+  return phasefunction->SampleDirection(reverse_incident_dir, sampler);
+}
+
+Medium::InteractionSample ModulatedDensityMedium::SampleInteractionPoint(const RaySegment& segment, const Spectral3 &initial_weights, Sampler& sampler, const PathContext &context) const
+{
+  return TrackingDetail::SpectralTracking(
+    *this, segment, initial_weights, sampler, context);
+}
+
+Spectral3 ModulatedDensityMedium::EvaluateTransmission(const RaySegment& segment, Sampler &sampler, const PathContext &context) const
+{
+  return TrackingDetail::EstimateTransmission(*this, segment, sampler, context);
+}
+
+void ModulatedDensityMedium::ConstructShortBeamTransmittance(const RaySegment& segment, Sampler& sampler, const PathContext& context, PiecewiseConstantTransmittance& pct) const
+{
+  TrackingDetail::HomogeneousConstructShortBeamTransmittance(
+    *this, segment, sampler, context, pct);
+}
+
+
+
+VolumePdfCoefficients ModulatedDensityMedium::ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const
+{
+  // We take the mean over the densities that would be appropriate for single-lambda sampling. So this is only approximate.
+  // With Peter Kutz's spectral tracking method the actual pdf is not accessible in closed form.
+  Spectral3 sigma_ext = Take(this->sigma_ext, context.lambda_idx);
+  double tr = (-segment.length*sigma_ext).exp().mean();
+  double e = sigma_ext.mean();
+  return VolumePdfCoefficients{
+    e*tr,
+    e*tr,
+    tr,
+  }; // Forward and backward is the same in homogeneous media.
+}
+
+
+Spectral3 ModulatedDensityMedium::ComputeMajorante(const RaySegment & segment, const PathContext & context) const
+{
+  Spectral3 vals = Take(this->sigma_ext, context.lambda_idx);
+  return vals;
+}
+
+Medium::MaterialCoefficients ModulatedDensityMedium::EvaluateCoeffs(const Double3& pos, const PathContext& context) const
+{
+  Double3 localp = trafo * pos;
+  // Checkerboard pattern for now
+  Eigen::Vector3i ixyz = localp.cast<int>();
+  int val = (ixyz[0] & 1) ^ (ixyz[1] & 1) ^ (ixyz[2] & 1);
+  double relative_density = val ? 1. : low_density_fraction;
+  return {
+    relative_density*Take(this->sigma_s, context.lambda_idx),
+    relative_density*Take(this->sigma_ext, context.lambda_idx)
+  };
+}
+
+
+#if 0
 namespace {
 inline MediumFlags MakeFlags(const double _sigma_s, const double _sigma_a)
 {
@@ -1551,5 +1463,6 @@ Medium::MaterialCoefficients MonochromaticHomogeneousMedium::EvaluateCoeffs(cons
     Spectral3{sigma_ext}
   };
 }
+#endif
 
 } // namespace materials

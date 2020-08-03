@@ -1,3 +1,6 @@
+#include "media_integrator.hxx"
+#include "sampler.hxx"
+#include "scene.hxx"
 #include "gtest/gtest.h"
 #include <cstdio>
 #include <thread>
@@ -467,3 +470,84 @@ TEST(Rendering,PiecewiseConstantTransmittance)
   ASSERT_NEAR(pct(InfinityFloat)[0], 5., 1.e-3);
   ASSERT_NEAR(pct(Infinity)[0], 5., 1.e-3);
 }
+
+
+#if 0
+TEST(NullPath, Mis)
+{
+  /* Transmission estimation using
+     a) Delta Tracking
+     b) Ratio Tracking
+     MIS combination of a and b.
+  */
+  const double density = 0.6931471805599453; // Half of particles make it through.
+  const double expected_transmissions = std::exp(-density);
+  // NOTE: I think there is some bias in the result because the 
+  // scatter coefficients given here are not converted by their exact value 
+  // to the spectral representation!
+  const auto scenestr = fmt::format(R"""(
+shader none
+medium med1 {} 0
+m testing/scenes/unitcube.dae
+
+medium default
+shader black
+transform 0 0 2.5 0 0 0
+m testing/scenes/unitcube.dae
+)""", density);
+  
+  Scene scene;
+  scene.ParseNFFString(scenestr);
+  scene.BuildAccelStructure();
+
+  Sampler sampler;
+  RaySegment segment{{ {0.,0.,-2}, {0.,0.,1.} }, 4};
+  MediumTracker medium_tracker(scene);
+  LambdaSelection wavelengths{};
+  wavelengths.indices = Index3{ 0,0,0 };
+  PathContext context{wavelengths};
+
+  Accumulators::OnlineVariance<double> n_track_through;
+  Accumulators::OnlineVariance<double> transmission_estimate;
+  Accumulators::OnlineVariance<double> combined_estimate;
+  Accumulators::OnlineVariance<double> mis_weights_track;
+  Accumulators::OnlineVariance<double> mis_weights_transmit;
+  const int N = 1000;
+  for (int iter=0; iter<N; ++iter)
+  {
+    double combined_estimator = 0;
+    {
+      medium_tracker.initializePosition(segment.ray.org);
+      auto [interaction, dist, factors] = nullpath::Tracking(scene, segment.ray, sampler, medium_tracker, context);
+      assert (interaction);
+      double estimator = (factors.throughput[0] / factors.pdf_track[0]) *
+          ((interaction && mpark::get_if<SurfaceInteraction>(&(*interaction))) ? 1. : 0.);
+      n_track_through += estimator;
+      double mis_weight = factors.pdf_track[0] / (factors.pdf_track[0] + factors.pdf_nulls[0]);
+      combined_estimator += mis_weight * estimator;
+      mis_weights_track += mis_weight;
+    }
+    {
+      medium_tracker.initializePosition(segment.ray.org);
+      auto factors = nullpath::Transmission(scene, segment, sampler, medium_tracker, context);
+      double estimator = factors.throughput[0] / factors.pdf_nulls[0];
+      transmission_estimate += estimator;
+      double mis_weight = factors.pdf_nulls[0] / (factors.pdf_track[0] + factors.pdf_nulls[0]);
+      combined_estimator += mis_weight * estimator;
+      mis_weights_transmit += mis_weight;
+    }
+    combined_estimate += combined_estimator;
+  }
+  fmt::print("transmission avg = {} +/- {}\n", transmission_estimate.Mean(),transmission_estimate.MeanErr());
+  fmt::print("tracking avg = {} +/- {}\n", n_track_through.Mean(),n_track_through.MeanErr());
+  fmt::print("combined estimate = {} +/- {}\n", combined_estimate.Mean(), combined_estimate.MeanErr());
+  fmt::print("mis_weights_track = {}\n", mis_weights_track.Mean());
+  fmt::print("mis_weights_transmit = {}\n", mis_weights_transmit.Mean());
+  fmt::print("expected = {}\n", expected_transmissions);
+  EXPECT_NEAR(transmission_estimate.Mean(), expected_transmissions, 2.*transmission_estimate.MeanErr());
+  EXPECT_NEAR(n_track_through.Mean(), expected_transmissions, 2.*n_track_through.MeanErr());
+  EXPECT_NEAR(combined_estimate.Mean(), expected_transmissions, 2.*combined_estimate.MeanErr());
+  EXPECT_LE(combined_estimate.MeanErr(), transmission_estimate.MeanErr());
+  EXPECT_LE(combined_estimate.MeanErr(), n_track_through.MeanErr());
+}
+#endif

@@ -32,6 +32,7 @@
 #include "embreeaccelerator.hxx"
 #include "cubature.h"
 #include "shader_util.hxx"
+#include "media_integrator.hxx"
 
 using namespace materials;
 
@@ -1696,3 +1697,76 @@ TEST_F(RandomSamplingFixture, HomogeneousTransmissionSampling)
   //std::this_thread::sleep_for(std::chrono::milliseconds(200));
 }
 
+
+#if 0
+TEST(NullPath, Tracking)
+{
+  SpectralN sigma_s{ Eigen::ones };
+  SpectralN sigma_a{ Eigen::ones };
+  sigma_s[1] = 2.;
+  sigma_s[2] = 3.;
+  LambdaSelection wavelengths{};
+  wavelengths.indices = Index3{ 2,1,0 };
+  HomogeneousMedium medium{
+    sigma_s,
+    sigma_a,
+    0 };
+  Spectral3 sigma_t = Take(sigma_s + sigma_a, wavelengths.indices);
+  Spectral3 sigma_t_major = sigma_t;
+  const ToyVector<double> randomnumbers{
+    1. - 1. / EulerNumber
+  };
+  RaySegment segment{ {{0.,0.,0.}, {0., 0., 1.,}}, LargeNumber };
+  Sampler sampler{ std::make_unique<MockSequence>(ToyVector<double>{randomnumbers}) };
+  auto smpl = nullpath::Tracking(medium, segment, sampler, PathContext{wavelengths});
+  EXPECT_NEAR(smpl.t, 1. / sigma_t[0], 1.e-6);
+  EXPECT_TRUE(smpl.coeffs.sigma_t.isApprox(sigma_t, 1.e-6));
+  EXPECT_TRUE(smpl.coeffs.sigma_s.isApprox(Take(sigma_s, wavelengths.indices), 1.e-6));
+  Spectral3 tr = (-sigma_t_major * smpl.t).exp();
+  Spectral3 expected_pdf = tr * sigma_t_major;
+  Spectral3 expected_pdf_nulls = tr;
+  EXPECT_TRUE(smpl.pdf_track.isApprox(expected_pdf, 1.e-6));
+  EXPECT_TRUE(smpl.throughput.isApprox(expected_pdf, 1.e-6));
+  EXPECT_TRUE(smpl.pdf_nulls.isApprox(expected_pdf_nulls, 1.e-6));
+  EXPECT_TRUE(smpl.coeffs.emission.isConstant(0., 1.e-6));
+  sampler = Sampler { std::make_unique<MockSequence>(ToyVector<double>{randomnumbers}) };
+  segment.length = smpl.t;
+  auto transmit = nullpath::Transmission(medium, segment, sampler, PathContext{wavelengths});
+  //EXPECT_TRUE(transmit.pdf_track.isApprox(expected_pdf, 1.e-6));
+  EXPECT_TRUE(transmit.pdf_nulls.isApprox(expected_pdf_nulls, 1.e-6));
+}
+
+
+TEST(NullPath, Transmission)
+{
+  SpectralN sigma_s{ Eigen::ones };
+  SpectralN sigma_a{ Eigen::ones };
+  sigma_s[1] = 2.;
+  sigma_s[2] = 3.;
+  LambdaSelection wavelengths{};
+  wavelengths.indices = Index3{ 2,1,0 };
+  HomogeneousMedium medium{
+    sigma_s,
+    sigma_a,
+    0 };
+  Spectral3 sigma_t = Take(sigma_s + sigma_a, wavelengths.indices);
+  Spectral3 sigma_t_major = sigma_t;
+  const ToyVector<double> randomnumbers{
+    1. - 1. / EulerNumber
+  };
+  const double l = 0.1;
+  RaySegment segment{ {{0.,0.,0.}, {0., 0., 1.,}}, l };
+  Sampler sampler{ std::make_unique<MockSequence>(ToyVector<double>{randomnumbers}) };
+  auto smpl = nullpath::Tracking(medium, segment, sampler, PathContext{wavelengths});
+  EXPECT_NEAR(smpl.t, 1. / sigma_t[0], 1.e-6);
+  Spectral3 tr = (-sigma_t_major * l).exp();
+  Spectral3 expected_pdf = tr;
+  Spectral3 expected_pdf_nulls = tr;
+  EXPECT_TRUE(smpl.pdf_track.isApprox(expected_pdf, 1.e-6));
+  EXPECT_TRUE(smpl.pdf_nulls.isApprox(expected_pdf_nulls, 1.e-6));
+  sampler = Sampler { std::make_unique<MockSequence>(ToyVector<double>{randomnumbers}) };
+  auto transmit = nullpath::Transmission(medium, segment, sampler, PathContext{wavelengths});
+  EXPECT_TRUE(transmit.pdf_track.isApprox(expected_pdf, 1.e-6));
+  EXPECT_TRUE(transmit.pdf_nulls.isApprox(expected_pdf_nulls, 1.e-6));
+}
+#endif

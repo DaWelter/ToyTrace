@@ -1909,7 +1909,7 @@ void CameraRenderWorker::AddEmission(const PathNode &ps, const VolumeInteraction
     return;
 
   // TODO: is this right?
-  Spectral3 radiance = vi.medium().EvaluateEmission(vi.pos, context, nullptr);
+  Spectral3 radiance = vi.medium().EvaluateCoeffs(vi.pos, context).emission;
 
   RecordMeasurementToDebugBuffer(radiance*ps.weight);
 }

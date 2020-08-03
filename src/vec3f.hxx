@@ -16,6 +16,7 @@ constexpr auto Epsilon = std::numeric_limits<double>::epsilon();
 constexpr auto EpsilonFloat = std::numeric_limits<float>::epsilon();
 constexpr auto Pi      = double(3.14159265358979323846264338327950288419716939937510);
 constexpr auto PiFloat      = float(3.14159265358979323846264338327950288419716939937510);
+constexpr auto EulerNumber = double(2.7182818284590452353602874713527);
 constexpr auto Infinity= std::numeric_limits<double>::infinity();
 constexpr auto InfinityFloat = std::numeric_limits<float>::infinity();
 constexpr auto LargeNumber = std::numeric_limits<double>::max()/16;

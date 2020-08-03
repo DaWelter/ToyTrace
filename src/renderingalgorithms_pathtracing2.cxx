@@ -1,3 +1,4 @@
+#include <cmath>
 #include <functional>
 
 #include <tbb/atomic.h>
@@ -17,6 +18,7 @@
 #include "rendering_util.hxx"
 #include "pathlogger.hxx"
 #include "spectral.hxx"
+#include "media_integrator.hxx"
 
 #include "renderingalgorithms_interface.hxx"
 #include "renderingalgorithms_simplebase.hxx"
@@ -131,8 +133,10 @@ struct PathState
   MediumTracker medium_tracker;
   PathContext context;
   Ray ray;
-  Spectral3 weight;
-  boost::optional<Pdf> last_scatter_pdf_value; // For MIS.
+  nullpath::Spectral33 weights_track;
+  nullpath::Spectral33 weights_track_then_null;
+  Spectral3 path_weights; // Excluding the factors for transmission
+  std::optional<Pdf> last_scatter_pdf_value; // For MIS.
   double shader_roughness = 0.;
   int current_node_count;
   bool monochromatic;
@@ -149,9 +153,11 @@ class alignas(128) CameraRenderWorker
   RayTermination ray_termination;
   LambdaSelectionStrategy lambda_selection_factory;
   //static constexpr int num_lambda_sweeps = decltype(lambda_selection_factory)::NUM_SAMPLES_REQUIRED;
+  bool use_nee = true;
+  bool use_emission = true;
 
 private:
-  void InitializePathState(PathState &p, Int2 pixel, const LambdaSelection &lambda_selection) const;
+  void InitializePathState(PathState &p, Int2 pixel) const;
   bool TrackToNextInteractionAndRecordPixel(PathState &ps) const;
 
   bool MaybeScatter(const SomeInteraction &interaction, PathState &ps) const;
@@ -170,6 +176,8 @@ private:
   };
 
   void PrepSamplerDimension(const PathState &ps, SmplNodeType t) const;
+
+  std::pair<double,Spectral3> MisWeight(std::optional<Pdf> scatter_pdf, double scatter_pdf_other, const nullpath::Spectral33 &distance_pdfs, const nullpath::Spectral33 &distance_pdfs_other) const;
 
 public:
   CameraRenderWorker(PathTracingAlgo2 *master, int worker_index);
@@ -310,6 +318,14 @@ CameraRenderWorker::CameraRenderWorker(PathTracingAlgo2* master, int worker_inde
   ray_termination{ master->render_params }
 {
   framebuffer = AsSpan(master->framebuffer);
+  if (master->render_params.pt_sample_mode == "bsdf")
+  {
+    use_nee = false;
+  }
+  else if (master->render_params.pt_sample_mode == "lights")
+  {
+    use_emission = false;
+  }
 }
 
 
@@ -334,8 +350,7 @@ void CameraRenderWorker::Render(const ImageTileSet::Tile &tile)
       for (int i = 0; i < samples_per_pixel; ++i)
       {
         sampler.SetPointNum(i + master->GetTotalSamplesPerPixel());
-        const auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
-        InitializePathState(state, { ix, iy }, lambda_selection);
+        InitializePathState(state, { ix, iy });
         bool keepgoing = true;
         do
         {
@@ -347,26 +362,44 @@ void CameraRenderWorker::Render(const ImageTileSet::Tile &tile)
 }
 
 
-
-
-void CameraRenderWorker::InitializePathState(PathState &p, Int2 pixel, const LambdaSelection &lambda_selection) const
+LambdaSelection SingleWavelength(const LambdaSelectionStrategy &lss, Sampler &sampler)
 {
+  // Only keep first wavelength, assuming that it will cover all strata.
+  // Zero out weights for other indices.
+  auto ls = lss.WithWeights(sampler);
+  for (int i=1; i<static_size<Spectral3>(); ++i)
+  {
+    ls.indices[i] = ls.indices[0];
+    ls.wavelengths[i] = ls.wavelengths[0];
+    ls.weights[i] = 0.;
+  }
+  ls.weights[0] *= static_size<Spectral3>();
+  return ls;
+}
+
+
+void CameraRenderWorker::InitializePathState(PathState &p, Int2 pixel) const
+{
+  const auto lambda_selection = lambda_selection_factory.WithWeights(sampler);
+
   const auto& camera = master->scene.GetCamera();
   p.context = PathContext(lambda_selection, camera.PixelToUnit({ pixel[0], pixel[1] }));
-  
+
   p.current_node_count = 0;
   p.monochromatic = false;
-  p.weight = lambda_selection.weights;
-  p.last_scatter_pdf_value = boost::none;
+  p.path_weights = lambda_selection.weights;
+  p.weights_track.setOnes();
+  p.weights_track_then_null.setOnes();
+  p.last_scatter_pdf_value = {};
   p.shader_roughness = 0.;
   
   PrepSamplerDimension(p, BSDF);
   auto pos = camera.TakePositionSample(p.context.pixel_index, sampler, p.context);
-  p.weight *= pos.value / pos.pdf_or_pmf;
+  p.path_weights *= pos.value / pos.pdf_or_pmf;
   p.current_node_count++;
   PrepSamplerDimension(p, BSDF);
   auto dir = camera.TakeDirectionSampleFrom(p.context.pixel_index, pos.coordinates, sampler, p.context);
-  p.weight *= dir.value / dir.pdf_or_pmf;
+  p.path_weights *= dir.value / dir.pdf_or_pmf;
   p.ray = { pos.coordinates, dir.coordinates };
   p.medium_tracker.initializePosition(pos.coordinates);
   // First node on camera. We start with the node code of the next interaction. Which is 2.
@@ -377,8 +410,13 @@ void CameraRenderWorker::InitializePathState(PathState &p, Int2 pixel, const Lam
 bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(PathState &ps) const
 {
   // TODO: fix the nonsensical use of initial weight in Atmosphere Material!!
-  auto[interaction, tfar, track_weight] = TrackToNextInteraction(master->scene, ps.ray, ps.context, Spectral3::Ones(), sampler, ps.medium_tracker, nullptr);
-  ps.weight *= track_weight;
+  auto[interaction, tfar, factors] = nullpath::Tracking(master->scene, ps.ray, sampler, ps.medium_tracker, ps.context);
+  
+  // Careful here. First part is from delta tracking. Last part for connection, corresponding to NEE technique.
+  ps.weights_track_then_null = ps.weights_track;
+  nullpath::AccumulateContributions(ps.weights_track_then_null, factors.weights_nulls); 
+  // Now update the pure tracking pdf.
+  nullpath::AccumulateContributions(ps.weights_track, factors.weights_track);
 
   if (!interaction)
   {
@@ -405,19 +443,44 @@ bool CameraRenderWorker::TrackToNextInteractionAndRecordPixel(PathState &ps) con
 }
 
 
-static double MisWeight(Pdf pdf_or_pmf_taken, double pdf_other)
+static double Average(const Spectral3 &x, const Spectral3 &y)
 {
-  double mis_weight = 1.;
-  if (!pdf_or_pmf_taken.IsFromDelta())
+  return 0.5*(x.mean() + y.mean());
+}
+
+
+std::pair<double,Spectral3> CameraRenderWorker::MisWeight(std::optional<Pdf> scatter_pdf, double scatter_pdf_other, const nullpath::Spectral33 &distance_pdfs, const nullpath::Spectral33 &distance_pdfs_other) const
+{
+  /*
+
+    f = (m_bsdf * f_bsdf + m_nee * f_nee)
+    m_bsdf = (p_bsdf * p_dist_i) * c_missing_wavelengths / (sum_i [p_bsdf * p_bsdf_dist_i + p_nee * p_nee_dist_i])
+    c_missing_wavelengths = num_wavelengths = 3
+    -> m_bsdf = (p_bsdf * p_dist_i) / (p_bsdf * <{p_bsdf_dist_i}> + p_nee * <{p_nee_dist_i}>})
+    <.> := average
+  */
+
+  if (!scatter_pdf || scatter_pdf->IsFromDelta() || !(use_nee && use_emission))
   {
-    mis_weight = PowerHeuristic(pdf_or_pmf_taken, { pdf_other });
+    return { 1., distance_pdfs.rowwise().mean().eval() };
   }
-  return mis_weight;
+
+  const Spectral3 distance_weights_total = nullpath::FixNan(distance_pdfs * (*scatter_pdf)).rowwise().mean();
+  const Spectral3 distance_weights_other_total = nullpath::FixNan(distance_pdfs_other * scatter_pdf_other).rowwise().mean();
+
+  const double mis_weight = *scatter_pdf;
+  const Spectral3 distance_part_inv_contrib = distance_weights_total+distance_weights_other_total;
+  assert((distance_part_inv_contrib > 0).all());
+
+  return { mis_weight, distance_part_inv_contrib };
 }
 
 
 void CameraRenderWorker::AddDirectLighting(const SomeInteraction & interaction, const PathState & ps) const
 {
+  if (!use_nee)
+    return;
+
   RaySegment segment_to_light;
   Pdf pdf;
   Spectral3 light_weight;
@@ -441,7 +504,7 @@ void CameraRenderWorker::AddDirectLighting(const SomeInteraction & interaction, 
   });
   auto[ray, length] = segment_to_light;
 
-  Spectral3 path_weight = ps.weight;
+  Spectral3 path_weights = ps.path_weights;
 
   MediumTracker medium_tracker{ ps.medium_tracker }; // Copy because well don't want to keep modifications.
   
@@ -450,7 +513,7 @@ void CameraRenderWorker::AddDirectLighting(const SomeInteraction & interaction, 
   if (auto si = mpark::get_if<SurfaceInteraction>(&interaction))
   {
     // Surface specific
-    path_weight *= DFactorPBRT(*si, ray.dir);
+    path_weights *= DFactorPBRT(*si, ray.dir);
     const auto &shd = GetShaderOf(*si, master->scene);
     ShaderQuery query {
       std::cref(*si),
@@ -458,27 +521,40 @@ void CameraRenderWorker::AddDirectLighting(const SomeInteraction & interaction, 
       ps.shader_roughness,
     };
     Spectral3 bsdf_weight = shd.EvaluateBSDF(-ps.ray.dir, query, ray.dir, &bsdf_pdf);
-    path_weight *= bsdf_weight;
+    path_weights *= bsdf_weight;
     MaybeGoingThroughSurface(medium_tracker, ray.dir, *si);
   }
   else // must be volume interaction
   {
     auto vi = mpark::get_if<VolumeInteraction>(&interaction);
     Spectral3 bsdf_weight = vi->medium().EvaluatePhaseFunction(-ps.ray.dir, vi->pos, ray.dir, ps.context, &bsdf_pdf);
-    path_weight *= bsdf_weight;
-    path_weight *= vi->sigma_s;
+    auto coeffs = vi->medium().EvaluateCoeffs(vi->pos, ps.context);
+    
+    path_weights *= bsdf_weight;
+    path_weights *= coeffs.sigma_s / (coeffs.sigma_t + Epsilon);
   }
 
-  Spectral3 transmittance = TransmittanceEstimate(master->scene, segment_to_light, medium_tracker, ps.context, sampler);
-  path_weight *= transmittance;
+  auto factors = nullpath::Transmission(master->scene, segment_to_light, sampler, medium_tracker, ps.context);
 
-  double mis_weight = MisWeight(pdf, bsdf_pdf);
+  nullpath::AccumulateContributions(factors.weights_track, ps.weights_track);
+  nullpath::AccumulateContributions(factors.weights_nulls, ps.weights_track);
 
-  Spectral3 measurement_estimator = mis_weight*path_weight*light_weight;
+  auto [mis_weight, mis_pdf_mix] = MisWeight(pdf, bsdf_pdf, factors.weights_nulls, factors.weights_track);
+
+  /*
+  contrib = distance_throughput * scatter_weight / distance_pdf
+  -> MIS ->
+  weighted_contrib = [ distance_pdf * scatter_pdfs^p / (sum_i sum_j distance_pdf_i scatter_pdf_j^p) ] distance_throughput * scatter_weight / distance_pdf
+  ==
+  MisWeight(scatter_pdfs,{scatter_pdf_j}) * distance_throughput * scatter_weight / (sum_i distance_pdf_i)
+  */
+
+  Spectral3 measurement_estimator = mis_weight*(path_weights*light_weight)/mis_pdf_mix;
 
   pickers->ObserveReturnNee(this->picker_local, light_ref, measurement_estimator);
   RecordMeasurementToCurrentPixel(measurement_estimator, ps);
 }
+
 
 namespace
 {
@@ -499,14 +575,15 @@ ScatterSample SampleScatterer(const SurfaceInteraction &interaction, const Doubl
 ScatterSample SampleScatterer(const VolumeInteraction &interaction, const Double3 &reverse_incident_dir, const Scene &scene, Sampler &sampler, PathState &ps)
 {
   ScatterSample s = interaction.medium().SamplePhaseFunction(reverse_incident_dir, interaction.pos, sampler, ps.context);
-  s.value *= interaction.sigma_s;
+  auto coeffs = interaction.medium().EvaluateCoeffs(interaction.pos, ps.context);
+  s.value *= coeffs.sigma_s / (coeffs.sigma_t + Epsilon);
   return s;
 }
 
 void PrepareStateForAfterScattering(PathState &ps, const SurfaceInteraction &interaction, const Scene &scene, const ScatterSample &scatter_sample)
 {
   ps.monochromatic |= GetShaderOf(interaction, scene).require_monochromatic;
-  ps.weight *= scatter_sample.value * DFactorPBRT(interaction, scatter_sample.coordinates) / scatter_sample.pdf_or_pmf;
+  ps.path_weights *= scatter_sample.value * DFactorPBRT(interaction, scatter_sample.coordinates) / scatter_sample.pdf_or_pmf;
   ps.ray.dir = scatter_sample.coordinates;
   ps.ray.org = interaction.pos + AntiSelfIntersectionOffset(interaction, ps.ray.dir);
   MaybeGoingThroughSurface(ps.medium_tracker, ps.ray.dir, interaction);
@@ -515,7 +592,7 @@ void PrepareStateForAfterScattering(PathState &ps, const SurfaceInteraction &int
 
 void PrepareStateForAfterScattering(PathState &ps, const VolumeInteraction &interaction, const Scene &scene, const ScatterSample &scatter_sample)
 {
-  ps.weight *= scatter_sample.value / scatter_sample.pdf_or_pmf;
+  ps.path_weights *= scatter_sample.value / scatter_sample.pdf_or_pmf;
   ps.ray.dir = scatter_sample.coordinates;
   ps.ray.org = interaction.pos;
   ps.last_scatter_pdf_value = scatter_sample.pdf_or_pmf;
@@ -549,45 +626,61 @@ bool CameraRenderWorker::MaybeScatter(const SomeInteraction &interaction, PathSt
 
 void CameraRenderWorker::MaybeAddEmission(const SurfaceInteraction &interaction, const PathState &ps) const
 {
+  if (!use_emission)
+    return;
+
   const auto emitter = GetMaterialOf(interaction, master->scene).emitter;
   if (!emitter)
     return;
 
   Spectral3 radiance = emitter->Evaluate(interaction.hitid, -ps.ray.dir, ps.context, nullptr);
 
-  double mis_weight = 1.0;
-  if (ps.last_scatter_pdf_value) // Should be set if this is secondary ray.
-  {
-    const double prob_select = pickers->GetDistributionNee().Pmf(Lights::MakeLightRef(master->scene, interaction.hitid));
-    const double area_pdf = emitter->EvaluatePdf(interaction.hitid, ps.context);
-    const double pdf_cvt = PdfConversion::AreaToSolidAngle(Length(ps.ray.org - interaction.pos), ps.ray.dir, interaction.normal);
-    mis_weight = MisWeight(*ps.last_scatter_pdf_value, prob_select*area_pdf*pdf_cvt);
-  }
+  auto [mis_weight, mis_pdf_mix] = [&]() {
+    if (ps.last_scatter_pdf_value) // Should be set if this is secondary ray.
+    {
+      const double prob_select = pickers->GetDistributionNee().Pmf(Lights::MakeLightRef(master->scene, interaction.hitid));
+      const double area_pdf = emitter->EvaluatePdf(interaction.hitid, ps.context);
+      const double pdf_cvt = PdfConversion::AreaToSolidAngle(Length(ps.ray.org - interaction.pos), ps.ray.dir, interaction.normal);
+      return MisWeight(ps.last_scatter_pdf_value, prob_select*area_pdf*pdf_cvt, ps.weights_track, ps.weights_track_then_null);
+    }
+    else
+    {
+      return MisWeight({}, 1., ps.weights_track, ps.weights_track_then_null);
+    }
+  }();
+
+  Spectral3 contributions = mis_weight*(radiance*ps.path_weights) / mis_pdf_mix;
 
 #ifdef DEBUG_BUFFERS 
   AddToDebugBuffer(PhotonmappingRenderingAlgo::DEBUGBUFFER_ID_BSDF, 0, radiance*weight_accum);
 #endif
-  RecordMeasurementToCurrentPixel(mis_weight*radiance*ps.weight, ps);
+  RecordMeasurementToCurrentPixel(contributions, ps);
 }
 
 
 void CameraRenderWorker::AddEnvEmission(const PathState &ps) const
 {
-  if (!master->scene.HasEnvLight())
+  if (!use_emission || !master->scene.HasEnvLight())
     return;
 
   const auto &emitter = master->scene.GetTotalEnvLight();
   const auto radiance = emitter.Evaluate(-ps.ray.dir, ps.context);
 
-  double mis_weight = 1.0;
-  if (ps.last_scatter_pdf_value) // Should be set if this is secondary ray.
+  auto [mis_weight, mis_pdf_mix] = [&]() 
   {
-    const double prob_select = pickers->GetDistributionNee().Pmf(Lights::MakeLightRef(master->scene, emitter));
-    const double pdf_env = emitter.EvaluatePdf(-ps.ray.dir, ps.context);
-    mis_weight = MisWeight(*ps.last_scatter_pdf_value, pdf_env*prob_select);
-  }
+    if (ps.last_scatter_pdf_value) // Should be set if this is secondary ray.
+    {
+      const double prob_select = pickers->GetDistributionNee().Pmf(Lights::MakeLightRef(master->scene, emitter));
+      const double pdf_env = emitter.EvaluatePdf(-ps.ray.dir, ps.context);
+      return MisWeight(*ps.last_scatter_pdf_value, pdf_env*prob_select, ps.weights_track, ps.weights_track_then_null);
+    }
+    else
+      return MisWeight({}, 1., ps.weights_track, ps.weights_track_then_null);
+  }();
 
-  RecordMeasurementToCurrentPixel(mis_weight*radiance*ps.weight, ps);
+  Spectral3 contributions = mis_weight*(radiance*ps.path_weights) / mis_pdf_mix;
+  
+  RecordMeasurementToCurrentPixel(contributions, ps);
 }
 
 

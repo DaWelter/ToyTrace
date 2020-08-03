@@ -246,17 +246,6 @@ struct EmitterSampleVisitor
       smpl.coordinates };
     pdf = prob*smpl.pdf_or_pmf;
   }
-  void operator()(const Lights::Medium &light, double prob)
-  {
-    const auto &medium = light.Get();
-    Medium::VolumeSample smpl = medium.SampleEmissionPosition(sampler, context);
-    double pdf_which_cannot_be_delta = 0;
-    auto radiance =  medium.EvaluateEmission(smpl.pos, context, &pdf_which_cannot_be_delta);
-    node.node_type = RW::NodeType::VOLUME_EMITTER;
-    node.interaction.volume = VolumeInteraction(smpl.pos, medium, radiance, Spectral3{0.});
-    // The reason sigma_s is set to 0 in the line above, is that the initial light node will never be used for scattering.
-    pdf = prob*pdf_which_cannot_be_delta;
-  }
 };
 
 
@@ -346,7 +335,7 @@ public:
         node_sample.beta_factor *= weight;
         node_sample.segment = RaySegment{ray, distance};
         const auto &m = medium_tracker.getCurrentMedium();
-        const Spectral3 radiance = m.is_emissive ? m.EvaluateEmission(interaction.pos, context, nullptr) : Spectral3::Zero();
+        const Spectral3 radiance = m.is_emissive ? m.EvaluateCoeffs(interaction.pos, context).emission : Spectral3::Zero();
         node_sample.node.interaction.volume = interaction;
         node_sample.node.interaction.volume.radiance = radiance;
         node_sample.node.node_type = RW::NodeType::VOLUME_SCATTER;
@@ -661,11 +650,7 @@ public:
     }
     else if(node.node_type == RW::NodeType::VOLUME_EMITTER)
     {
-      const VolumeInteraction &interaction = node.interaction.volume;
-      double pdf = 0;
-      interaction.medium().EvaluateEmission(interaction.pos, context, &pdf);
-      pdf *= light_picker.PmfOfLight(interaction.medium());
-      return pdf;
+      return 0.;
     }
     else if(node.node_type == RW::NodeType::ENV)
     {

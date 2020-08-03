@@ -2,6 +2,11 @@
 
 #include "spectral.hxx"
 #include "sampler.hxx"
+#include "shader.hxx"
+#include "scene.hxx"
+#include <limits>
+
+class MediumTracker;
 
 namespace TrackingDetail
 {
@@ -28,36 +33,67 @@ inline bool RussianRouletteSurvival(double weight, int iteration, Sampler &sampl
 }
 
 
-// Is passing parameters like that as efficient has having the same number of item as normal individual arguments?
-// Ref: Kutz et a. (2017) "Spectral and Decomposition Tracking for Rendering Heterogeneous Volumes"
-inline void ComputeProbabilitiesHistoryScheme(
-  const Spectral3 &weights,
-  std::initializer_list<std::reference_wrapper<const Spectral3>> sigmas,
-  std::initializer_list<std::reference_wrapper<double>> probs)
+// Yields x, distributed according to the pdf sigma_ext*Transmittance(x)
+inline double HomogeneousTransmittanceDistanceSample(double sigma_ext, double r)
 {
-  double normalization = 0.;
-  auto it_sigma = sigmas.begin();
-  auto it_probs = probs.begin();
-  for (; it_sigma != sigmas.end(); ++it_sigma, ++it_probs)
-  {
-    const Spectral3 &s = it_sigma->get();
-    assert (s.minCoeff() >= 0.);
-    double p = (s*weights).mean();
-    it_probs->get() = p;
-    normalization += p;
-  }
-  if (normalization > 0.)
-  {
-    double norm_inv = 1./normalization;
-    for (it_probs = probs.begin(); it_probs != probs.end(); ++it_probs)
-      it_probs->get() *= norm_inv; 
-  }
-  else // Zeroed weights?
-  {
-    const double p = 1.0/probs.size();
-    for (it_probs = probs.begin(); it_probs != probs.end(); ++it_probs)
-      it_probs->get() = p;
-  }
+  return -std::log(1. - r) / sigma_ext;
 }
 
+inline double HomogeneousTransmittance(double sigma_ext, double t)
+{
+  return std::exp(-sigma_ext * t);
+}
+
+
+Medium::InteractionSample HomogeneousSpectralTracking(const materials::Medium &medium, const RaySegment& segment, const Spectral3 &initial_weights, Sampler& sampler, const PathContext &context);
+Medium::InteractionSample SpectralTracking(const materials::Medium &medium, const RaySegment& segment, const Spectral3 &initial_weights, Sampler& sampler, const PathContext &context);
+void HomogeneousConstructShortBeamTransmittance(const Medium& medium, const RaySegment& segment, Sampler& sampler, const PathContext& context, PiecewiseConstantTransmittance& pct);
+Spectral3 EstimateTransmission(const Medium &medium, const RaySegment &segment, Sampler &sampler, const PathContext &context);
+
 } // TrackingDetail
+
+// From Miller et al. (2019) "A null-scattering path integral formulation of light transport"
+namespace nullpath
+{
+
+constexpr inline double SmallishDouble = std::numeric_limits<double>::min()*1024;
+
+// Rows <-> Contribution components, 
+// Cols <-> Probabilities, one per wavelength.
+using Spectral33 = Eigen::Array<double, Spectral3::RowsAtCompileTime, Spectral3::RowsAtCompileTime>;
+
+void AccumulateContributions(Spectral33 &w, const Spectral33 &x);
+Spectral33 FixNan(const Spectral33 &x);
+
+struct ThroughputAndPdfs
+{
+  Spectral33 weights_nulls{ Eigen::ones };
+  Spectral33 weights_track{ Eigen::ones };
+};
+
+struct InteractionSample : public ThroughputAndPdfs
+{
+  materials::MediaCoefficients coeffs;
+  double t = 0.;
+};
+
+
+InteractionSample Tracking(const materials::Medium &medium, const RaySegment& segment, Sampler& sampler, const PathContext &context);
+ThroughputAndPdfs Transmission(const Medium &medium, const RaySegment &segment, Sampler &sampler, const PathContext &context);
+
+std::tuple<MaybeSomeInteraction, double, ThroughputAndPdfs>
+Tracking(
+  const Scene &scene,
+  const Ray &ray,
+  Sampler &sampler,
+  MediumTracker &medium_tracker,
+  const PathContext &context);
+
+ThroughputAndPdfs Transmission(
+  const Scene &scene, 
+  RaySegment seg, 
+  Sampler &sampler,
+  MediumTracker &medium_tracker, 
+  const PathContext &context);
+
+} // namespace nullpath

@@ -43,75 +43,7 @@ const PhaseFunctions::PhaseFunction& AtmosphereTemplate<ConstituentDistribution_
 template<class ConstituentDistribution_, class Geometry_>
 Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_>::SampleInteractionPoint(const RaySegment &segment, const Spectral3 &initial_weights, Sampler &sampler, const PathContext &context) const
 {
-  Medium::InteractionSample smpl{
-    0.,
-    initial_weights,
-    Spectral3::Zero()
-  };
-  Spectral3 sigma_s, sigma_a;
-  double prob_t, prob_n;
-  // The lowest point gives the largest collision coefficients along the path.
-  auto lowest_point = geometry.ComputeLowestPointAlong(segment);
-  double altitude = geometry.ComputeAltitude(lowest_point);
-  if (altitude < GetLowerAltitudeCutoff())
-  {
-    // It can totallly happen that the origin here lies below the surface.
-    // It happens when a scattering event is located below the surface due
-    // to roundoff errors. The intersection point of a nearby surface will
-    // also be computed to lie below the surface.
-    smpl.t = 0;
-    smpl.weight = Spectral3{0.};
-    return smpl;
-  }
-    
-  double sigma_t_majorant = constituents.ComputeSigmaTMajorante(altitude, context.lambda_idx);
-  if (sigma_t_majorant <= 0.)
-  {
-    smpl.t = LargeNumber;
-    return smpl;
-  }
-  double inv_sigma_t_majorant = 1./sigma_t_majorant;
-  // Then start tracking.
-  // - No russian roulette because the probability to arrive
-  // beyond the end of the segment must be identical to the transmissivity.
-  // - Need to limit the number of iterations to protect against evil edge
-  // cases where a particles escapes outside of the scene boundaries but
-  // due to incorrect collisions the path tracer thinks that we are in a medium.
-  constexpr int emergency_abort_max_num_iterations = 1000;
-  int iteration = 0;
-  while (++iteration < emergency_abort_max_num_iterations)
-  {
-    smpl.t -= std::log(sampler.Uniform01()) * inv_sigma_t_majorant;
-    if (smpl.t > segment.length)
-    {
-      return smpl;
-    }
-    else
-    {
-      const Double3 pos = segment.ray.PointAt(smpl.t);
-      altitude = geometry.ComputeAltitude(pos);
-      constituents.ComputeCollisionCoefficients(
-        altitude, sigma_s, sigma_a, context.lambda_idx);
-      Spectral3 sigma_n = sigma_t_majorant - sigma_s - sigma_a;
-      assert(sigma_n.minCoeff() >= -1.e-3); // By definition of the majorante
-      assert(sigma_s.minCoeff() >= 0.);
-      sigma_n = sigma_n.cwiseMax(0.);
-      TrackingDetail::ComputeProbabilitiesHistoryScheme(smpl.weight, {sigma_s, sigma_n}, {prob_t, prob_n});
-      double r = sampler.Uniform01();
-      if (r < prob_t) // Scattering/Absorption
-      {
-        smpl.weight *= inv_sigma_t_majorant / prob_t;
-        smpl.sigma_s = sigma_s;
-        return smpl;
-      }
-      else // Null collision
-      {
-        smpl.weight *= inv_sigma_t_majorant / prob_n * sigma_n;
-      }
-    }
-  }
-  assert (false);
-  return smpl;
+  return TrackingDetail::SpectralTracking(*this, segment, initial_weights, sampler, context);
 }
 
 
@@ -119,47 +51,7 @@ Medium::InteractionSample AtmosphereTemplate<ConstituentDistribution_, Geometry_
 template<class ConstituentDistribution_, class Geometry_>
 Spectral3 AtmosphereTemplate<ConstituentDistribution_, Geometry_>::EvaluateTransmission(const RaySegment &segment, Sampler &sampler, const PathContext &context) const
 {
-  Spectral3 estimate{1.};
-  Spectral3 sigma_s, sigma_a;
-  // The lowest point gives the largest collision coefficients along the path.
-  auto lowest_point = geometry.ComputeLowestPointAlong(segment);
-  double lowest_altitude = geometry.ComputeAltitude(lowest_point);
-  if (lowest_altitude < GetLowerAltitudeCutoff())
-  {
-    estimate = Spectral3{0.};
-    return estimate;
-  }
-  
-  double sigma_t_majorant = constituents.ComputeSigmaTMajorante(lowest_altitude, context.lambda_idx);
-  if (sigma_t_majorant <= 0.)
-    return estimate;
-  double inv_sigma_t_majorant = 1./sigma_t_majorant;
-  // Then start tracking.
-  double t = 0.;
-  int iteration = 0;
-  bool gogogo = true;
-  do
-  {
-    t -=std::log(sampler.Uniform01()) * inv_sigma_t_majorant;
-    if (t > segment.length)
-    {
-      gogogo = false;
-    }
-    else
-    {
-      const Double3 pos = segment.ray.PointAt(t);
-      constituents.ComputeCollisionCoefficients(
-            geometry.ComputeAltitude(pos), sigma_s, sigma_a, context.lambda_idx);
-      Spectral3 sigma_n = sigma_t_majorant - sigma_s - sigma_a;
-      assert(sigma_n.minCoeff() >= 0.); // By definition of the majorante
-      estimate *= sigma_n * inv_sigma_t_majorant;
-      
-      gogogo = TrackingDetail::RussianRouletteSurvival(
-        estimate.maxCoeff(), iteration++, sampler, [&estimate](double q) { estimate *= q; });
-    }
-  }
-  while(gogogo);
-  return estimate;
+  return TrackingDetail::EstimateTransmission(*this, segment, sampler, context);
 }
 
 
@@ -175,7 +67,7 @@ VolumePdfCoefficients AtmosphereTemplate<ConstituentDistribution_, Geometry_>::C
 {
   auto lowest_point = geometry.ComputeLowestPointAlong(segment);
   double lowest_altitude = geometry.ComputeAltitude(lowest_point);
-  double sigma_t_majorant = constituents.ComputeSigmaTMajorante(lowest_altitude, context.lambda_idx);
+  double sigma_t_majorant = constituents.ComputeSigmaTMajorante(lowest_altitude, context.lambda_idx).maxCoeff();
   // Pretend we are in a homogeneous medium with extinction coeff sigma_t_majorant. This is a very bad approximation.
   // But maybe it will do for MIS weighting. I got to try before implementing more elaborate approximations.
   double tr = std::exp(-sigma_t_majorant*segment.length);
@@ -188,7 +80,18 @@ VolumePdfCoefficients AtmosphereTemplate<ConstituentDistribution_, Geometry_>::C
 
 
 
-template<typename ConstituentDistribution_, typename Geometry_> 
+template<class ConstituentDistribution_, class Geometry_>
+Spectral3 AtmosphereTemplate<ConstituentDistribution_, Geometry_>::ComputeMajorante(const RaySegment & segment, const PathContext & context) const
+{
+  Spectral3 sigma_s, sigma_a;
+  // The lowest point gives the largest collision coefficients along the path.
+  auto lowest_point = geometry.ComputeLowestPointAlong(segment);
+  double altitude = std::max(GetLowerAltitudeCutoff(), geometry.ComputeAltitude(lowest_point));
+  return constituents.ComputeSigmaTMajorante(altitude, context.lambda_idx);
+}
+
+
+template<typename ConstituentDistribution_, typename Geometry_>
 Medium::MaterialCoefficients AtmosphereTemplate<ConstituentDistribution_, Geometry_>::EvaluateCoeffs(const Double3& pos, const PathContext& context) const
 {
   Medium::MaterialCoefficients ret;
@@ -259,7 +162,7 @@ ExponentialConstituentDistribution::ExponentialConstituentDistribution()
 
 void ExponentialConstituentDistribution::ComputeCollisionCoefficients(double altitude, Spectral3& sigma_s, Spectral3& sigma_a, const Index3 &lambda_idx) const
 {
-  assert (altitude > lower_altitude_cutoff);
+  //assert (altitude >= lower_altitude_cutoff);
   altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
   sigma_a = Spectral3{0.};
   sigma_s = Spectral3{0.};
@@ -274,7 +177,7 @@ void ExponentialConstituentDistribution::ComputeCollisionCoefficients(double alt
 
 void ExponentialConstituentDistribution::ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent, const Index3 &lambda_idx) const
 {
-  assert (altitude > lower_altitude_cutoff);
+  //assert (altitude > lower_altitude_cutoff);
   altitude = (altitude>lower_altitude_cutoff) ? altitude : lower_altitude_cutoff;
   for (int i=0; i<NUM_CONSTITUENTS; ++i)
   {
@@ -284,11 +187,12 @@ void ExponentialConstituentDistribution::ComputeSigmaS(double altitude, Spectral
 }
 
 
-double ExponentialConstituentDistribution::ComputeSigmaTMajorante(double altitude, const Index3 &lambda_idx) const
+Spectral3 ExponentialConstituentDistribution::ComputeSigmaTMajorante(double altitude, const Index3 &lambda_idx) const
 {
   Spectral3 sigma_s, sigma_a;
   ComputeCollisionCoefficients(altitude, sigma_s, sigma_a, lambda_idx);
-  return (sigma_s + sigma_a).maxCoeff();
+  const auto ret = (sigma_s + sigma_a);
+  return ret;
 }
 
 #ifdef HAVE_JSON
@@ -424,23 +328,25 @@ void TabulatedConstituents::ComputeSigmaS(double altitude, Spectral3* sigma_s_of
 }
 
 
-double TabulatedConstituents::ComputeSigmaTMajorante(double altitude, const Index3&) const
+Spectral3 TabulatedConstituents::ComputeSigmaTMajorante(double altitude, const Index3&) const
 {
+  // TODO: This should be correct, but not efficient. Need to change the table to have
+  // the majorante for each wavelength!
   double real_index = RealTableIndex(altitude);
   auto idx = (int)real_index;
   if (idx >= 0 && idx < AltitudeTableSize()-1)
   {
     double f = real_index - idx; // The fractional part.
-    return Lerp(sigma_t_majorante[idx], 
-                sigma_t_majorante[idx+1], f);
+    return Spectral3::Constant(Lerp(sigma_t_majorante[idx], 
+                               sigma_t_majorante[idx+1], f));
   }
   else if (idx < 0)
   {
-    return sigma_t_majorante[0];
+    return Spectral3::Constant(sigma_t_majorante[0]);
   }
   else
   {
-    return 0.;
+    return Spectral3::Zero();
   }  
 }
 

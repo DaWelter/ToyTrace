@@ -1188,7 +1188,7 @@ void CameraRenderWorker::AddPhotonBeamContributions(const RaySegment &segment, c
     if (photon.node_number + ps.current_node_count > ray_termination.max_node_count) 
       continue;
     Spectral3 scatter_val = medium.EvaluatePhaseFunction(-segment.ray.dir, photon.position, -photon.direction.cast<double>(), ps.context, nullptr);
-    auto [sigma_s, _] = medium.EvaluateCoeffs(photon.position, ps.context);
+    auto [sigma_s, _, __] = medium.EvaluateCoeffs(photon.position, ps.context);
     const double kernel_value = EvalKernel(kernel2d, photon.position, segment.ray.PointAt(photon_distance[i]));
     Spectral3 weight = MaybeReWeightToMonochromatic(kernel_value*scatter_val*sigma_s*photon.weight.cast<double>()*pct(photon_distance[i]), photon.monochromatic | ps.monochromatic);
     inscatter_estimator += weight;

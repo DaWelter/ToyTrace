@@ -356,6 +356,13 @@ Sampler::Sampler(bool use_qmc_sequence)
 }
 
 
+Sampler::Sampler(std::unique_ptr<SampleSequence> &&sequence)
+  :sequence{ std::move(sequence) }
+{
+
+}
+
+
 RandGen::RandGen()
 {
 }
@@ -386,3 +393,23 @@ int RandGen::UniformInt(int a, int b_inclusive)
 }
 
 constexpr std::uint64_t RandGen::default_seed;
+
+
+MockSequence::MockSequence(ToyVector<double>&& numbers1d)
+  : numbers1d {std::move(numbers1d)}
+{
+}
+
+
+double MockSequence::Uniform01()
+{
+  assert(index1d < isize(numbers1d));
+  return numbers1d[index1d];
+}
+
+
+Double2 MockSequence::UniformUnitSquare()
+{
+  assert(!"not implemented");
+  return Double2();
+}

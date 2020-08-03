@@ -44,6 +44,8 @@ public:
   VolumePdfCoefficients ComputeVolumePdfCoefficients(const RaySegment &segment, const PathContext &context) const override;
   PhaseSample SamplePhaseFunction(const Double3 &incident_dir, const Double3 &pos, Sampler &sampler, const PathContext &context) const override;
   Spectral3 EvaluatePhaseFunction(const Double3 &indcident_dir, const Double3 &pos, const Double3 &out_direction, const PathContext &context, double *pdf) const override;
+
+  Spectral3 ComputeMajorante(const RaySegment &segment, const PathContext &context) const override;
   MaterialCoefficients EvaluateCoeffs(const Double3 &pos, const PathContext &context) const override;
 };
 
@@ -62,7 +64,7 @@ struct ExponentialConstituentDistribution
 
   void ComputeCollisionCoefficients(double altitude, Spectral3 &sigma_s, Spectral3 &sigma_a, const Index3 &lambda_idx) const;
   void ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent, const Index3 &lambda_idx) const;
-  double ComputeSigmaTMajorante(double altitude, const Index3 &lambda_idx) const;
+  Spectral3 ComputeSigmaTMajorante(double altitude, const Index3 &lambda_idx) const;
 };
 
 
@@ -85,7 +87,7 @@ struct TabulatedConstituents
   TabulatedConstituents(const std::string &filename); // Read from JSON.
   void ComputeCollisionCoefficients(double altitude, Spectral3 &sigma_s, Spectral3 &sigma_a, const Index3 &lambda_idx) const;
   void ComputeSigmaS(double altitude, Spectral3* sigma_s_of_constituent, const Index3 &lambda_idx) const;
-  double ComputeSigmaTMajorante(double altitude, const Index3 &lambda_idx) const;
+  Spectral3 ComputeSigmaTMajorante(double altitude, const Index3 &lambda_idx) const;
 };
 
 
