@@ -2,28 +2,21 @@ ToyTrace
 ========
 Born out of an ancient computer graphics exercise, this is my hobby renderer.
 
-[Picz](https://www.dropbox.com/sh/vevib9qe5r87a24/AACuqKUPGzxHyl6E2E7iepSha?dl=0)
+Images
+------
 
-This is experimental software. I do not claim that it is fit for any particular purpose. Rather it is an expression of my interest in graphics.
-
-Dependencies:
-
-* CIMG
-* Eigen 3
-* boost
-* assimp
-* OpenImageIO
-* yaml-cpp
-* tbb
-
-On Ubuntu 16 there is an issue with yaml-cpp and OpenImageIO. I prefer the latest yaml-cpp (0.6) but OpenImageIO links to an older version (0.3). Therefore I suggest to build and install OpenImageIO from sources.
-
-Maybe Toytrace compiles with VC, but you'd need to have the dependencies as well ofc.
+![Buddha](./images/buddha.jpg)
+![Torus](./images/torus_in_cube.jpg)
+![Prism](./images/prism.jpg)
+![Dragon](./images/dragon.jpg)
+![Glas](./images/wineglass.jpg)
+![Reflector](./images/parabolic_reflector.jpg)
 
 Features
 --------
-* Forward path tracing with next event estimation.
-* Bidirectional path tracing.
+
+* Forward- and bidirectional path tracing.
+* Volume rendering with the beam radiance estimator.
 * Participating media:
     * Homogeneous chromatic collision coefficients.
     * Atmosphere model with tabulated altitude profiles.
@@ -37,27 +30,32 @@ Features
     * Lambertian diffuse.
 * Textures & UV mapping.
 * Lights:
-    * Isotropic homogeneous area.
-    * Parallel area.
-    * Infinitely distant, including a sun model with realistic spectrum.
-    * Isotropic sky dome.
-    * Point.
-    * Image based lighting / HRD environment map.
-    * Emissive Media (work in progress)
+    * Multiple idealized light models, e.g. point lights and uniform area lights.
+    * Image based lighting from HDR environment maps.
+    * (Emissive Media)
 * Camera:
     * Pinhole.
     * Fisheye.
 * Statistical test for BSDF & Phasefunction sampling routines.
-* Embree for fast ray triangle intersections. 
-* Binned spectral representation.
-* Multithreading.
-* Automated rendering of test scenes.
+* Binned spectral representation using a few dozen wavelengths.
+
+Dependencies
+------------
+
+* CIMG
+* Eigen 3
+* boost
+* assimp
+* OpenImageIO
+* yaml-cpp
+* tbb
+* embree
 
 Todo
 ----
 Eventually, maybe, and in no particular order.
 
-* Advanced techniques. VCM and beam radiance estimators as extension of VCM would be nice.
+* Advanced techniques. VCM and extensions to volume rendering.
 * Custom triangle intersection routines with double precision. Embree only for BVH.
 * Robust intersection computations in the style of BPRT.
 * Overlapping media volumes in the sense that a mixture medium comprising multiple components is rendered.
@@ -67,9 +65,9 @@ Eventually, maybe, and in no particular order.
 * A multi-layer material.
 * A sane scene description format.
 * Better image reconstruction filter.
-* Wavelength dependent index of refraction.
+* Support for wavelength dependent index of refraction throughout all algorithms.
 * Firefly suppression.
-* Quasi-random sampling.
+* Quasi-random sampling throughout all algorithms.
 * Bloom filter.
 * Physical camera.
 * Texture filtering.
